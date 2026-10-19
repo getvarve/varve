@@ -4,6 +4,8 @@
 //! binary crate that calls [`run`] with its own Tauri context (product name,
 //! bundle id, frontend) and its list of extensions. Community passes none.
 
+pub mod sessions;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

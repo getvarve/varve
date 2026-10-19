@@ -22,8 +22,14 @@ tauri-build.workspace = true
 
 [dependencies]
 varve-core.workspace = true
+varve-driver.workspace = true
 varve-extension.workspace = true
+varve-records.workspace = true
+varve-secrets.workspace = true
 varve-store.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
