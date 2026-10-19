@@ -4463,11 +4463,11 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "varve-activity"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-app"
-version = "0.0.1"
+version = "0.0.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4483,11 +4483,11 @@ dependencies = [
 
 [[package]]
 name = "varve-catalog"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-core"
-version = "0.0.1"
+version = "0.0.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4496,19 +4496,19 @@ dependencies = [
 
 [[package]]
 name = "varve-driver-mysql"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-driver-postgres"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-driver-redis"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-extension"
-version = "0.0.1"
+version = "0.0.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4521,15 +4521,15 @@ dependencies = [
 
 [[package]]
 name = "varve-jobs"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-live-stats"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "varve-secrets"
-version = "0.0.1"
+version = "0.0.3"
 dependencies = [
  "keyring",
  "thiserror 2.0.21",
@@ -4538,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "varve-store"
-version = "0.0.1"
+version = "0.0.3"
 dependencies = [
  "refinery",
  "rusqlite",
@@ -4549,7 +4549,7 @@ dependencies = [
 
 [[package]]
 name = "varve-tunnel"
-version = "0.0.1"
+version = "0.0.3"
 
 [[package]]
 name = "vcpkg"
