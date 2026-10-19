@@ -1,0 +1,24 @@
+[package]
+name = "varve-records"
+description = "Folders, connection profiles and saved queries for Varve."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core.workspace = true
+varve-driver.workspace = true
+varve-secrets.workspace = true
+varve-store.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
