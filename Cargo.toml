@@ -17,8 +17,11 @@ varve-core = { path = "crates/core" }
 varve-extension = { path = "crates/extension" }
 varve-store = { path = "crates/store" }
 varve-secrets = { path = "crates/secrets" }
+varve-driver = { path = "crates/driver" }
 varve-app = { path = "app/src-tauri" }
 
+async-trait = "0.1.92"
+futures = "0.3.34"
 keyring = { version = "4.2", default-features = false, features = ["v1"] }
 refinery = { version = "0.10", default-features = false, features = ["rusqlite"] }
 rusqlite = { version = "0.40", features = ["bundled"] }

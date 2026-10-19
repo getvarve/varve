@@ -4495,6 +4495,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "varve-driver"
+version = "0.0.3"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "varve-core",
+ "varve-secrets",
+]
+
+[[package]]
 name = "varve-driver-mysql"
 version = "0.0.3"
 

@@ -220,6 +220,89 @@ fn created_objects(sql: &str) -> Vec<String> {
     names
 }
 
+/// The local activity log (design doc 9.5). Kept forever by default.
+const CORE_V2_ACTIVITY: &str = "
+CREATE TABLE core_activity (
+    id            TEXT    PRIMARY KEY NOT NULL,
+    occurred_at   INTEGER NOT NULL,
+    actor_id      TEXT    NOT NULL,
+    device_id     TEXT,
+    workspace_id  TEXT,
+    connection_id TEXT,
+    server_key    TEXT,
+    category      TEXT    NOT NULL,
+    action        TEXT    NOT NULL,
+    outcome       TEXT    NOT NULL CHECK (outcome IN ('success', 'failure', 'cancelled')),
+    duration_ms   INTEGER,
+    target        TEXT,
+    details       TEXT    NOT NULL DEFAULT '{}',
+    upload_state  TEXT    NOT NULL DEFAULT 'local_only'
+                  CHECK (upload_state IN ('local_only', 'pending', 'uploaded'))
+);
+CREATE INDEX core_activity_time ON core_activity (occurred_at);
+CREATE INDEX core_activity_conn_time ON core_activity (connection_id, occurred_at);
+CREATE INDEX core_activity_cat_time ON core_activity (category, occurred_at);
+";
+
+/// Folders, connection profiles and saved queries (design doc 3.1 and 3.4).
+/// Secrets are never stored here; `saved_secrets` only lists which secret
+/// kinds this device has in its keychain.
+const CORE_V3_RECORDS: &str = "
+CREATE TABLE core_folders (
+    id           TEXT    PRIMARY KEY NOT NULL,
+    workspace_id TEXT    NOT NULL DEFAULT 'personal',
+    parent_id    TEXT    REFERENCES core_folders (id) ON DELETE CASCADE,
+    name         TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    color        TEXT,
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    version      INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX core_folders_parent ON core_folders (workspace_id, parent_id, sort_order);
+
+CREATE TABLE core_connections (
+    id            TEXT    PRIMARY KEY NOT NULL,
+    workspace_id  TEXT    NOT NULL DEFAULT 'personal',
+    folder_id     TEXT    REFERENCES core_folders (id) ON DELETE SET NULL,
+    name          TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    color         TEXT,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    engine        TEXT    NOT NULL CHECK (engine IN ('postgres', 'mysql', 'mariadb', 'redis')),
+    host          TEXT    NOT NULL,
+    port          INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+    database      TEXT,
+    username      TEXT,
+    environment   TEXT    NOT NULL DEFAULT 'development'
+                  CHECK (environment IN ('development', 'test', 'staging', 'production')),
+    tls           TEXT    NOT NULL DEFAULT '{}',
+    ssh           TEXT    NOT NULL DEFAULT '{}',
+    options       TEXT    NOT NULL DEFAULT '{}',
+    saved_secrets TEXT    NOT NULL DEFAULT '[]',
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX core_connections_folder ON core_connections (workspace_id, folder_id, sort_order);
+
+CREATE TABLE core_saved_queries (
+    id            TEXT    PRIMARY KEY NOT NULL,
+    workspace_id  TEXT    NOT NULL DEFAULT 'personal',
+    folder_id     TEXT    REFERENCES core_folders (id) ON DELETE SET NULL,
+    connection_id TEXT    REFERENCES core_connections (id) ON DELETE SET NULL,
+    database      TEXT,
+    name          TEXT    NOT NULL CHECK (length(trim(name)) > 0),
+    sql           TEXT    NOT NULL,
+    tags          TEXT    NOT NULL DEFAULT '[]',
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    INTEGER NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    version       INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX core_saved_queries_folder ON core_saved_queries (workspace_id, folder_id, sort_order);
+CREATE INDEX core_saved_queries_connection ON core_saved_queries (connection_id);
+";
+
 /// Migrations of the core namespace, owned by the app.
 #[must_use]
 pub fn core_migrations() -> MigrationSet {
@@ -227,15 +310,19 @@ pub fn core_migrations() -> MigrationSet {
         DottedId::new(CORE_NAMESPACE).unwrap_or_else(|_| unreachable!("`core` is a valid id"));
     MigrationSet::new(
         namespace,
-        vec![SchemaMigration::new(
-            1,
-            "create_meta",
-            "CREATE TABLE core_meta (
+        vec![
+            SchemaMigration::new(
+                1,
+                "create_meta",
+                "CREATE TABLE core_meta (
                 key   TEXT PRIMARY KEY NOT NULL,
                 value TEXT NOT NULL
             );
             INSERT INTO core_meta (key, value) VALUES ('created_at', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
-        )],
+            ),
+            SchemaMigration::new(2, "create_activity", CORE_V2_ACTIVITY),
+            SchemaMigration::new(3, "create_folders_connections_queries", CORE_V3_RECORDS),
+        ],
     )
 }
 
