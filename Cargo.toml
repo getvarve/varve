@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "app/src-tauri"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/SherinBloemendaal/varve"
+homepage = "https://getvarve.com"
+authors = ["The Varve Authors"]
+publish = false
+
+[workspace.dependencies]
+varve-core = { path = "crates/core" }
+varve-extension = { path = "crates/extension" }
+varve-store = { path = "crates/store" }
+varve-secrets = { path = "crates/secrets" }
+varve-app = { path = "app/src-tauri" }
+
+keyring = { version = "4.2", default-features = false, features = ["v1"] }
+refinery = { version = "0.10", default-features = false, features = ["rusqlite"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2.12.4", features = [] }
+tauri-build = { version = "2.7.3", features = [] }
+thiserror = "2.0.21"
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "sync"] }
+tracing = "0.1.44"
+zeroize = "1.9.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

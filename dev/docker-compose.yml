@@ -1,0 +1,167 @@
+# Database version matrix for local development and driver tests
+# (design doc section 1, "Supported server versions").
+#
+# Start one engine family:   docker compose -f dev/docker-compose.yml --profile postgres up -d
+# Start the newest of each:  docker compose -f dev/docker-compose.yml --profile latest up -d
+# Start everything:          docker compose -f dev/docker-compose.yml --profile all up -d
+#
+# Credentials are local development values only. Ports are fixed so tests can
+# find each version: <engine base><version>.
+
+x-postgres: &postgres
+  environment:
+    POSTGRES_USER: varve
+    POSTGRES_PASSWORD: varve_dev
+    POSTGRES_DB: varve
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U varve -d varve"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+  tmpfs: ["/var/lib/postgresql"]
+
+x-mysql: &mysql
+  environment:
+    MYSQL_ROOT_PASSWORD: varve_dev
+    MYSQL_DATABASE: varve
+    MYSQL_USER: varve
+    MYSQL_PASSWORD: varve_dev
+  healthcheck:
+    test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pvarve_dev --silent"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+  tmpfs: ["/var/lib/mysql"]
+
+x-mariadb: &mariadb
+  environment:
+    MARIADB_ROOT_PASSWORD: varve_dev
+    MARIADB_DATABASE: varve
+    MARIADB_USER: varve
+    MARIADB_PASSWORD: varve_dev
+  healthcheck:
+    test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+  tmpfs: ["/var/lib/mysql"]
+
+x-redis: &redis
+  command: ["redis-server", "--requirepass", "varve_dev", "--save", ""]
+  healthcheck:
+    test: ["CMD-SHELL", "redis-cli -a varve_dev --no-auth-warning ping | grep PONG"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+x-valkey: &valkey
+  command: ["valkey-server", "--requirepass", "varve_dev", "--save", ""]
+  healthcheck:
+    test: ["CMD-SHELL", "valkey-cli -a varve_dev --no-auth-warning ping | grep PONG"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+
+services:
+  # PostgreSQL 13 to 18 (ports 54313 to 54318)
+  postgres-13:
+    <<: *postgres
+    image: postgres:13-alpine
+    ports: ["54313:5432"]
+    profiles: [postgres, all]
+  postgres-15:
+    <<: *postgres
+    image: postgres:15-alpine
+    ports: ["54315:5432"]
+    profiles: [postgres, all]
+  postgres-16:
+    <<: *postgres
+    image: postgres:16-alpine
+    ports: ["54316:5432"]
+    profiles: [postgres, all]
+  postgres-17:
+    <<: *postgres
+    image: postgres:17-alpine
+    ports: ["54317:5432"]
+    profiles: [postgres, all]
+  postgres-18:
+    <<: *postgres
+    image: postgres:18-alpine
+    ports: ["54318:5432"]
+    profiles: [postgres, all, latest]
+
+  # MySQL 8.0, 8.4 LTS, 9.7 (ports 33080, 33084, 33097)
+  mysql-8.0:
+    <<: *mysql
+    image: mysql:8.0
+    ports: ["33080:3306"]
+    profiles: [mysql, all]
+  mysql-8.4:
+    <<: *mysql
+    image: mysql:8.4
+    ports: ["33084:3306"]
+    profiles: [mysql, all]
+  mysql-9.7:
+    <<: *mysql
+    image: mysql:9.7
+    ports: ["33097:3306"]
+    profiles: [mysql, all, latest]
+
+  # MariaDB 10.6, 10.11, 11.4, 11.8, 12.3 (ports 33106 to 33123)
+  mariadb-10.6:
+    <<: *mariadb
+    image: mariadb:10.6
+    ports: ["33106:3306"]
+    profiles: [mariadb, all]
+  mariadb-10.11:
+    <<: *mariadb
+    image: mariadb:10.11
+    ports: ["33111:3306"]
+    profiles: [mariadb, all]
+  mariadb-11.4:
+    <<: *mariadb
+    image: mariadb:11.4
+    ports: ["33114:3306"]
+    profiles: [mariadb, all]
+  mariadb-11.8:
+    <<: *mariadb
+    image: mariadb:11.8
+    ports: ["33118:3306"]
+    profiles: [mariadb, all]
+  mariadb-12.3:
+    <<: *mariadb
+    image: mariadb:12.3
+    ports: ["33123:3306"]
+    profiles: [mariadb, all, latest]
+
+  # Redis 6.2, 7.2, 7.4, 8.10 and Valkey 8, 9 (ports 63062 to 63190)
+  redis-6.2:
+    <<: *redis
+    image: redis:6.2-alpine
+    ports: ["63062:6379"]
+    profiles: [redis, all]
+  redis-7.2:
+    <<: *redis
+    image: redis:7.2-alpine
+    ports: ["63072:6379"]
+    profiles: [redis, all]
+  redis-7.4:
+    <<: *redis
+    image: redis:7.4-alpine
+    ports: ["63074:6379"]
+    profiles: [redis, all]
+  redis-8.10:
+    <<: *redis
+    image: redis:8.10-alpine
+    ports: ["63081:6379"]
+    profiles: [redis, all, latest]
+  valkey-8:
+    <<: *valkey
+    image: valkey/valkey:8-alpine
+    ports: ["63180:6379"]
+    profiles: [redis, all]
+  valkey-9:
+    <<: *valkey
+    image: valkey/valkey:9-alpine
+    ports: ["63190:6379"]
+    profiles: [redis, all]

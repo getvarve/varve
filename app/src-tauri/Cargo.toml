@@ -1,0 +1,35 @@
+[package]
+name = "varve-app"
+description = "The Varve desktop app: Tauri shell shared by Varve Community and Varve Pro."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "varve_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "varve"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+varve-core.workspace = true
+varve-extension.workspace = true
+varve-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[lints]
+workspace = true

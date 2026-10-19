@@ -1,0 +1,20 @@
+[package]
+name = "varve-store"
+description = "Local app.db storage for Varve with namespaced migrations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core.workspace = true
+refinery.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

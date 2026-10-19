@@ -22,10 +22,65 @@ Varve comes in two editions built from the same app:
 | Cloud sync across devices | | ✓ |
 | Team workspaces | | ✓ |
 
-## How Pro plugs in
+## How extensions plug in
 
-The `extension` crate in this repository defines the only way an extension reaches the app. An extension can add Tauri commands, job kinds, database migrations in its own namespace, activity actions, hooks (on connect, on activity, on record change) and capabilities. It can only add, never replace. The Vue app has named slots (menu items, tool routes, connection tabs, settings sections) that extensions fill. With no extensions, the slots render nothing.
+An edition is a small binary that calls `varve_app::run` with its Tauri context and a list of extensions. Varve Community passes an empty list. Everything an extension adds is placed under its id, so it can add but never replace.
 
-Dependencies go one way: Pro depends on this repository, and this repository never references Pro. Community and Pro share the same local data file, so moving between editions keeps your connections, queries and history of actions.
+### Backend (`crates/extension`)
 
-Anyone can write an extension against the same API.
+```rust
+use varve_extension::{ActivityCategory, AppContext, Extension, ExtensionError, Registry};
+use varve_store::SchemaMigration;
+
+struct Hello;
+
+impl Extension for Hello {
+    fn id(&self) -> &'static str { "acme.hello" }
+    fn name(&self) -> &'static str { "Hello" }
+
+    fn register(&self, r: &mut Registry<'_>) -> Result<(), ExtensionError> {
+        // Callable from the UI as "acme.hello.greet".
+        r.command("greet", |_ctx: AppContext, payload: serde_json::Value| async move {
+            Ok(serde_json::json!({ "hello": payload }))
+        })?;
+        // Tables must start with "acme_hello_"; history is kept per namespace.
+        r.migrations(vec![SchemaMigration::new(1, "create_greetings",
+            "CREATE TABLE acme_hello_greetings (id INTEGER PRIMARY KEY, at TEXT NOT NULL)")])?;
+        r.capability("greet")?;                                  // "acme.hello.greet"
+        r.activity_action("greeted", ActivityCategory::Tool)?;   // "acme.hello.greeted"
+        r.on_connect(|_ctx, event| tracing::info!(?event, "connected"));
+        Ok(())
+    }
+}
+```
+
+Registration happens before any window opens. An extension that breaks a rule (bad id, duplicate name, unprefixed table) stops the app with a clear error, and nothing of it is kept.
+
+The UI calls extension commands through one Tauri command, `ext_invoke`, by full name. Extensions never add Tauri commands of their own.
+
+### Frontend (`@varve/ui`)
+
+```ts
+import { createVarveApp } from '@varve/ui';
+import type { UiExtension } from '@varve/ui';
+import GreetButton from './GreetButton.vue';
+
+const hello: UiExtension = {
+  id: 'acme.hello',
+  setup(ctx) {
+    ctx.addSlotItem('tools', { id: 'acme.hello.greet-button', component: GreetButton });
+    ctx.addRoute({ path: '/x/acme.hello/history', component: GreetButton });
+    // ctx.invoke('greet', payload) calls "acme.hello.greet".
+  },
+};
+
+createVarveApp({ extensions: [hello] }).mount('#app');
+```
+
+Slots: `title-bar`, `main-menu`, `tools`, `sidebar-sections`, `connection-tabs`, `settings-sections`. With no extensions, every slot renders nothing.
+
+### Rules
+
+- Dependencies go one way: Pro depends on this repository, and this repository never references Pro. CI enforces this with `scripts/check-no-pro.mjs`.
+- Community and Pro share the same local data folder (`<OS data dir>/Varve`), so moving between editions keeps your connections, queries and activity. Pro tables stay on disk, unused, when you go back to Community.
+- Anyone can write an extension against the same API.

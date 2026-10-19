@@ -1,0 +1,24 @@
+[package]
+name = "varve-extension"
+description = "The extension API of Varve: how extensions add commands, migrations, capabilities and hooks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+varve-core.workspace = true
+varve-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

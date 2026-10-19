@@ -49,11 +49,43 @@ Varve Community is this repository: free, open source and complete on its own. P
 
 ## Status
 
-Varve is in its design phase; there is no code yet. Next up:
+Early development. **M0 (foundations)** is in place: the Cargo and pnpm workspaces, the Tauri shell, the extension API, local storage and CI. Nothing connects to a database yet. Next up:
 
-1. **M0** Foundations: workspace, Tauri shell, extension API, CI
-2. **M1** Connections and query editor
-3. **M2** Object browser and editors
+1. **M1** Connections and query editor
+2. **M2** Object browser and editors
+
+## Develop
+
+Requirements: Rust (stable), Node.js 22 or newer, and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS. pnpm is pinned in `package.json`; run it through Corepack or `npx pnpm@12.14.0`.
+
+```bash
+pnpm install
+pnpm dev            # run the app with hot reload
+pnpm tauri build    # build an installer
+```
+
+| Check | Command |
+|---|---|
+| Rust format, lint, tests | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
+| Frontend types, lint, tests | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
+| Open core boundary | `pnpm check:no-pro` |
+| Databases for driver work | `docker compose -f dev/docker-compose.yml --profile latest up -d` (see the file for every version) |
+
+`app.db` lives in `<OS data dir>/Varve`; set `VARVE_DATA_DIR` to use another folder and `VARVE_LOG=debug` for more logging.
+
+### Layout
+
+| Path | What |
+|---|---|
+| `crates/core` | Engines, editions, ids and shared errors |
+| `crates/extension` | The extension API: commands, migrations, capabilities, job kinds, activity actions, hooks |
+| `crates/store` | `app.db` with migrations per namespace |
+| `crates/secrets` | OS keychain access |
+| `crates/driver-*`, `catalog`, `jobs`, `live-stats`, `activity`, `tunnel` | Arrive with milestones M1 to M5 |
+| `app/src-tauri` | Tauri shell shared by every edition, plus the Community binary |
+| `app/` | Community frontend entry |
+| `packages/ui` | The app UI: shell, views, extension slots, design tokens |
+| `dev/` | Database version matrix for local development |
 
 ## Built with
 
@@ -61,7 +93,7 @@ Varve is in its design phase; there is no code yet. Next up:
 
 ## Contributing
 
-Contributions are welcome once the code lands. Read [CONTRIBUTING.md](CONTRIBUTING.md) first; every commit needs a `Signed-off-by` line.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first; every commit needs a `Signed-off-by` line.
 
 ## License
 

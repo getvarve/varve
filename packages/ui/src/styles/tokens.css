@@ -1,0 +1,127 @@
+/* Varve design tokens. Source: the Foundations board of the style guide. */
+:root {
+  color-scheme: light dark;
+
+  --ground: #F6F7F9;
+  --surface: #FFFFFF;
+  --surface-raised: #EEF0F3;
+  --border: #D9DDE3;
+  --border-inner: #E6E9ED;
+  --text: #14171C;
+  --text-muted: #4A5160;
+  --text-subtle: #6A7180;
+  --accent: #5B4BE0;
+  --accent-hover: #4637C4;
+  --accent-tint: rgba(91, 75, 224, 0.10);
+  --on-accent: #FFFFFF;
+  --ring-1: #5B4BE0;
+  --ring-2: #14171C;
+  --ring-3: #4A5160;
+
+  --env-production: #D93A37;
+  --env-staging: #E8A23B;
+  --env-test: #3B82F6;
+  --env-development: #2E9E64;
+
+  --engine-pg: #7FA7DC;
+  --engine-my: #E0A06A;
+  --engine-ma: #C2A88A;
+  --engine-rd: #E07A72;
+
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --radius-control: 4px;
+  --radius-panel: 6px;
+  --radius-dialog: 8px;
+  --row-grid: 24px;
+  --row-tree: 28px;
+  --control: 32px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ground: #0F1115;
+    --surface: #161920;
+    --surface-raised: #1D212A;
+    --border: #2A2F3A;
+    --border-inner: #1D212A;
+    --text: #E6E8EC;
+    --text-muted: #A3A9B5;
+    --text-subtle: #7A8190;
+    --accent: #8B7CFF;
+    --accent-hover: #B3A9FF;
+    --accent-tint: rgba(139, 124, 255, 0.18);
+    --on-accent: #0F1115;
+    --ring-1: #8B7CFF;
+    --ring-2: #E6E8EC;
+    --ring-3: #A3A9B5;
+    --env-production: #F0605D;
+    --env-test: #58A6FF;
+    --env-development: #3FB97A;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ground: #0F1115;
+  --surface: #161920;
+  --surface-raised: #1D212A;
+  --border: #2A2F3A;
+  --border-inner: #1D212A;
+  --text: #E6E8EC;
+  --text-muted: #A3A9B5;
+  --text-subtle: #7A8190;
+  --accent: #8B7CFF;
+  --accent-hover: #B3A9FF;
+  --accent-tint: rgba(139, 124, 255, 0.18);
+  --on-accent: #0F1115;
+  --ring-1: #8B7CFF;
+  --ring-2: #E6E8EC;
+  --ring-3: #A3A9B5;
+  --env-production: #F0605D;
+  --env-test: #58A6FF;
+  --env-development: #3FB97A;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

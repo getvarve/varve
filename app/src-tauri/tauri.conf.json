@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Varve Community",
+  "mainBinaryName": "varve",
+  "identifier": "com.getvarve.desktop",
+  "build": {
+    "beforeDevCommand": "npx --yes pnpm@12.14.0 --filter @varve/app dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npx --yes pnpm@12.14.0 --filter @varve/app build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Varve Community",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "DeveloperTool",
+    "shortDescription": "A calm database manager",
+    "longDescription": "A calm desktop manager for PostgreSQL, MySQL, MariaDB and Redis.",
+    "copyright": "Copyright 2026 The Varve Authors",
+    "license": "Apache-2.0",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
