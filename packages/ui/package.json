@@ -6,10 +6,18 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
+    "./createVarveApp": "./src/createVarveApp.ts",
+    "./extensions": "./src/extensions.ts",
+    "./backend": "./src/backend.ts",
+    "./keys": "./src/keys.ts",
+    "./components/AppShell.vue": "./src/components/AppShell.vue",
+    "./components/ExtensionSlot.vue": "./src/components/ExtensionSlot.vue",
+    "./components/VarveMark.vue": "./src/components/VarveMark.vue",
     "./tokens.css": "./src/styles/tokens.css"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "scripts": {
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run"

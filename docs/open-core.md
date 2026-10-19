@@ -61,8 +61,8 @@ The UI calls extension commands through one Tauri command, `ext_invoke`, by full
 ### Frontend (`@varve/ui`)
 
 ```ts
-import { createVarveApp } from '@varve/ui';
-import type { UiExtension } from '@varve/ui';
+import { createVarveApp } from '@varve/ui/createVarveApp';
+import type { UiExtension } from '@varve/ui/extensions';
 import GreetButton from './GreetButton.vue';
 
 const hello: UiExtension = {

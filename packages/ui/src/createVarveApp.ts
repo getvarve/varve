@@ -10,13 +10,6 @@ import { APP_INFO_KEY, REGISTRY_KEY } from './keys';
 import AboutProView from './views/AboutProView.vue';
 import HomeView from './views/HomeView.vue';
 
-export type { AppInfo, CommandError } from './backend';
-export { extInvoke, fetchAppInfo, isCommandError } from './backend';
-export { default as ExtensionSlot } from './components/ExtensionSlot.vue';
-export { default as VarveMark } from './components/VarveMark.vue';
-export { ExtensionRegistry, SLOT_NAMES } from './extensions';
-export type { ExtensionInvoker, ExtensionSetupContext, SlotItem, SlotName, UiExtension } from './extensions';
-
 export interface VarveAppOptions {
   /** UI extensions to install. Varve Community passes none. */
   extensions?: readonly UiExtension[];

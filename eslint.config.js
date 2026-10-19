@@ -24,6 +24,13 @@ export default tseslint.config(
       'vue/multi-word-component-names': 'off',
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: '@varve/ui', message: 'Import a concrete module, for example @varve/ui/createVarveApp.' }],
+          patterns: [{ group: ['**/index', '**/index.ts', '**/index.js'], message: 'Import the concrete file, not a barrel.' }],
+        },
+      ],
     },
   },
   {
