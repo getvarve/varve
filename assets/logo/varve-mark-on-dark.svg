@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="96 100 320 328" role="img" aria-label="Varve">
-  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M120 124 L256 224 L392 124" stroke="#8B7CFF" stroke-width="44"/>
-    <path d="M120 196 L256 296 L392 196" stroke="#E6E8EC" stroke-width="30"/>
-    <path d="M120 256 L256 356 L392 256" stroke="#A3A9B5" stroke-width="20"/>
-    <path d="M120 304 L256 404 L392 304" stroke="#6A7180" stroke-width="14"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 56 400 400" role="img" aria-label="Varve">
+  <g fill="none" stroke-linecap="round" transform="rotate(-62 256 256)">
+    <circle cx="256" cy="256" r="172" stroke="#8B7CFF" stroke-width="44" stroke-dasharray="900 1081"/>
+    <circle cx="256" cy="256" r="118" stroke="#E6E8EC" stroke-width="30" stroke-dasharray="618 741"/>
+    <circle cx="256" cy="256" r="76" stroke="#A3A9B5" stroke-width="20" stroke-dasharray="398 478"/>
   </g>
+  <circle cx="256" cy="256" r="28" fill="#6A7180"/>
 </svg>
