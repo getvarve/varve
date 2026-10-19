@@ -1,0 +1,38 @@
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Rust
+/target/
+**/target/
+
+# Node / Vue / Vite
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Tauri
+app/src-tauri/gen/schemas/
+
+# Cloudflare Worker
+.wrangler/
+.dev.vars
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and local databases
+*.log
+*.sqlite
+*.sqlite3
+*.db

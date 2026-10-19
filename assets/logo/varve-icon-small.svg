@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Varve">
+  <rect width="512" height="512" rx="114" fill="#14171C"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M112 132 L256 240 L400 132" stroke="#8B7CFF" stroke-width="60"/>
+    <path d="M112 232 L256 340 L400 232" stroke="#E6E8EC" stroke-width="44"/>
+    <path d="M112 316 L256 424 L400 316" stroke="#A3A9B5" stroke-width="32"/>
+  </g>
+</svg>
