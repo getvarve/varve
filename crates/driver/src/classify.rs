@@ -1,12 +1,31 @@
-//! Statement classification for SQL engines.
+//! Statement splitting and classification for SQL engines.
 //!
 //! Used for the destructive-statement confirmation on production connections
-//! (design doc 3.2) and for the statement kind in activity events (9.2). The
-//! lexer understands `--`, `#` and `/* */` comments, single and double quoted
-//! strings, backtick identifiers and PostgreSQL dollar quoting, so keywords
-//! inside literals and comments never count.
+//! (design doc 3.2), for the statement kind in activity events (9.2), and by
+//! drivers that run scripts one statement at a time.
+//!
+//! The lexer follows the rules of each [`Dialect`], so keywords inside
+//! literals, quoted identifiers and comments never count:
+//!
+//! | | PostgreSQL | MySQL, MariaDB |
+//! |---|---|---|
+//! | `--` and `/* */` comments | yes (`/* */` nests) | yes |
+//! | `#` comments | no, `#` is an operator | yes |
+//! | backslash escapes in `'...'` | only in `E'...'` | yes |
+//! | `$tag$ ... $tag$` quoting | yes | no |
+//! | `` `identifier` `` | no | yes |
 
 use serde::{Deserialize, Serialize};
+
+/// Lexical rules of a SQL engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dialect {
+    /// PostgreSQL.
+    Postgres,
+    /// MySQL and MariaDB.
+    Mysql,
+}
 
 /// What a statement does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,20 +99,52 @@ impl StatementKind {
     }
 }
 
-/// Classifies every statement in `sql`, in order. Empty statements are skipped.
+/// One statement of a script.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatementSpan<'a> {
+    /// Statement text, trimmed, without the terminating `;`.
+    pub text: &'a str,
+    /// Byte offset of `text` in the script, for mapping server error
+    /// positions back to the editor.
+    pub offset: usize,
+    /// What the statement does.
+    pub kind: StatementKind,
+}
+
+/// Splits a script into statements. Statements that contain only
+/// whitespace and comments are dropped.
 #[must_use]
-pub fn classify(sql: &str) -> Vec<StatementKind> {
-    split_tokens(sql)
-        .iter()
-        .filter(|s| !s.is_empty())
-        .map(|s| classify_tokens(s))
+pub fn split_statements(sql: &str, dialect: Dialect) -> Vec<StatementSpan<'_>> {
+    scan(sql, dialect)
+        .into_iter()
+        .filter(|s| !s.tokens.is_empty())
+        .map(|s| {
+            let raw = &sql[s.start..s.end];
+            let leading = raw.len() - raw.trim_start().len();
+            StatementSpan {
+                text: raw.trim(),
+                offset: s.start + leading,
+                kind: classify_tokens(&s.tokens),
+            }
+        })
+        .collect()
+}
+
+/// Classifies every statement in `sql`, in order.
+#[must_use]
+pub fn classify(sql: &str, dialect: Dialect) -> Vec<StatementKind> {
+    split_statements(sql, dialect)
+        .into_iter()
+        .map(|s| s.kind)
         .collect()
 }
 
 /// True when any statement in `sql` is destructive.
 #[must_use]
-pub fn is_destructive(sql: &str) -> bool {
-    classify(sql).into_iter().any(StatementKind::is_destructive)
+pub fn is_destructive(sql: &str, dialect: Dialect) -> bool {
+    classify(sql, dialect)
+        .into_iter()
+        .any(StatementKind::is_destructive)
 }
 
 /// A keyword-level token with its parenthesis depth.
@@ -103,22 +154,42 @@ struct Token {
     depth: u32,
 }
 
-/// Splits `sql` into statements of uppercase word tokens. Literals, quoted
-/// identifiers and comments produce no tokens.
-fn split_tokens(sql: &str) -> Vec<Vec<Token>> {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut statements = vec![Vec::new()];
+/// A statement found by the scanner: byte range and its word tokens.
+struct Scanned {
+    start: usize,
+    end: usize,
+    tokens: Vec<Token>,
+}
+
+/// Walks the script once. Literals, quoted identifiers and comments produce
+/// no tokens; `;` at parenthesis depth 0 ends a statement.
+fn scan(sql: &str, dialect: Dialect) -> Vec<Scanned> {
+    let chars: Vec<(usize, char)> = sql.char_indices().collect();
+    let byte_at = |i: usize| chars.get(i).map_or(sql.len(), |(b, _)| *b);
+    let mysql = dialect == Dialect::Mysql;
+
+    let mut out = Vec::new();
+    let mut current = Scanned {
+        start: 0,
+        end: 0,
+        tokens: Vec::new(),
+    };
     let mut depth: u32 = 0;
     let mut i = 0;
     while i < chars.len() {
-        let c = chars[i];
-        let next = chars.get(i + 1).copied();
+        let c = chars[i].1;
+        let next = chars.get(i + 1).map(|(_, c)| *c);
         match c {
             '-' if next == Some('-') => i = skip_line(&chars, i),
-            '#' => i = skip_line(&chars, i),
-            '/' if next == Some('*') => i = skip_block_comment(&chars, i + 2),
-            '\'' | '"' | '`' => i = skip_quoted(&chars, i + 1, c),
-            '$' => match dollar_tag(&chars, i) {
+            '#' if mysql => i = skip_line(&chars, i),
+            '/' if next == Some('*') => i = skip_block_comment(&chars, i + 2, !mysql),
+            '\'' => {
+                let escapes = mysql || escape_string_prefix(&chars, i);
+                i = skip_quoted(&chars, i + 1, '\'', escapes);
+            }
+            '"' => i = skip_quoted(&chars, i + 1, '"', mysql),
+            '`' if mysql => i = skip_quoted(&chars, i + 1, '`', false),
+            '$' if !mysql => match dollar_tag(&chars, i) {
                 Some(tag_len) => i = skip_dollar_quoted(&chars, i, tag_len),
                 None => i += 1,
             },
@@ -131,42 +202,61 @@ fn split_tokens(sql: &str) -> Vec<Vec<Token>> {
                 i += 1;
             }
             ';' if depth == 0 => {
-                statements.push(Vec::new());
+                current.end = byte_at(i);
+                out.push(current);
                 i += 1;
+                current = Scanned {
+                    start: byte_at(i),
+                    end: 0,
+                    tokens: Vec::new(),
+                };
             }
             c if c.is_alphabetic() || c == '_' => {
                 let start = i;
-                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                while i < chars.len()
+                    && (chars[i].1.is_alphanumeric()
+                        || chars[i].1 == '_'
+                        || (!mysql && chars[i].1 == '$'))
+                {
                     i += 1;
                 }
                 let word: String = chars[start..i]
                     .iter()
+                    .map(|(_, c)| *c)
                     .collect::<String>()
                     .to_ascii_uppercase();
-                if let Some(statement) = statements.last_mut() {
-                    statement.push(Token { word, depth });
-                }
+                current.tokens.push(Token { word, depth });
             }
             _ => i += 1,
         }
     }
-    statements
+    current.end = sql.len();
+    out.push(current);
+    out
 }
 
-fn skip_line(chars: &[char], mut i: usize) -> usize {
-    while i < chars.len() && chars[i] != '\n' {
+/// True for PostgreSQL escape strings: `E'...'` (not part of a longer word).
+fn escape_string_prefix(chars: &[(usize, char)], quote: usize) -> bool {
+    quote >= 1
+        && matches!(chars[quote - 1].1, 'e' | 'E')
+        && (quote < 2 || !(chars[quote - 2].1.is_alphanumeric() || chars[quote - 2].1 == '_'))
+}
+
+fn skip_line(chars: &[(usize, char)], mut i: usize) -> usize {
+    while i < chars.len() && chars[i].1 != '\n' {
         i += 1;
     }
     i
 }
 
-fn skip_block_comment(chars: &[char], mut i: usize) -> usize {
+fn skip_block_comment(chars: &[(usize, char)], mut i: usize, nests: bool) -> usize {
     let mut nesting = 1;
     while i < chars.len() && nesting > 0 {
-        if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+        let next = chars.get(i + 1).map(|(_, c)| *c);
+        if nests && chars[i].1 == '/' && next == Some('*') {
             nesting += 1;
             i += 2;
-        } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+        } else if chars[i].1 == '*' && next == Some('/') {
             nesting -= 1;
             i += 2;
         } else {
@@ -176,12 +266,18 @@ fn skip_block_comment(chars: &[char], mut i: usize) -> usize {
     i
 }
 
-fn skip_quoted(chars: &[char], mut i: usize, quote: char) -> usize {
+fn skip_quoted(
+    chars: &[(usize, char)],
+    mut i: usize,
+    quote: char,
+    backslash_escapes: bool,
+) -> usize {
     while i < chars.len() {
-        if chars[i] == '\\' && quote != '`' {
+        let c = chars[i].1;
+        if backslash_escapes && c == '\\' {
             i += 2;
-        } else if chars[i] == quote {
-            if chars.get(i + 1) == Some(&quote) {
+        } else if c == quote {
+            if chars.get(i + 1).map(|(_, c)| *c) == Some(quote) {
                 i += 2;
             } else {
                 return i + 1;
@@ -193,24 +289,27 @@ fn skip_quoted(chars: &[char], mut i: usize, quote: char) -> usize {
     i
 }
 
-/// Length of a dollar-quote opening tag (`$$` or `$tag$`) starting at `i`.
-fn dollar_tag(chars: &[char], i: usize) -> Option<usize> {
+/// Length in chars of a dollar-quote opening tag (`$$` or `$tag$`) at `i`.
+fn dollar_tag(chars: &[(usize, char)], i: usize) -> Option<usize> {
+    if chars.get(i + 1).is_some_and(|(_, c)| c.is_ascii_digit()) {
+        return None; // `$1` is a parameter, not a quote.
+    }
     let mut j = i + 1;
-    while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+    while j < chars.len() && (chars[j].1.is_alphanumeric() || chars[j].1 == '_') {
         j += 1;
     }
-    if chars.get(j) == Some(&'$') && !chars.get(i + 1).is_some_and(char::is_ascii_digit) {
-        Some(j - i + 1)
-    } else {
-        None
-    }
+    (chars.get(j).map(|(_, c)| *c) == Some('$')).then_some(j - i + 1)
 }
 
-fn skip_dollar_quoted(chars: &[char], i: usize, tag_len: usize) -> usize {
-    let tag = &chars[i..i + tag_len];
+fn skip_dollar_quoted(chars: &[(usize, char)], i: usize, tag_len: usize) -> usize {
+    let tag: Vec<char> = chars[i..i + tag_len].iter().map(|(_, c)| *c).collect();
     let mut j = i + tag_len;
     while j + tag_len <= chars.len() {
-        if &chars[j..j + tag_len] == tag {
+        if chars[j..j + tag_len]
+            .iter()
+            .map(|(_, c)| *c)
+            .eq(tag.iter().copied())
+        {
             return j + tag_len;
         }
         j += 1;
@@ -229,7 +328,7 @@ fn classify_tokens(tokens: &[Token]) -> StatementKind {
     match first.word.as_str() {
         "WITH" => {
             // The main statement follows the CTE list at depth 0.
-            let main = tokens.iter().skip(1).find(|t| {
+            let main = tokens.iter().enumerate().skip(1).find(|(_, t)| {
                 t.depth == 0
                     && matches!(
                         t.word.as_str(),
@@ -237,10 +336,7 @@ fn classify_tokens(tokens: &[Token]) -> StatementKind {
                     )
             });
             match main {
-                Some(t) => {
-                    let position = tokens.iter().position(|x| std::ptr::eq(x, t)).unwrap_or(0);
-                    classify_tokens(&tokens[position..])
-                }
+                Some((position, _)) => classify_tokens(&tokens[position..]),
                 None => StatementKind::Select,
             }
         }
@@ -288,102 +384,186 @@ fn classify_tokens(tokens: &[Token]) -> StatementKind {
 
 #[cfg(test)]
 mod tests {
+    use super::Dialect::{Mysql, Postgres};
     use super::StatementKind::*;
     use super::*;
 
     #[test]
     fn basic_kinds() {
-        assert_eq!(classify("select 1"), vec![Select]);
-        assert_eq!(classify("INSERT INTO t VALUES (1)"), vec![Insert]);
-        assert_eq!(classify("update t set a = 1 where id = 2"), vec![Update]);
-        assert_eq!(classify("update t set a = 1"), vec![UpdateAll]);
-        assert_eq!(classify("delete from t where id = 1"), vec![Delete]);
-        assert_eq!(classify("DELETE FROM t"), vec![DeleteAll]);
-        assert_eq!(classify("drop table t"), vec![Drop]);
-        assert_eq!(classify("truncate t"), vec![Truncate]);
-        assert_eq!(classify("alter table t add column a int"), vec![Ddl]);
-        assert_eq!(classify("alter table t drop column a"), vec![AlterDrop]);
+        for d in [Postgres, Mysql] {
+            assert_eq!(classify("select 1", d), vec![Select]);
+            assert_eq!(classify("INSERT INTO t VALUES (1)", d), vec![Insert]);
+            assert_eq!(classify("update t set a = 1 where id = 2", d), vec![Update]);
+            assert_eq!(classify("update t set a = 1", d), vec![UpdateAll]);
+            assert_eq!(classify("delete from t where id = 1", d), vec![Delete]);
+            assert_eq!(classify("DELETE FROM t", d), vec![DeleteAll]);
+            assert_eq!(classify("drop table t", d), vec![Drop]);
+            assert_eq!(classify("truncate t", d), vec![Truncate]);
+            assert_eq!(classify("alter table t add column a int", d), vec![Ddl]);
+            assert_eq!(classify("alter table t drop column a", d), vec![AlterDrop]);
+            assert_eq!(classify("explain analyze select 1", d), vec![Explain]);
+        }
         assert_eq!(
-            classify("refresh materialized view concurrently mv"),
+            classify("refresh materialized view concurrently mv", Postgres),
             vec![Maintenance]
         );
-        assert_eq!(classify("explain analyze select 1"), vec![Explain]);
     }
 
     #[test]
     fn scripts_return_every_statement() {
         assert_eq!(
-            classify("begin; delete from t where id = 1; commit;"),
+            classify("begin; delete from t where id = 1; commit;", Postgres),
             vec![Transaction, Delete, Transaction]
         );
-        assert!(is_destructive("select 1; drop table t"));
-        assert!(!is_destructive("select 1; delete from t where id = 1"));
+        assert!(is_destructive("select 1; drop table t", Postgres));
+        assert!(!is_destructive(
+            "select 1; delete from t where id = 1",
+            Mysql
+        ));
+    }
+
+    #[test]
+    fn hash_is_an_operator_in_postgres_and_a_comment_in_mysql() {
+        // In PostgreSQL `#` is bitwise XOR: the DROP after it must be seen.
+        assert_eq!(
+            classify("select 1 # 2; drop table t", Postgres),
+            vec![Select, Drop]
+        );
+        assert!(is_destructive("select 1 # 2; drop table t", Postgres));
+        // In MySQL the rest of the line is a comment.
+        assert_eq!(classify("select 1 # 2; drop table t", Mysql), vec![Select]);
+    }
+
+    #[test]
+    fn backslash_escapes_follow_the_dialect() {
+        // MySQL: \' escapes the quote, so the string continues past it.
+        assert_eq!(
+            classify(r"select 'it\'s; drop table t'", Mysql),
+            vec![Select]
+        );
+        // PostgreSQL standard strings: \ is literal, the string ends at the second quote.
+        assert_eq!(
+            classify(r"select 'a\'; drop table t; select 'b'", Postgres),
+            vec![Select, Drop, Select]
+        );
+        // PostgreSQL E'' strings do process backslash escapes.
+        assert_eq!(
+            classify(r"select E'it\'s; drop table t'", Postgres),
+            vec![Select]
+        );
     }
 
     #[test]
     fn where_inside_a_subquery_does_not_count() {
         assert_eq!(
-            classify("delete from t using (select id from u where x = 1) s"),
+            classify(
+                "delete from t using (select id from u where x = 1) s",
+                Postgres
+            ),
             vec![DeleteAll]
         );
         assert_eq!(
-            classify("update t set a = (select max(b) from u where u.id = 1)"),
+            classify(
+                "update t set a = (select max(b) from u where u.id = 1)",
+                Mysql
+            ),
             vec![UpdateAll]
         );
     }
 
     #[test]
     fn keywords_in_literals_and_comments_do_not_count() {
+        for d in [Postgres, Mysql] {
+            assert_eq!(
+                classify("select 'drop table t; delete from x'", d),
+                vec![Select]
+            );
+            assert_eq!(classify("-- drop table t\nselect 1", d), vec![Select]);
+            assert_eq!(classify("/* drop table */ select 1", d), vec![Select]);
+            assert_eq!(
+                classify("delete from t where note = 'it''s; fine'", d),
+                vec![Delete]
+            );
+        }
+        assert_eq!(classify("# drop table t\nselect 1", Mysql), vec![Select]);
         assert_eq!(
-            classify("select 'drop table t; delete from x'"),
+            classify("/* drop /* nested */ table */ select 1", Postgres),
             vec![Select]
         );
-        assert_eq!(classify("-- drop table t\nselect 1"), vec![Select]);
-        assert_eq!(classify("# drop table t\nselect 1"), vec![Select]);
         assert_eq!(
-            classify("/* drop /* nested */ table */ select 1"),
-            vec![Select]
-        );
-        assert_eq!(
-            classify("select \"where\" from t; select `drop` from u"),
+            classify("select \"where\" from t; select `drop` from u", Mysql),
             vec![Select, Select]
-        );
-        assert_eq!(
-            classify("delete from t where note = 'it''s; fine'"),
-            vec![Delete]
         );
     }
 
     #[test]
-    fn dollar_quoted_bodies_are_skipped() {
+    fn dollar_quoted_bodies_are_skipped_in_postgres() {
         let sql = "create function f() returns void as $body$ begin delete from t; drop table x; end $body$ language plpgsql";
-        assert_eq!(classify(sql), vec![Ddl]);
-        assert_eq!(classify("do $$ begin truncate t; end $$"), vec![Call]);
-        assert_eq!(classify("select $1, $2 from t where a = $3"), vec![Select]);
+        assert_eq!(classify(sql, Postgres), vec![Ddl]);
+        assert_eq!(
+            classify("do $$ begin truncate t; end $$", Postgres),
+            vec![Call]
+        );
+        assert_eq!(
+            classify("select $1, $2 from t where a = $3", Postgres),
+            vec![Select]
+        );
     }
 
     #[test]
     fn ctes_classify_by_their_main_statement() {
         assert_eq!(
-            classify("with x as (select 1) select * from x"),
+            classify("with x as (select 1) select * from x", Postgres),
             vec![Select]
         );
         assert_eq!(
-            classify("with x as (select id from t) delete from t"),
+            classify("with x as (select id from t) delete from t", Postgres),
             vec![DeleteAll]
         );
         assert_eq!(
-            classify("with x as (select id from t) delete from t where id in (select id from x)"),
+            classify(
+                "with x as (select id from t) delete from t where id in (select id from x)",
+                Postgres
+            ),
             vec![Delete]
         );
     }
 
     #[test]
-    fn empty_and_whitespace_statements_are_skipped() {
+    fn split_returns_trimmed_text_and_offsets() {
+        let sql = "  select 1;\n-- note\n delete from t where id = 2 ;\n ; ";
+        let spans = split_statements(sql, Postgres);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].text, "select 1");
+        assert_eq!(spans[0].offset, 2);
+        assert_eq!(spans[1].text, "-- note\n delete from t where id = 2");
+        assert_eq!(&sql[spans[1].offset..spans[1].offset + 7], "-- note");
+        assert_eq!(spans[1].kind, Delete);
+    }
+
+    #[test]
+    fn split_keeps_function_bodies_whole() {
+        let sql = "create function f() returns int as $$ select 1; $$ language sql; select f();";
+        let spans = split_statements(sql, Postgres);
+        assert_eq!(spans.len(), 2);
+        assert!(spans[0].text.ends_with("language sql"));
+        assert_eq!(spans[1].text, "select f()");
+    }
+
+    #[test]
+    fn split_handles_multibyte_text() {
+        let sql = "select 'café ☕'; select 'ü'";
+        let spans = split_statements(sql, Mysql);
         assert_eq!(
-            classify(" ;; \n -- only a comment\n ; "),
-            Vec::<StatementKind>::new()
+            spans.iter().map(|s| s.text).collect::<Vec<_>>(),
+            vec!["select 'café ☕'", "select 'ü'"]
         );
+        assert_eq!(&sql[spans[1].offset..], "select 'ü'");
+    }
+
+    #[test]
+    fn empty_and_comment_only_statements_are_dropped() {
+        assert!(classify(" ;; \n -- only a comment\n ; ", Postgres).is_empty());
     }
 
     #[test]

@@ -22,7 +22,9 @@ use varve_secrets::Secret;
 mod classify;
 mod value;
 
-pub use classify::{StatementKind, classify, is_destructive};
+pub use classify::{
+    Dialect, StatementKind, StatementSpan, classify, is_destructive, split_statements,
+};
 pub use value::Value;
 
 /// How TLS is used for a connection (design doc 3.1).
