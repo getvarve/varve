@@ -36,3 +36,4 @@ app/src-tauri/gen/schemas/
 *.sqlite
 *.sqlite3
 *.db
+__pycache__/
