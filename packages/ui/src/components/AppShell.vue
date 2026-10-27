@@ -1,14 +1,45 @@
 <script setup lang="ts">
-import { computed, inject, ref } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AppInfo } from '../backend';
 import { RouterLink, RouterView } from 'vue-router';
+import { installQuitGuard } from '../composables/useQuitGuard';
+import { useWorkspace } from '../composables/useWorkspace';
+import { useWorkspaceActions } from '../composables/useWorkspaceActions';
 import { APP_INFO_KEY } from '../keys';
+import Icon from './common/Icon.vue';
+import ToastHost from './common/ToastHost.vue';
+import DialogHost from './dialogs/DialogHost.vue';
 import ExtensionSlot from './ExtensionSlot.vue';
+import WorkspaceTree from './sidebar/WorkspaceTree.vue';
+import StatusBar from './StatusBar.vue';
 import VarveMark from './VarveMark.vue';
 
 const info = inject(APP_INFO_KEY, ref<AppInfo | null>(null));
 const productName = computed(() => info.value?.productName ?? 'Varve');
 const isCommunity = computed(() => info.value?.edition !== 'pro');
+const workspace = useWorkspace();
+const actions = useWorkspaceActions();
+
+let removeQuitGuard: (() => void) | null = null;
+let unmounted = false;
+
+onMounted(() => {
+  void workspace.refresh();
+  installQuitGuard()
+    .then((remove) => {
+      // Unmounted before the guard was ready: remove its listeners at once.
+      if (unmounted) remove();
+      else removeQuitGuard = remove;
+    })
+    .catch((error: unknown) => {
+      console.error('Could not watch for the window closing', error);
+    });
+});
+
+onBeforeUnmount(() => {
+  unmounted = true;
+  removeQuitGuard?.();
+});
 </script>
 
 <template>
@@ -24,7 +55,10 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
         <VarveMark :size="18" />
         <span class="brand-name">{{ productName }}</span>
       </div>
-      <div class="titlebar-slot">
+      <div
+        class="titlebar-slot"
+        data-tauri-drag-region
+      >
         <ExtensionSlot name="title-bar" />
       </div>
     </header>
@@ -42,7 +76,19 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
             class="menu-item"
             to="/"
           >
-            Home
+            <Icon name="home" />Workspace
+          </RouterLink>
+          <RouterLink
+            class="menu-item"
+            to="/activity"
+          >
+            <Icon name="activity" />Activity
+          </RouterLink>
+          <RouterLink
+            class="menu-item"
+            to="/settings"
+          >
+            <Icon name="settings" />Settings
           </RouterLink>
           <ExtensionSlot name="main-menu" />
           <RouterLink
@@ -50,16 +96,20 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
             class="menu-item"
             to="/about-pro"
           >
-            About Varve Pro
+            <Icon name="sparkle" />About Varve Pro
           </RouterLink>
         </nav>
-        <div class="section-label">
-          Connections
-        </div>
-        <p class="empty">
-          No connections yet.
-        </p>
+        <WorkspaceTree class="tree" />
         <ExtensionSlot name="sidebar-sections" />
+        <div class="sidebar-foot">
+          <button
+            type="button"
+            class="btn new-connection"
+            @click="actions.newConnection()"
+          >
+            <Icon name="plus" />New connection
+          </button>
+        </div>
       </aside>
 
       <main class="main">
@@ -67,14 +117,9 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
       </main>
     </div>
 
-    <footer class="statusbar">
-      <span>{{ productName }}</span>
-      <span v-if="info">v{{ info.version }}</span>
-      <span class="spacer" />
-      <span v-if="info">
-        {{ info.extensions.length === 1 ? '1 extension' : `${info.extensions.length} extensions` }}
-      </span>
-    </footer>
+    <StatusBar />
+    <DialogHost />
+    <ToastHost />
   </div>
 </template>
 
@@ -101,6 +146,12 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
   gap: 8px;
 }
 
+/* Tauri only drags when the pressed element itself has data-tauri-drag-region,
+   so the logo and name let the press fall through to the brand. */
+.brand > * {
+  pointer-events: none;
+}
+
 .brand-name {
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -123,9 +174,11 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-height: 0;
   padding: 8px 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
+  /* The whole sidebar scrolls, so extension sections below the tree are never clipped. */
   overflow-y: auto;
 }
 
@@ -141,6 +194,7 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
 .menu :deep(a) {
   display: flex;
   align-items: center;
+  gap: 8px;
   height: var(--row-tree);
   padding: 0 12px;
   color: var(--text);
@@ -158,42 +212,27 @@ const isCommunity = computed(() => info.value?.edition !== 'pro');
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.section-label {
-  height: var(--row-tree);
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+.tree {
+  flex: 1 0 auto;
 }
 
-.empty {
-  margin: 0;
-  padding: 0 12px;
-  color: var(--text-subtle);
+.sidebar-foot {
+  position: sticky;
+  bottom: 0;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border-inner);
+}
+
+.new-connection {
+  width: 100%;
 }
 
 .main {
   min-width: 0;
+  min-height: 0;
   overflow: auto;
   background: var(--ground);
 }
 
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-
-.spacer {
-  flex: 1;
-}
 </style>

@@ -1,0 +1,28 @@
+{
+  "engine": "postgres",
+  "object": {
+    "attributes": [
+      {
+        "collation": null,
+        "comment": null,
+        "dataType": "integer",
+        "name": "a"
+      },
+      {
+        "collation": null,
+        "comment": null,
+        "dataType": "text",
+        "name": "b"
+      }
+    ],
+    "kind": "compositeType",
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "name": "pair",
+    "schema": "m2_uisamples"
+  }
+}

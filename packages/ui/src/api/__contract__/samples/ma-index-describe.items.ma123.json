@@ -1,0 +1,251 @@
+{
+  "engine": "mysql",
+  "object": {
+    "autoIncrement": null,
+    "avgRowLength": null,
+    "charset": "utf8mb4",
+    "collation": "utf8mb4_uca1400_ai_ci",
+    "columns": [
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "int(11)",
+        "comment": null,
+        "dataType": "int",
+        "default": null,
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "PRI",
+        "name": "id",
+        "nullable": false,
+        "onUpdate": null,
+        "position": 1,
+        "srid": null,
+        "table": "items"
+      },
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "int(11)",
+        "comment": null,
+        "dataType": "int",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "MUL",
+        "name": "a",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 2,
+        "srid": null,
+        "table": "items"
+      },
+      {
+        "autoIncrement": false,
+        "charset": "utf8mb4",
+        "check": null,
+        "collation": "utf8mb4_uca1400_ai_ci",
+        "columnType": "varchar(20)",
+        "comment": null,
+        "dataType": "varchar",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": null,
+        "name": "c",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 3,
+        "srid": null,
+        "table": "items"
+      },
+      {
+        "autoIncrement": false,
+        "charset": "utf8mb4",
+        "check": null,
+        "collation": "utf8mb4_uca1400_ai_ci",
+        "columnType": "text",
+        "comment": null,
+        "dataType": "text",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "MUL",
+        "name": "f",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 4,
+        "srid": null,
+        "table": "items"
+      },
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "geometry",
+        "comment": null,
+        "dataType": "geometry",
+        "default": null,
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "MUL",
+        "name": "g",
+        "nullable": false,
+        "onUpdate": null,
+        "position": 5,
+        "srid": null,
+        "table": "items"
+      }
+    ],
+    "comment": null,
+    "constraints": [
+      {
+        "checkClause": null,
+        "columns": [
+          "id"
+        ],
+        "constraintType": "primaryKey",
+        "enforced": null,
+        "json": false,
+        "level": null,
+        "name": "PRIMARY",
+        "period": false,
+        "references": null,
+        "table": "items"
+      },
+      {
+        "checkClause": null,
+        "columns": [
+          "a",
+          "c"
+        ],
+        "constraintType": "unique",
+        "enforced": null,
+        "json": false,
+        "level": null,
+        "name": "u_ac",
+        "period": false,
+        "references": null,
+        "table": "items"
+      }
+    ],
+    "createOptions": null,
+    "created": null,
+    "dataFree": null,
+    "dataLength": null,
+    "database": "m2_uicontract",
+    "engine": "InnoDB",
+    "indexLength": null,
+    "indexes": [
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "primary",
+        "invisible": false,
+        "method": "BTREE",
+        "methodExplicit": false,
+        "name": "PRIMARY",
+        "parser": null,
+        "parts": [
+          {
+            "column": "id",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "items"
+      },
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "fulltext",
+        "invisible": false,
+        "method": null,
+        "methodExplicit": false,
+        "name": "ft",
+        "parser": null,
+        "parts": [
+          {
+            "column": "f",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "items"
+      },
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "spatial",
+        "invisible": false,
+        "method": null,
+        "methodExplicit": false,
+        "name": "sp",
+        "parser": null,
+        "parts": [
+          {
+            "column": "g",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "items"
+      },
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "unique",
+        "invisible": false,
+        "method": "BTREE",
+        "methodExplicit": true,
+        "name": "u_ac",
+        "parser": null,
+        "parts": [
+          {
+            "column": "a",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          },
+          {
+            "column": "c",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "items"
+      }
+    ],
+    "kind": "table",
+    "name": "items",
+    "partitioning": null,
+    "periods": [],
+    "rowEstimate": null,
+    "rowFormat": "Dynamic",
+    "system": false,
+    "systemVersioning": null,
+    "tableType": "BASE TABLE",
+    "triggers": [],
+    "updated": null
+  }
+}

@@ -1,0 +1,23 @@
+[
+ {"id":"KeyVersion","rust":"Option<KeyVersion>","ts":"redis.KeyVersion | null","dir":"result","value":{"keyType":"hash","length":"120000","digest":null,"digestMissing":"tooLarge","expireAtMs":"1792333914012"}},
+ {"id":"KeyVersion(null)","rust":"Option<KeyVersion>","ts":"redis.KeyVersion | null","dir":"result","value":null},
+ {"id":"RedisEditRequest(arg)","rust":"RedisEditRequest","ts":"redis.RedisEditRequest","dir":"arg","value":{"key":"user:1","expect":{"state":"present","keyType":"hash","version":{"keyType":"hash","length":"3","digest":"9f2c","digestMissing":null,"expireAtMs":null}},"edits":[{"op":"hashSet","field":{"t":"text","v":"name"},"value":{"t":"text","v":"Ann"},"original":{"t":"text","v":"Anne"}}]}},
+ {"id":"RedisEditRequest.create(arg)","rust":"RedisEditRequest","ts":"redis.RedisEditRequest","dir":"arg","value":{"key":"new","expect":{"state":"absent"},"edits":[{"op":"listPush","end":"tail","values":[{"t":"text","v":"a"}]},{"op":"expire","ttlMs":"60000"}]}},
+ {"id":"RedisEditRequest.trim(arg)","rust":"RedisEditRequest","ts":"redis.RedisEditRequest","dir":"arg","value":{"key":"s","expect":{"state":"present","keyType":"stream","version":{"keyType":"stream","length":"3","digest":null,"digestMissing":"tooLarge","expireAtMs":null}},"edits":[{"op":"streamTrim","strategy":"maxLen","threshold":"100","approximate":true}]}},
+ {"id":"RedisEditRequest.rename(arg)","rust":"RedisEditRequest","ts":"redis.RedisEditRequest","dir":"arg","value":{"key":"a","expect":{"state":"present","keyType":"string","version":{"keyType":"string","length":"1","digest":"x","digestMissing":null,"expireAtMs":"1792333914012"}},"edits":[{"op":"rename","newKey":"b","replace":false}]}},
+ {"id":"RedisEditRequest.zset(arg)","rust":"RedisEditRequest","ts":"redis.RedisEditRequest","dir":"arg","value":{"key":"z","expect":{"state":"present","keyType":"zset","version":null},"edits":[{"op":"zsetScore","member":{"t":"text","v":"m"},"score":{"t":"float","v":2.5},"original":{"t":"float","v":1}}]}},
+ {"id":"ZsetRange(arg)","rust":"ZsetRange","ts":"redis.ZsetRange","dir":"arg","value":{"by":"score","min":{"kind":"exclusive","value":{"t":"int","v":10}},"max":{"kind":"unbounded"},"reverse":true,"offset":"0","count":50}},
+ {"id":"ZsetRangePage","rust":"Option<ZsetRangePage>","ts":"redis.ZsetRangePage | null","dir":"result","value":{"members":[{"member":{"t":"text","v":"a"},"score":{"t":"null"}},{"member":{"t":"bytes","v":"ff"},"score":{"t":"float","v":"-Infinity"}}],"nextOffset":"50"}},
+ {"id":"StreamInfo","rust":"Option<StreamInfo>","ts":"redis.StreamInfo | null","dir":"result","value":{"length":"18446744073709551615","lastGeneratedId":"1-0","groups":"1","firstEntryId":null,"lastEntryId":"1-0","maxDeletedEntryId":null,"entriesAdded":"5","recordedFirstEntryId":null}},
+ {"id":"StreamGroup[]","rust":"Vec<StreamGroup>","ts":"redis.StreamGroup[]","dir":"result","value":[{"name":"g","consumers":"2","pending":"3","lastDeliveredId":"1-0","entriesRead":null,"lag":"0"}]},
+ {"id":"StreamConsumer[]","rust":"Vec<StreamConsumer>","ts":"redis.StreamConsumer[]","dir":"result","value":[{"name":"c","pending":"1","idleMs":"100","inactiveMs":null}]},
+ {"id":"PendingSummary","rust":"PendingSummary","ts":"redis.PendingSummary","dir":"result","value":{"count":"1","minId":"1-0","maxId":"1-0","consumers":[{"name":"c","pending":"1"}]}},
+ {"id":"PendingQuery(arg)","rust":"PendingQuery","ts":"redis.PendingQuery","dir":"arg","value":{"start":null,"count":50,"consumer":null,"minIdleMs":"60000"}},
+ {"id":"PendingPage","rust":"PendingPage","ts":"redis.PendingPage","dir":"result","value":{"entries":[{"id":"1-0","consumer":"c","idleMs":"5","deliveries":"2"}],"nextStart":null}},
+ {"id":"StreamGroupChange.claim(arg)","rust":"StreamGroupChange","ts":"redis.StreamGroupChange","dir":"arg","value":{"op":"claim","group":"g1","consumer":"c2","minIdleMs":"0","ids":["1792333914012-0"],"justId":false}},
+ {"id":"StreamGroupChange.create(arg)","rust":"StreamGroupChange","ts":"redis.StreamGroupChange","dir":"arg","value":{"op":"groupCreate","group":"g","id":"$","mkStream":true,"entriesRead":null}},
+ {"id":"StreamGroupChange.autoClaim(arg)","rust":"StreamGroupChange","ts":"redis.StreamGroupChange","dir":"arg","value":{"op":"autoClaim","group":"g","consumer":"c","minIdleMs":"1000","start":"0-0","count":10,"justId":true}},
+ {"id":"StreamGroupChange.destroy(arg)","rust":"StreamGroupChange","ts":"redis.StreamGroupChange","dir":"arg","value":{"op":"groupDestroy","group":"g","expectedPending":"3"}},
+ {"id":"PubSubNames(arg)","rust":"PubSubNames","ts":"redis.PubSubNames","dir":"arg","value":{"channels":["news"],"patterns":[]}},
+ {"id":"Value(publish arg)","rust":"Value","ts":"sessions.Value","dir":"arg","value":{"t":"bytes","v":"00ff"}}
+]

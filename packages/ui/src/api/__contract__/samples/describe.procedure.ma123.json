@@ -1,0 +1,29 @@
+{
+  "engine": "mysql",
+  "object": {
+    "altered": null,
+    "body": "BEGIN SELECT a; END",
+    "charsetClient": "utf8mb4",
+    "collationConnection": "utf8mb4_uca1400_ai_ci",
+    "comment": null,
+    "created": null,
+    "dataAccess": "CONTAINS SQL",
+    "database": "m2_uisamples",
+    "databaseCollation": "utf8mb4_uca1400_ai_ci",
+    "definer": "root@%",
+    "deterministic": false,
+    "kind": "procedure",
+    "name": "p",
+    "parameters": [
+      {
+        "dataType": "int(11)",
+        "mode": "IN",
+        "name": "a",
+        "position": 1
+      }
+    ],
+    "returns": null,
+    "security": "DEFINER",
+    "sqlMode": "STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION"
+  }
+}

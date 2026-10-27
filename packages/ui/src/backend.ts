@@ -9,6 +9,8 @@ export interface AppInfo {
   extensions: { id: string; name: string }[];
   capabilities: string[];
   commands: string[];
+  /** A debug build (`tauri dev`): the webview's own context menu and reload stay available. */
+  debugBuild: boolean;
 }
 
 /** Error shape returned by extension commands. */

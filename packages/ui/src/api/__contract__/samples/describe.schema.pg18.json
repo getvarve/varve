@@ -1,0 +1,11 @@
+{
+  "engine": "postgres",
+  "object": {
+    "comment": null,
+    "extension": null,
+    "kind": "schema",
+    "name": "m2_uisamples",
+    "owner": "varve",
+    "system": false
+  }
+}

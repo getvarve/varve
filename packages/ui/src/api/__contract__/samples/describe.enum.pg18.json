@@ -1,0 +1,18 @@
+{
+  "engine": "postgres",
+  "object": {
+    "kind": "enumType",
+    "labels": [
+      "sad",
+      "ok"
+    ],
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "name": "mood",
+    "schema": "m2_uisamples"
+  }
+}

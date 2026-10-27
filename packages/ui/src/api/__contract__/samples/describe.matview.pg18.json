@@ -1,0 +1,46 @@
+{
+  "engine": "postgres",
+  "object": {
+    "accessMethod": "heap",
+    "columns": [
+      {
+        "collation": null,
+        "comment": null,
+        "compression": null,
+        "dataType": "integer",
+        "default": null,
+        "defaultStorage": "plain",
+        "fdwOptions": [],
+        "generated": null,
+        "identity": null,
+        "inheritedCount": 0,
+        "local": true,
+        "name": "id",
+        "notNull": false,
+        "notNullConstraint": null,
+        "options": [],
+        "position": 1,
+        "schema": "m2_uisamples",
+        "statisticsTarget": null,
+        "storage": "plain",
+        "table": "mv"
+      }
+    ],
+    "comment": null,
+    "definition": "SELECT id\n   FROM m2_uisamples.t",
+    "indexes": [],
+    "kind": "materializedView",
+    "lastRefreshNote": "PostgreSQL does not record when a materialized view was last refreshed",
+    "name": "mv",
+    "owner": "varve",
+    "populated": true,
+    "refreshConcurrently": false,
+    "rowEstimate": null,
+    "schema": "m2_uisamples",
+    "sizeNote": null,
+    "storageParameters": [],
+    "system": false,
+    "tablespace": null,
+    "totalBytes": null
+  }
+}

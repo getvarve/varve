@@ -1,0 +1,208 @@
+/* Layout shared by the object editors (scoped per component through <style scoped src>). */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+}
+
+.layout.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border-inner);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  min-width: 0;
+}
+
+.section h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-head .grow,
+.grow {
+  flex-grow: 1;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.grid .wide {
+  grid-column: 1 / -1;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.check input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.check .sub {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.code-box {
+  height: 280px;
+}
+
+.code-box.tall {
+  height: 380px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+  text-align: left;
+  color: var(--text-muted);
+}
+
+.table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-inner);
+  vertical-align: middle;
+}
+
+.table td .input,
+.table td .select {
+  height: 28px;
+}
+
+.field-error {
+  font-size: 12px;
+  color: var(--danger-text);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
+.list-item:hover {
+  background: var(--surface-raised);
+}
+
+.list-item[aria-current='true'] {
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat .value {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border-radius: 12px;
+  background: var(--accent-tint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.chip button {
+  display: inline-flex;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.pad {
+  padding: 16px;
+}
+
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

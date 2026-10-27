@@ -1,0 +1,27 @@
+{
+  "engine": "mysql",
+  "object": {
+    "altered": null,
+    "body": "DELETE FROM m2_uisamples.t",
+    "comment": null,
+    "created": null,
+    "database": "m2_uisamples",
+    "definer": "root@%",
+    "kind": "event",
+    "lastExecuted": null,
+    "name": "ev",
+    "originator": 1,
+    "preserve": false,
+    "schedule": {
+      "ends": null,
+      "intervalField": "DAY",
+      "intervalValue": "1",
+      "starts": null,
+      "type": "every"
+    },
+    "scheduler": "on",
+    "sqlMode": "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION",
+    "status": "disabled",
+    "timeZone": "+00:00"
+  }
+}

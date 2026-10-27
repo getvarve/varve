@@ -1,0 +1,805 @@
+[
+  {
+    "label": "create range partitioned events",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "events"
+          },
+          "columns": [
+            {
+              "name": "id",
+              "dataType": "bigint",
+              "notNull": true,
+              "identity": {
+                "generation": "always"
+              }
+            },
+            {
+              "name": "at",
+              "dataType": "timestamptz",
+              "notNull": true
+            }
+          ],
+          "constraints": [
+            {
+              "name": null,
+              "kind": {
+                "type": "primaryKey",
+                "columns": [
+                  "id",
+                  "at"
+                ]
+              },
+              "deferrable": false,
+              "initiallyDeferred": false
+            }
+          ],
+          "partitionBy": {
+            "strategy": "range",
+            "keys": [
+              {
+                "key": {
+                  "column": "id"
+                }
+              },
+              {
+                "key": {
+                  "column": "at"
+                }
+              }
+            ]
+          },
+          "unlogged": false,
+          "inherits": [],
+          "storageParams": [],
+          "tablespace": null,
+          "comment": "events by time"
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "events"
+          },
+          "operations": [
+            {
+              "op": "owner",
+              "owner": {
+                "kind": "name",
+                "name": "m2_td_owner"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "events_default"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "events"
+            },
+            "bound": {
+              "kind": "default"
+            }
+          },
+          "tablespace": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "partitions of events",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "events_low"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "events"
+            },
+            "bound": {
+              "kind": "range",
+              "from": [
+                {
+                  "kind": "minValue"
+                },
+                {
+                  "kind": "minValue"
+                }
+              ],
+              "to": [
+                {
+                  "kind": "literal",
+                  "value": "1000"
+                },
+                {
+                  "kind": "literal",
+                  "value": "2026-01-01"
+                }
+              ]
+            }
+          },
+          "tablespace": null
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "events"
+          },
+          "operations": [
+            {
+              "op": "attachPartition",
+              "partition": {
+                "schema": "m2_td",
+                "name": "events_old"
+              },
+              "bound": {
+                "kind": "range",
+                "from": [
+                  {
+                    "kind": "literal",
+                    "value": "1000"
+                  },
+                  {
+                    "kind": "literal",
+                    "value": "2026-01-01"
+                  }
+                ],
+                "to": [
+                  {
+                    "kind": "literal",
+                    "value": "2000"
+                  },
+                  {
+                    "kind": "literal",
+                    "value": "2026-01-01"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "detach events_old",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "events"
+          },
+          "operations": [
+            {
+              "op": "detachPartition",
+              "partition": {
+                "schema": "m2_td",
+                "name": "events_old"
+              },
+              "mode": "normal"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "create list partitioned regions",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "regions"
+          },
+          "columns": [
+            {
+              "name": "id",
+              "dataType": "bigint",
+              "notNull": true,
+              "identity": {
+                "generation": "always"
+              }
+            },
+            {
+              "name": "code",
+              "dataType": "text",
+              "notNull": true
+            }
+          ],
+          "constraints": [],
+          "partitionBy": {
+            "strategy": "list",
+            "keys": [
+              {
+                "key": {
+                  "expression": "lower(code)"
+                }
+              }
+            ]
+          },
+          "unlogged": false,
+          "inherits": [],
+          "storageParams": [],
+          "tablespace": null,
+          "comment": null
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "regions_default"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "regions"
+            },
+            "bound": {
+              "kind": "default"
+            }
+          },
+          "tablespace": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "partition of regions",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "regions_eu"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "regions"
+            },
+            "bound": {
+              "kind": "list",
+              "values": [
+                {
+                  "kind": "literal",
+                  "value": "nl"
+                },
+                {
+                  "kind": "literal",
+                  "value": "de"
+                }
+              ]
+            }
+          },
+          "tablespace": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "create hash partitioned spread",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "spread"
+          },
+          "columns": [
+            {
+              "name": "id",
+              "dataType": "bigint",
+              "notNull": true,
+              "identity": {
+                "generation": "always"
+              }
+            }
+          ],
+          "constraints": [
+            {
+              "name": null,
+              "kind": {
+                "type": "primaryKey",
+                "columns": [
+                  "id"
+                ]
+              },
+              "deferrable": false,
+              "initiallyDeferred": false
+            }
+          ],
+          "partitionBy": {
+            "strategy": "hash",
+            "keys": [
+              {
+                "key": {
+                  "column": "id"
+                }
+              }
+            ]
+          },
+          "unlogged": false,
+          "inherits": [],
+          "storageParams": [],
+          "tablespace": null,
+          "comment": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "partitions of spread",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "spread_0"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "spread"
+            },
+            "bound": {
+              "kind": "hash",
+              "modulus": 2,
+              "remainder": 0
+            }
+          },
+          "tablespace": null
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "spread_1"
+          },
+          "partitionOf": {
+            "parent": {
+              "schema": "m2_td",
+              "name": "spread"
+            },
+            "bound": {
+              "kind": "hash",
+              "modulus": 2,
+              "remainder": 1
+            }
+          },
+          "tablespace": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "create plain with properties",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "plain"
+          },
+          "columns": [
+            {
+              "name": "id",
+              "dataType": "bigint",
+              "notNull": true,
+              "identity": {
+                "generation": "always"
+              }
+            }
+          ],
+          "constraints": [
+            {
+              "name": null,
+              "kind": {
+                "type": "primaryKey",
+                "columns": [
+                  "id"
+                ]
+              },
+              "deferrable": false,
+              "initiallyDeferred": false
+            }
+          ],
+          "partitionBy": null,
+          "unlogged": true,
+          "inherits": [
+            {
+              "schema": "m2_td",
+              "name": "base"
+            }
+          ],
+          "storageParams": [
+            {
+              "name": "fillfactor",
+              "value": "80"
+            }
+          ],
+          "tablespace": "pg_default",
+          "comment": "plain table"
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "plain"
+          },
+          "operations": [
+            {
+              "op": "owner",
+              "owner": {
+                "kind": "name",
+                "name": "m2_td_owner"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "orders properties",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "orders"
+          },
+          "operations": [
+            {
+              "op": "owner",
+              "owner": {
+                "kind": "name",
+                "name": "m2_td_owner"
+              }
+            },
+            {
+              "op": "setLogged",
+              "logged": true
+            },
+            {
+              "op": "resetStorageParams",
+              "names": [
+                "autovacuum_enabled"
+              ]
+            },
+            {
+              "op": "setStorageParams",
+              "params": [
+                {
+                  "name": "fillfactor",
+                  "value": "70"
+                }
+              ]
+            },
+            {
+              "op": "inherit",
+              "parent": {
+                "schema": "m2_td",
+                "name": "base"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "table",
+            "database": null,
+            "schema": "m2_td",
+            "parent": null,
+            "name": "orders",
+            "signature": null
+          },
+          "comment": "orders, renamed"
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "orders"
+          },
+          "operations": [
+            {
+              "op": "rename",
+              "newName": "orders_moved"
+            },
+            {
+              "op": "setSchema",
+              "schema": "m2_td_b"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "unique index on mv",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "index",
+          "action": "create",
+          "name": "mv_day",
+          "table": {
+            "schema": "m2_td",
+            "name": "mv"
+          },
+          "unique": true,
+          "nullsNotDistinct": false,
+          "concurrently": true,
+          "method": {
+            "kind": "btree"
+          },
+          "elements": [
+            {
+              "key": {
+                "column": "day"
+              }
+            }
+          ],
+          "include": [],
+          "storageParams": [],
+          "tablespace": null,
+          "predicate": null
+        }
+      }
+    ]
+  },
+  {
+    "label": "events_low to m2_td_b",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "events_low"
+          },
+          "operations": [
+            {
+              "op": "setSchema",
+              "schema": "m2_td_b"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "label": "create noted with constraint comments",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "create",
+          "name": {
+            "schema": "m2_td",
+            "name": "noted"
+          },
+          "columns": [
+            {
+              "name": "id",
+              "dataType": "bigint",
+              "notNull": true
+            }
+          ],
+          "constraints": [
+            {
+              "name": "noted_pkey",
+              "kind": {
+                "type": "primaryKey",
+                "columns": [
+                  "id"
+                ]
+              },
+              "deferrable": false,
+              "initiallyDeferred": false
+            },
+            {
+              "name": "noted_positive",
+              "kind": {
+                "type": "check",
+                "expression": "id > 0"
+              }
+            }
+          ],
+          "partitionBy": null,
+          "unlogged": false,
+          "inherits": [],
+          "storageParams": [],
+          "tablespace": null,
+          "comment": null
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "constraint",
+            "database": null,
+            "schema": "m2_td",
+            "parent": "noted",
+            "name": "noted_pkey",
+            "signature": null
+          },
+          "comment": "the key"
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "constraint",
+            "database": null,
+            "schema": "m2_td",
+            "parent": "noted",
+            "name": "noted_positive",
+            "signature": null
+          },
+          "comment": "it's positive"
+        }
+      }
+    ]
+  },
+  {
+    "label": "noted constraint comments changed",
+    "changes": [
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "table",
+          "action": "alter",
+          "name": {
+            "schema": "m2_td",
+            "name": "noted"
+          },
+          "operations": [
+            {
+              "op": "renameConstraint",
+              "name": "noted_positive",
+              "newName": "noted_pos"
+            },
+            {
+              "op": "addConstraint",
+              "constraint": {
+                "name": "noted_small",
+                "kind": {
+                  "type": "check",
+                  "expression": "id < 1000000"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "constraint",
+            "database": null,
+            "schema": "m2_td",
+            "parent": "noted",
+            "name": "noted_pkey",
+            "signature": null
+          },
+          "comment": null
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "constraint",
+            "database": null,
+            "schema": "m2_td",
+            "parent": "noted",
+            "name": "noted_pos",
+            "signature": null
+          },
+          "comment": "renamed, still positive"
+        }
+      },
+      {
+        "engine": "postgres",
+        "change": {
+          "object": "comment",
+          "target": {
+            "kind": "constraint",
+            "database": null,
+            "schema": "m2_td",
+            "parent": "noted",
+            "name": "noted_small",
+            "signature": null
+          },
+          "comment": "below a million"
+        }
+      }
+    ]
+  }
+]

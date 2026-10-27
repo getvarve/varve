@@ -1,0 +1,40 @@
+{
+  "engine": "postgres",
+  "object": {
+    "arguments": [
+      {
+        "dataType": "integer",
+        "default": null,
+        "mode": "in",
+        "name": "a"
+      }
+    ],
+    "config": [],
+    "cost": 100.0,
+    "definition": "CREATE OR REPLACE PROCEDURE m2_uisamples.p(IN a integer)\n LANGUAGE sql\nAS $procedure$SELECT 1$procedure$\n",
+    "kind": "procedure",
+    "language": "sql",
+    "leakproof": false,
+    "library": null,
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "name": "p",
+    "parallel": "unsafe",
+    "result": null,
+    "returnType": null,
+    "returnsSet": false,
+    "rows": null,
+    "schema": "m2_uisamples",
+    "securityDefiner": false,
+    "signature": "IN a integer",
+    "source": "SELECT 1",
+    "sqlStandardBody": false,
+    "strict": false,
+    "volatility": "volatile",
+    "window": false
+  }
+}

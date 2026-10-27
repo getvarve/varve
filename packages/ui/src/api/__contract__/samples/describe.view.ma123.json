@@ -1,0 +1,61 @@
+{
+  "engine": "mysql",
+  "object": {
+    "algorithm": "UNDEFINED",
+    "charsetClient": "utf8mb4",
+    "checkOption": "NONE",
+    "collationConnection": "utf8mb4_uca1400_ai_ci",
+    "columns": [
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "int(11)",
+        "comment": null,
+        "dataType": "int",
+        "default": null,
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": null,
+        "name": "id",
+        "nullable": false,
+        "onUpdate": null,
+        "position": 1,
+        "srid": null,
+        "table": "v"
+      },
+      {
+        "autoIncrement": false,
+        "charset": "utf8mb4",
+        "check": null,
+        "collation": "utf8mb4_uca1400_ai_ci",
+        "columnType": "varchar(20)",
+        "comment": null,
+        "dataType": "varchar",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": null,
+        "name": "label",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 2,
+        "srid": null,
+        "table": "v"
+      }
+    ],
+    "database": "m2_uisamples",
+    "definer": "root@%",
+    "definition": "select `m2_uisamples`.`t`.`id` AS `id`,`m2_uisamples`.`t`.`label` AS `label` from `m2_uisamples`.`t` where `m2_uisamples`.`t`.`id` > 0",
+    "kind": "view",
+    "name": "v",
+    "security": "DEFINER",
+    "system": false,
+    "updatable": true
+  }
+}

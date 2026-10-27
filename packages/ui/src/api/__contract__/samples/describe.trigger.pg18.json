@@ -1,0 +1,26 @@
+{
+  "engine": "postgres",
+  "object": {
+    "comment": null,
+    "condition": null,
+    "constraintTrigger": false,
+    "deferrable": false,
+    "deferred": false,
+    "definition": "CREATE TRIGGER tr BEFORE INSERT ON m2_uisamples.t FOR EACH ROW EXECUTE FUNCTION m2_uisamples.trg()",
+    "enabled": "origin",
+    "events": [
+      "insert"
+    ],
+    "function": "m2_uisamples.trg()",
+    "inherited": false,
+    "kind": "trigger",
+    "level": "row",
+    "name": "tr",
+    "newTable": null,
+    "oldTable": null,
+    "schema": "m2_uisamples",
+    "table": "t",
+    "timing": "before",
+    "updateColumns": []
+  }
+}

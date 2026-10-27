@@ -1,0 +1,710 @@
+[
+  {
+    "label": "create made with options",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "createTable",
+          "database": "m2_td",
+          "name": "made",
+          "columns": [
+            {
+              "name": "id",
+              "dataType": {
+                "name": "bigint",
+                "unsigned": true
+              },
+              "nullable": false,
+              "autoIncrement": true
+            },
+            {
+              "name": "label",
+              "dataType": {
+                "name": "varchar",
+                "length": 30
+              },
+              "nullable": true
+            }
+          ],
+          "constraints": [
+            {
+              "kind": "primaryKey",
+              "parts": [
+                {
+                  "kind": "column",
+                  "name": "id"
+                }
+              ]
+            }
+          ],
+          "indexes": [],
+          "options": {
+            "engine": "InnoDB",
+            "rowFormat": "compact",
+            "autoIncrement": 100,
+            "charset": "utf8mb4",
+            "collation": "utf8mb4_bin",
+            "comment": "made by the designer"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "label": "orders options",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "orders",
+          "operations": [
+            {
+              "op": "setOptions",
+              "options": {
+                "engine": "MyISAM",
+                "autoIncrement": 500,
+                "comment": "orders, converted"
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "orders charset and rename",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "orders",
+          "operations": [
+            {
+              "op": "convertCharset",
+              "charset": "latin1",
+              "collation": "latin1_swedish_ci"
+            },
+            {
+              "op": "rename",
+              "name": "orders_renamed"
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "partition made by hash",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "made",
+          "operations": [
+            {
+              "op": "partitionBy",
+              "partitioning": {
+                "method": {
+                  "kind": "hash",
+                  "expression": "id"
+                },
+                "count": 2,
+                "partitions": []
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "orders_renamed to InnoDB",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "orders_renamed",
+          "operations": [
+            {
+              "op": "setOptions",
+              "options": {
+                "engine": "InnoDB"
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "latin to utf8mb4",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "latin",
+          "operations": [
+            {
+              "op": "convertCharset",
+              "charset": "utf8mb4",
+              "collation": null
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "latin comment with backslashes",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "latin",
+          "operations": [
+            {
+              "op": "setOptions",
+              "options": {
+                "comment": "C:\\data\\new\\x */ it's; ü"
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "scratch to a row-losing engine",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "scratch",
+          "operations": [
+            {
+              "op": "setOptions",
+              "options": {
+                "engine": "BLACKHOLE"
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "create vis with invisible and on update",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "createTable",
+          "database": "m2_td",
+          "name": "vis",
+          "columns": [
+            {
+              "name": "id",
+              "dataType": {
+                "name": "bigint",
+                "unsigned": true
+              },
+              "nullable": false,
+              "autoIncrement": true
+            },
+            {
+              "name": "secret",
+              "dataType": {
+                "name": "varchar",
+                "length": 20
+              },
+              "nullable": true,
+              "invisible": true
+            },
+            {
+              "name": "changed",
+              "dataType": {
+                "name": "datetime",
+                "length": 3
+              },
+              "nullable": false,
+              "default": {
+                "kind": "currentTimestamp",
+                "precision": 3
+              },
+              "onUpdateCurrentTimestamp": 3
+            }
+          ],
+          "constraints": [
+            {
+              "kind": "primaryKey",
+              "parts": [
+                {
+                  "kind": "column",
+                  "name": "id"
+                }
+              ]
+            }
+          ],
+          "indexes": [],
+          "options": {
+            "charset": "utf8mb4",
+            "collation": "utf8mb4_bin"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "label": "vis visibility swapped and on update cleared",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "vis",
+          "operations": [
+            {
+              "op": "modifyColumn",
+              "previous": {
+                "name": "secret",
+                "dataType": {
+                  "name": "varchar",
+                  "length": 20,
+                  "collation": "utf8mb4_bin"
+                },
+                "nullable": true,
+                "default": {
+                  "kind": "null"
+                },
+                "invisible": true
+              },
+              "column": {
+                "name": "secret",
+                "dataType": {
+                  "name": "varchar",
+                  "length": 20,
+                  "collation": "utf8mb4_bin"
+                },
+                "nullable": true,
+                "default": {
+                  "kind": "null"
+                }
+              },
+              "position": null,
+              "indexed": false
+            },
+            {
+              "op": "modifyColumn",
+              "previous": {
+                "name": "changed",
+                "dataType": {
+                  "name": "datetime",
+                  "length": 3
+                },
+                "nullable": false,
+                "default": {
+                  "kind": "currentTimestamp",
+                  "precision": 3
+                },
+                "onUpdateCurrentTimestamp": 3
+              },
+              "column": {
+                "name": "changed",
+                "dataType": {
+                  "name": "datetime",
+                  "length": 3
+                },
+                "nullable": false,
+                "default": {
+                  "kind": "currentTimestamp",
+                  "precision": 3
+                },
+                "invisible": true
+              },
+              "position": null,
+              "indexed": false
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "create subp",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "createTable",
+          "database": "m2_td",
+          "name": "subp",
+          "columns": [
+            {
+              "name": "id",
+              "dataType": {
+                "name": "bigint",
+                "unsigned": true
+              },
+              "nullable": false,
+              "autoIncrement": true
+            }
+          ],
+          "constraints": [
+            {
+              "kind": "primaryKey",
+              "parts": [
+                {
+                  "kind": "column",
+                  "name": "id"
+                }
+              ]
+            }
+          ],
+          "indexes": [],
+          "options": {}
+        }
+      }
+    ]
+  },
+  {
+    "label": "partition subp by range with hash subpartitions",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "subp",
+          "operations": [
+            {
+              "op": "partitionBy",
+              "partitioning": {
+                "method": {
+                  "kind": "range",
+                  "expression": "id"
+                },
+                "count": null,
+                "subpartition": {
+                  "method": {
+                    "kind": "hash",
+                    "expression": "id"
+                  },
+                  "count": 2
+                },
+                "partitions": [
+                  {
+                    "name": "p0",
+                    "values": {
+                      "kind": "lessThan",
+                      "bounds": [
+                        {
+                          "kind": "value",
+                          "value": {
+                            "t": "int",
+                            "v": 100
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "pmax",
+                    "values": {
+                      "kind": "lessThan",
+                      "bounds": [
+                        {
+                          "kind": "maxValue"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "split subp pmax",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "subp",
+          "operations": [
+            {
+              "op": "reorganizePartitions",
+              "names": [
+                "pmax"
+              ],
+              "into": [
+                {
+                  "name": "p1",
+                  "values": {
+                    "kind": "lessThan",
+                    "bounds": [
+                      {
+                        "kind": "value",
+                        "value": {
+                          "t": "int",
+                          "v": 1000
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "pmax",
+                  "values": {
+                    "kind": "lessThan",
+                    "bounds": [
+                      {
+                        "kind": "maxValue"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "merge subp p0 and p1",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "subp",
+          "operations": [
+            {
+              "op": "reorganizePartitions",
+              "names": [
+                "p0",
+                "p1"
+              ],
+              "into": [
+                {
+                  "name": "plow",
+                  "values": {
+                    "kind": "lessThan",
+                    "bounds": [
+                      {
+                        "kind": "value",
+                        "value": {
+                          "t": "int",
+                          "v": 1000
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "create lst",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "createTable",
+          "database": "m2_td",
+          "name": "lst",
+          "columns": [
+            {
+              "name": "id",
+              "dataType": {
+                "name": "bigint",
+                "unsigned": true
+              },
+              "nullable": false,
+              "autoIncrement": true
+            }
+          ],
+          "constraints": [
+            {
+              "kind": "primaryKey",
+              "parts": [
+                {
+                  "kind": "column",
+                  "name": "id"
+                }
+              ]
+            }
+          ],
+          "indexes": [],
+          "options": {}
+        }
+      }
+    ]
+  },
+  {
+    "label": "partition lst by list",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "lst",
+          "operations": [
+            {
+              "op": "partitionBy",
+              "partitioning": {
+                "method": {
+                  "kind": "list",
+                  "expression": "id"
+                },
+                "count": null,
+                "partitions": [
+                  {
+                    "name": "a",
+                    "values": {
+                      "kind": "in",
+                      "rows": [
+                        [
+                          {
+                            "kind": "value",
+                            "value": {
+                              "t": "int",
+                              "v": 1
+                            }
+                          }
+                        ],
+                        [
+                          {
+                            "kind": "value",
+                            "value": {
+                              "t": "int",
+                              "v": 2
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  },
+                  {
+                    "name": "b",
+                    "values": {
+                      "kind": "in",
+                      "rows": [
+                        [
+                          {
+                            "kind": "value",
+                            "value": {
+                              "t": "int",
+                              "v": 3
+                            }
+                          }
+                        ]
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  },
+  {
+    "label": "split lst a",
+    "changes": [
+      {
+        "engine": "mysql",
+        "change": {
+          "change": "alterTable",
+          "database": "m2_td",
+          "name": "lst",
+          "operations": [
+            {
+              "op": "reorganizePartitions",
+              "names": [
+                "a"
+              ],
+              "into": [
+                {
+                  "name": "a1",
+                  "values": {
+                    "kind": "in",
+                    "rows": [
+                      [
+                        {
+                          "kind": "value",
+                          "value": {
+                            "t": "int",
+                            "v": 1
+                          }
+                        }
+                      ]
+                    ]
+                  }
+                },
+                {
+                  "name": "a2",
+                  "values": {
+                    "kind": "in",
+                    "rows": [
+                      [
+                        {
+                          "kind": "value",
+                          "value": {
+                            "t": "int",
+                            "v": 2
+                          }
+                        }
+                      ]
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "systemVersioned": false
+        }
+      }
+    ]
+  }
+]

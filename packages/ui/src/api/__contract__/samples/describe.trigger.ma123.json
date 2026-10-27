@@ -1,0 +1,21 @@
+{
+  "engine": "mysql",
+  "object": {
+    "actionOrder": 1,
+    "body": "SET NEW.label = 'x'",
+    "charsetClient": "utf8mb4",
+    "collationConnection": "utf8mb4_uca1400_ai_ci",
+    "created": null,
+    "database": "m2_uisamples",
+    "databaseCollation": "utf8mb4_uca1400_ai_ci",
+    "definer": "root@%",
+    "event": "INSERT",
+    "follows": null,
+    "kind": "trigger",
+    "name": "tr",
+    "precedes": null,
+    "sqlMode": "STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION",
+    "table": "t",
+    "timing": "BEFORE"
+  }
+}

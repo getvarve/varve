@@ -1,0 +1,548 @@
+[
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "Orders_Mixed"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_bloom"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_body"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_brin"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_clu"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_expr"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_stats"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_tags"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "Orders_Mixed",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "OrderId"
+          },
+          "order": "desc",
+          "nulls": "last"
+        },
+        {
+          "key": {
+            "column": "we\"ird"
+          },
+          "collation": {
+            "name": "POSIX",
+            "schema": "pg_catalog"
+          },
+          "opclass": {
+            "name": "text_pattern_ops",
+            "schema": "pg_catalog"
+          }
+        }
+      ],
+      "include": [
+        "amount",
+        "label"
+      ],
+      "storageParams": [
+        {
+          "name": "fillfactor",
+          "value": "70"
+        },
+        {
+          "name": "deduplicate_items",
+          "value": "off"
+        }
+      ],
+      "tablespace": "m2_uicontract_ts",
+      "predicate": "amount > 0::numeric"
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "comment",
+      "target": {
+        "kind": "index",
+        "database": null,
+        "schema": "m2_uicontract",
+        "parent": null,
+        "name": "Orders_Mixed",
+        "signature": null
+      },
+      "comment": "mixed keys"
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_bloom",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "custom",
+        "name": "bloom"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "OrderId"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [
+        {
+          "name": "length",
+          "value": "80"
+        }
+      ],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_body",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "gist"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "body"
+          },
+          "opclass": {
+            "name": "tsvector_ops",
+            "schema": "pg_catalog"
+          },
+          "opclassOptions": [
+            {
+              "name": "siglen",
+              "value": "100"
+            }
+          ]
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_brin",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "brin"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "amount"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [
+        {
+          "name": "pages_per_range",
+          "value": "32"
+        },
+        {
+          "name": "autosummarize",
+          "value": "on"
+        }
+      ],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_clu",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "note"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "table",
+      "action": "alter",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "operations": [
+        {
+          "op": "clusterOn",
+          "index": "orders_clu"
+        }
+      ]
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_expr",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "expression": "lower(\"we\"\"ird\")"
+          },
+          "collation": {
+            "name": "default",
+            "schema": "pg_catalog"
+          }
+        },
+        {
+          "key": {
+            "expression": "(amount + 1::numeric)"
+          }
+        },
+        {
+          "key": {
+            "column": "note"
+          }
+        },
+        {
+          "key": {
+            "column": "label"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_replid_varve_swap"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_replid_varve_swap_i00000",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": true,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "OrderId"
+          },
+          "order": "desc"
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "table",
+      "action": "alter",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "operations": [
+        {
+          "op": "replicaIdentityUsingIndex",
+          "index": "orders_replid_varve_swap_i00000"
+        }
+      ]
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_replid"
+      },
+      "concurrently": true
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "alter",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_replid_varve_swap_i00000"
+      },
+      "operations": [
+        {
+          "op": "rename",
+          "newName": "orders_replid"
+        }
+      ]
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_stats",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "expression": "(amount * 2::numeric)"
+          }
+        },
+        {
+          "key": {
+            "expression": "lower(label)"
+          },
+          "collation": {
+            "name": "default",
+            "schema": "pg_catalog"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "alter",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "orders_stats"
+      },
+      "operations": [
+        {
+          "op": "setStatistics",
+          "column": 1,
+          "target": 500
+        }
+      ]
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "orders_tags",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "Orders"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": true,
+      "method": {
+        "kind": "gin"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "tags"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  }
+]

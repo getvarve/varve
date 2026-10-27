@@ -1,0 +1,15 @@
+[
+ {"id":"ExplainCapabilities","rust":"ExplainCapabilities","ts":"explain.ExplainCapabilities","dir":"result","value":{"formats":["json","tree"],"analyze":true,"analyzeFormats":["json"],"buffers":true,"verbose":true,"settings":true,"wal":false}},
+ {"id":"ExplainOptions(arg)","rust":"ExplainOptions","ts":"explain.ExplainOptions","dir":"arg","value":{"analyze":true,"buffers":true,"verbose":false,"settings":false,"wal":false,"format":null,"confirmed":false}},
+ {"id":"ExplainOptions.tree(arg)","rust":"ExplainOptions","ts":"explain.ExplainOptions","dir":"arg","value":{"analyze":true,"buffers":false,"verbose":false,"settings":false,"wal":false,"format":"tree","confirmed":false}},
+ {"id":"Plan","rust":"Plan","ts":"explain.Plan","dir":"result","value":
+  {"format":"postgresJson","analyzed":true,"planningMs":0.1,"executionMs":2.5,"totalCost":10.5,"shareBasis":"time",
+   "planningBuffers":{"sharedHit":1,"sharedRead":0,"sharedDirtied":0,"sharedWritten":0,"localHit":0,"localRead":0,"localDirtied":0,"localWritten":0,"tempRead":0,"tempWritten":0},
+   "triggers":[{"name":"t","relation":"orders","timeMs":0.2,"calls":1}],"settings":[{"name":"work_mem","value":"64MB"}],"properties":[],"warnings":["w"],"notices":[],"raw":"[]",
+   "root":{"id":0,"operation":"Hash Join","detail":{"relation":null,"schema":null,"alias":null,"index":null,"joinType":"Inner","strategy":null,"relationship":null,"subplan":null,"cte":null,"function":null,"filter":null,"condition":"(a.id = b.id)","sortKey":[],"groupKey":[],"parallelAware":false,"workersPlanned":null,"workersLaunched":null,"output":[]},
+     "estimatedRows":10,"actualRows":1000,"loops":1,"neverExecuted":false,"estimatedCost":{"startup":0,"total":10.5,"exclusive":2},"actualTime":{"firstRowMs":0.1,"perLoopMs":2,"totalMs":2,"exclusiveMs":1},
+     "buffers":null,"properties":[{"name":"Hash Buckets","value":"1024"}],"share":0.5,
+     "warnings":[{"kind":"rowMisestimate","estimated":10,"actual":1000,"factor":100},{"kind":"externalSort","method":"external merge","spaceKb":100},{"kind":"diskSpill","batches":4,"diskKb":null},{"kind":"seqScanLargeTable","relation":"orders","rows":100000}],
+     "children":[{"id":1,"operation":"Seq Scan","detail":{"relation":"orders","schema":"public","alias":"a","index":null,"joinType":null,"strategy":null,"relationship":"Outer","subplan":null,"cte":null,"function":null,"filter":"(x > 1)","condition":null,"sortKey":["a"],"groupKey":[],"parallelAware":true,"workersPlanned":2,"workersLaunched":2,"output":["a.id"]},
+       "estimatedRows":null,"actualRows":null,"loops":null,"neverExecuted":true,"estimatedCost":null,"actualTime":null,"buffers":null,"properties":[],"children":[],"share":null,"warnings":[]}]}}}
+]

@@ -1,0 +1,17 @@
+{
+  "engine": "postgres",
+  "object": {
+    "command": "all",
+    "comment": null,
+    "kind": "policy",
+    "name": "pol",
+    "permissive": true,
+    "roles": [
+      "public"
+    ],
+    "schema": "m2_uisamples",
+    "table": "t",
+    "using": "id > 0",
+    "withCheck": null
+  }
+}

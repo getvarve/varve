@@ -28,6 +28,48 @@
   --engine-ma: #C2A88A;
   --engine-rd: #E07A72;
 
+  --zebra: #F9FAFB;
+  --text-disabled: #9AA0AB;
+  --focus-ring: rgba(91, 75, 224, 0.20);
+  --backdrop: rgba(20, 23, 28, 0.32);
+  --shadow-dialog: 0 16px 48px rgba(20, 23, 28, 0.18);
+
+  --success: #2E9E64;
+  --success-text: #1F7A4C;
+  --success-tint: #E3F4EA;
+  --warning: #E8A23B;
+  --warning-text: #9A5B00;
+  --warning-tint: #FCF0DC;
+  --danger: #D93A37;
+  --danger-hover: #B42724;
+  --danger-text: #B42724;
+  --danger-tint: #FDE4E3;
+  --on-danger: #FFFFFF;
+  --info: #3B82F6;
+  --info-text: #1D5FB8;
+  --info-tint: #E2EDFC;
+
+  --on-env-production: #FFFFFF;
+  --on-env-staging: #14171C;
+  --on-env-test: #FFFFFF;
+  --on-env-development: #FFFFFF;
+  --on-engine: #14171C;
+
+  --tag-red: #D93A37;
+  --tag-amber: #E8A23B;
+  --tag-green: #2E9E64;
+  --tag-blue: #3B82F6;
+  --tag-violet: #5B4BE0;
+  --tag-gray: #6A7180;
+
+  --code-keyword: #5B4BE0;
+  --code-string: #1F7A4C;
+  --code-number: #9A5B00;
+  --code-comment: #6A7180;
+  --code-gutter: #6A7180;
+  --code-selection: rgba(91, 75, 224, 0.18);
+  --code-error-mark: rgba(217, 58, 55, 0.18);
+
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
@@ -59,6 +101,48 @@
     --env-production: #F0605D;
     --env-test: #58A6FF;
     --env-development: #3FB97A;
+    --env-staging: #F0B050;
+    --engine-pg: #7FA7DC;
+    --engine-my: #E0A06A;
+    --engine-ma: #C2A88A;
+    --engine-rd: #E07A72;
+    --zebra: #1A1D24;
+    --text-disabled: #5C6270;
+    --focus-ring: rgba(139, 124, 255, 0.30);
+    --backdrop: rgba(0, 0, 0, 0.55);
+    --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.5);
+    --success: #3FB97A;
+    --success-text: #5FCB93;
+    --success-tint: rgba(63, 185, 122, 0.16);
+    --warning: #E8A23B;
+    --warning-text: #F0B865;
+    --warning-tint: rgba(232, 162, 59, 0.16);
+    --danger: #F0605D;
+    --danger-hover: #F48A87;
+    --danger-text: #F48A87;
+    --danger-tint: rgba(240, 96, 93, 0.16);
+    --on-danger: #0F1115;
+    --info: #58A6FF;
+    --info-text: #8CC2FF;
+    --info-tint: rgba(88, 166, 255, 0.16);
+    --on-env-production: #0F1115;
+    --on-env-staging: #0F1115;
+    --on-env-test: #0F1115;
+    --on-env-development: #0F1115;
+    --on-engine: #0F1115;
+    --tag-red: #F0605D;
+    --tag-amber: #E8A23B;
+    --tag-green: #3FB97A;
+    --tag-blue: #58A6FF;
+    --tag-violet: #8B7CFF;
+    --tag-gray: #7A8190;
+    --code-keyword: #B3A9FF;
+    --code-string: #5FCB93;
+    --code-number: #F0B865;
+    --code-comment: #7A8190;
+    --code-gutter: #5C6270;
+    --code-selection: rgba(139, 124, 255, 0.28);
+    --code-error-mark: rgba(240, 96, 93, 0.25);
   }
 }
 
@@ -81,6 +165,48 @@
   --env-production: #F0605D;
   --env-test: #58A6FF;
   --env-development: #3FB97A;
+  --env-staging: #F0B050;
+  --engine-pg: #7FA7DC;
+  --engine-my: #E0A06A;
+  --engine-ma: #C2A88A;
+  --engine-rd: #E07A72;
+  --zebra: #1A1D24;
+  --text-disabled: #5C6270;
+  --focus-ring: rgba(139, 124, 255, 0.30);
+  --backdrop: rgba(0, 0, 0, 0.55);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --success: #3FB97A;
+  --success-text: #5FCB93;
+  --success-tint: rgba(63, 185, 122, 0.16);
+  --warning: #E8A23B;
+  --warning-text: #F0B865;
+  --warning-tint: rgba(232, 162, 59, 0.16);
+  --danger: #F0605D;
+  --danger-hover: #F48A87;
+  --danger-text: #F48A87;
+  --danger-tint: rgba(240, 96, 93, 0.16);
+  --on-danger: #0F1115;
+  --info: #58A6FF;
+  --info-text: #8CC2FF;
+  --info-tint: rgba(88, 166, 255, 0.16);
+  --on-env-production: #0F1115;
+  --on-env-staging: #0F1115;
+  --on-env-test: #0F1115;
+  --on-env-development: #0F1115;
+  --on-engine: #0F1115;
+  --tag-red: #F0605D;
+  --tag-amber: #E8A23B;
+  --tag-green: #3FB97A;
+  --tag-blue: #58A6FF;
+  --tag-violet: #8B7CFF;
+  --tag-gray: #7A8190;
+  --code-keyword: #B3A9FF;
+  --code-string: #5FCB93;
+  --code-number: #F0B865;
+  --code-comment: #7A8190;
+  --code-gutter: #5C6270;
+  --code-selection: rgba(139, 124, 255, 0.28);
+  --code-error-mark: rgba(240, 96, 93, 0.25);
 }
 
 *,

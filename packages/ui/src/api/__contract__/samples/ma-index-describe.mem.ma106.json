@@ -1,0 +1,115 @@
+{
+  "engine": "mysql",
+  "object": {
+    "autoIncrement": null,
+    "avgRowLength": null,
+    "charset": "utf8mb4",
+    "collation": "utf8mb4_general_ci",
+    "columns": [
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "int(11)",
+        "comment": null,
+        "dataType": "int",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "MUL",
+        "name": "k",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 1,
+        "srid": null,
+        "table": "mem"
+      },
+      {
+        "autoIncrement": false,
+        "charset": null,
+        "check": null,
+        "collation": null,
+        "columnType": "int(11)",
+        "comment": null,
+        "dataType": "int",
+        "default": {
+          "type": "null"
+        },
+        "generated": null,
+        "invisible": false,
+        "json": false,
+        "key": "MUL",
+        "name": "v",
+        "nullable": true,
+        "onUpdate": null,
+        "position": 2,
+        "srid": null,
+        "table": "mem"
+      }
+    ],
+    "comment": null,
+    "constraints": [],
+    "createOptions": null,
+    "created": null,
+    "dataFree": null,
+    "dataLength": null,
+    "database": "m2_uicontract",
+    "engine": "MEMORY",
+    "indexLength": null,
+    "indexes": [
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "index",
+        "invisible": false,
+        "method": "BTREE",
+        "methodExplicit": true,
+        "name": "kb",
+        "parser": null,
+        "parts": [
+          {
+            "column": "k",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "mem"
+      },
+      {
+        "comment": null,
+        "ignored": false,
+        "indexKind": "index",
+        "invisible": false,
+        "method": "HASH",
+        "methodExplicit": true,
+        "name": "kh",
+        "parser": null,
+        "parts": [
+          {
+            "column": "v",
+            "descending": false,
+            "expression": null,
+            "prefixLength": null
+          }
+        ],
+        "table": "mem"
+      }
+    ],
+    "kind": "table",
+    "name": "mem",
+    "partitioning": null,
+    "periods": [],
+    "rowEstimate": null,
+    "rowFormat": "Fixed",
+    "system": false,
+    "systemVersioning": null,
+    "tableType": "BASE TABLE",
+    "triggers": [],
+    "updated": null
+  }
+}

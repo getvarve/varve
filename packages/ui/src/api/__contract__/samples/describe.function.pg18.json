@@ -1,0 +1,46 @@
+{
+  "engine": "postgres",
+  "object": {
+    "arguments": [
+      {
+        "dataType": "integer",
+        "default": null,
+        "mode": "in",
+        "name": "a"
+      },
+      {
+        "dataType": "text",
+        "default": "'x'::text",
+        "mode": "in",
+        "name": "b"
+      }
+    ],
+    "config": [],
+    "cost": 100.0,
+    "definition": "CREATE OR REPLACE FUNCTION m2_uisamples.f(a integer, b text DEFAULT 'x'::text)\n RETURNS integer\n LANGUAGE sql\n IMMUTABLE\nAS $function$SELECT a$function$\n",
+    "kind": "function",
+    "language": "sql",
+    "leakproof": false,
+    "library": null,
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "name": "f",
+    "parallel": "unsafe",
+    "result": "integer",
+    "returnType": "integer",
+    "returnsSet": false,
+    "rows": null,
+    "schema": "m2_uisamples",
+    "securityDefiner": false,
+    "signature": "a integer, b text",
+    "source": "SELECT a",
+    "sqlStandardBody": false,
+    "strict": false,
+    "volatility": "immutable",
+    "window": false
+  }
+}

@@ -1,0 +1,43 @@
+[
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "drop",
+      "name": {
+        "schema": "m2_uicontract",
+        "name": "parted_k"
+      },
+      "concurrently": false
+    }
+  },
+  {
+    "engine": "postgres",
+    "change": {
+      "object": "index",
+      "action": "create",
+      "name": "parted_k",
+      "table": {
+        "schema": "m2_uicontract",
+        "name": "parted"
+      },
+      "unique": false,
+      "nullsNotDistinct": false,
+      "concurrently": false,
+      "method": {
+        "kind": "btree"
+      },
+      "elements": [
+        {
+          "key": {
+            "column": "k"
+          }
+        }
+      ],
+      "include": [],
+      "storageParams": [],
+      "tablespace": null,
+      "predicate": null
+    }
+  }
+]

@@ -1,0 +1,133 @@
+{
+  "engine": "postgres",
+  "object": {
+    "accessMethod": "heap",
+    "columns": [
+      {
+        "collation": null,
+        "comment": null,
+        "compression": null,
+        "dataType": "integer",
+        "default": null,
+        "defaultStorage": "plain",
+        "fdwOptions": [],
+        "generated": null,
+        "identity": null,
+        "inheritedCount": 1,
+        "local": false,
+        "name": "k",
+        "notNull": false,
+        "notNullConstraint": null,
+        "options": [],
+        "position": 1,
+        "schema": "m2_uicontract",
+        "statisticsTarget": null,
+        "storage": "plain",
+        "table": "parted_p1"
+      },
+      {
+        "collation": null,
+        "comment": null,
+        "compression": null,
+        "dataType": "integer",
+        "default": null,
+        "defaultStorage": "plain",
+        "fdwOptions": [],
+        "generated": null,
+        "identity": null,
+        "inheritedCount": 1,
+        "local": false,
+        "name": "v",
+        "notNull": false,
+        "notNullConstraint": null,
+        "options": [],
+        "position": 2,
+        "schema": "m2_uicontract",
+        "statisticsTarget": null,
+        "storage": "plain",
+        "table": "parted_p1"
+      }
+    ],
+    "comment": null,
+    "constraints": [],
+    "foreign": null,
+    "indexBytes": null,
+    "indexes": [
+      {
+        "clustered": false,
+        "comment": null,
+        "constraint": null,
+        "definition": "CREATE INDEX parted_p1_k_idx ON m2_uicontract.parted_p1 USING btree (k)",
+        "exclusion": false,
+        "foreignKeys": [],
+        "immediate": true,
+        "includeColumns": [],
+        "keys": [
+          {
+            "collation": null,
+            "column": "k",
+            "definition": "k",
+            "descending": false,
+            "expression": false,
+            "nullsFirst": false,
+            "opclass": null,
+            "opclassOptions": [],
+            "statisticsTarget": null
+          }
+        ],
+        "method": "btree",
+        "name": "parted_p1_k_idx",
+        "nullsNotDistinct": null,
+        "parentIndex": {
+          "name": "parted_k",
+          "schema": "m2_uicontract"
+        },
+        "partitioned": false,
+        "predicate": null,
+        "primary": false,
+        "ready": true,
+        "replicaIdentity": false,
+        "schema": "m2_uicontract",
+        "sizeBytes": null,
+        "sizeNote": null,
+        "storageParameters": [],
+        "system": false,
+        "table": "parted_p1",
+        "tablespace": null,
+        "unique": false,
+        "valid": true
+      }
+    ],
+    "inherits": [],
+    "kind": "partition",
+    "name": "parted_p1",
+    "ofType": null,
+    "ownedSequences": [],
+    "owner": "varve",
+    "partitionOf": {
+      "bound": "FOR VALUES FROM (0) TO (100)",
+      "detachPending": false,
+      "isDefault": false,
+      "parent": {
+        "name": "parted",
+        "schema": "m2_uicontract"
+      }
+    },
+    "partitioning": null,
+    "policies": [],
+    "replicaIdentity": "default",
+    "rlsEnabled": false,
+    "rlsForced": false,
+    "rowEstimate": null,
+    "rules": [],
+    "schema": "m2_uicontract",
+    "sizeNote": null,
+    "storageParameters": [],
+    "system": false,
+    "tableBytes": null,
+    "tablespace": null,
+    "totalBytes": null,
+    "triggers": [],
+    "unlogged": false
+  }
+}

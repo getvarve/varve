@@ -1,0 +1,53 @@
+[
+  {
+    "engine": "mysql",
+    "change": {
+      "change": "alterTable",
+      "database": "m2_uicontract",
+      "name": "mem",
+      "operations": [
+        {
+          "op": "dropIndex",
+          "name": "kb"
+        },
+        {
+          "op": "dropIndex",
+          "name": "kh"
+        },
+        {
+          "op": "addIndex",
+          "index": {
+            "name": "kb",
+            "kind": "index",
+            "parts": [
+              {
+                "kind": "column",
+                "name": "k",
+                "length": null,
+                "descending": false
+              }
+            ],
+            "method": "btree"
+          }
+        },
+        {
+          "op": "addIndex",
+          "index": {
+            "name": "kh",
+            "kind": "index",
+            "parts": [
+              {
+                "kind": "column",
+                "name": "v",
+                "length": null,
+                "descending": false
+              }
+            ],
+            "method": "hash"
+          }
+        }
+      ],
+      "systemVersioned": false
+    }
+  }
+]

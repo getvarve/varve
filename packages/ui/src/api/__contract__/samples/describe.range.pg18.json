@@ -1,0 +1,20 @@
+{
+  "engine": "postgres",
+  "object": {
+    "canonical": null,
+    "collation": null,
+    "kind": "rangeType",
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "multirange": "m2_uisamples.floatmultirange",
+    "name": "floatrange",
+    "schema": "m2_uisamples",
+    "subtype": "double precision",
+    "subtypeDiff": null,
+    "subtypeOpclass": "pg_catalog.float8_ops"
+  }
+}

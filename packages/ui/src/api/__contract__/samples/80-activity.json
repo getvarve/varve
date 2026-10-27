@@ -1,0 +1,4 @@
+[
+ {"id": "record_export(record)", "rust": "ExportRecord", "ts": "activity.ExportRecord", "dir": "arg", "value": {"connectionId": "0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d33", "objects": ["Orders"], "fileName": "/Users/kim/exports/orders.csv", "format": "csv", "sizeBytes": 2048, "rows": 17}},
+ {"id": "record_export(record) without connection", "rust": "ExportRecord", "ts": "activity.ExportRecord", "dir": "arg", "value": {"connectionId": null, "objects": [], "fileName": "keys.csv", "format": "json", "sizeBytes": null, "rows": null}}
+]

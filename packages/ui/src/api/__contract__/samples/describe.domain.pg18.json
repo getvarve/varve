@@ -1,0 +1,27 @@
+{
+  "engine": "postgres",
+  "object": {
+    "baseType": "integer",
+    "collation": null,
+    "constraints": [
+      {
+        "comment": null,
+        "definition": "CHECK ((VALUE > 0))",
+        "name": "pos_check",
+        "notNull": false,
+        "validated": true
+      }
+    ],
+    "default": null,
+    "kind": "domain",
+    "meta": {
+      "comment": null,
+      "extension": null,
+      "owner": "varve",
+      "system": false
+    },
+    "name": "pos",
+    "notNull": false,
+    "schema": "m2_uisamples"
+  }
+}

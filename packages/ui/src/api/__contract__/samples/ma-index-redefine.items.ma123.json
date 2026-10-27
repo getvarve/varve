@@ -1,0 +1,77 @@
+[
+  {
+    "engine": "mysql",
+    "change": {
+      "change": "alterTable",
+      "database": "m2_uicontract",
+      "name": "items",
+      "operations": [
+        {
+          "op": "dropIndex",
+          "name": "ft"
+        },
+        {
+          "op": "dropIndex",
+          "name": "sp"
+        },
+        {
+          "op": "dropIndex",
+          "name": "u_ac"
+        },
+        {
+          "op": "addIndex",
+          "index": {
+            "name": "ft",
+            "kind": "fulltext",
+            "parts": [
+              {
+                "kind": "column",
+                "name": "f",
+                "length": null,
+                "descending": false
+              }
+            ]
+          }
+        },
+        {
+          "op": "addIndex",
+          "index": {
+            "name": "sp",
+            "kind": "spatial",
+            "parts": [
+              {
+                "kind": "column",
+                "name": "g",
+                "length": null,
+                "descending": false
+              }
+            ]
+          }
+        },
+        {
+          "op": "addIndex",
+          "index": {
+            "name": "u_ac",
+            "kind": "unique",
+            "parts": [
+              {
+                "kind": "column",
+                "name": "a",
+                "length": null,
+                "descending": false
+              },
+              {
+                "kind": "column",
+                "name": "c",
+                "length": null,
+                "descending": false
+              }
+            ],
+            "method": "btree"
+          }
+        }
+      ],
+      "systemVersioned": false
+    }
+  }
+]

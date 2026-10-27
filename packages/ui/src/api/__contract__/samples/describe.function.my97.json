@@ -1,0 +1,29 @@
+{
+  "engine": "mysql",
+  "object": {
+    "altered": null,
+    "body": "RETURN a + 1",
+    "charsetClient": "utf8mb4",
+    "collationConnection": "utf8mb4_0900_ai_ci",
+    "comment": null,
+    "created": null,
+    "dataAccess": "CONTAINS SQL",
+    "database": "m2_uisamples",
+    "databaseCollation": "utf8mb4_0900_ai_ci",
+    "definer": "root@%",
+    "deterministic": true,
+    "kind": "function",
+    "name": "f",
+    "parameters": [
+      {
+        "dataType": "int",
+        "mode": "IN",
+        "name": "a",
+        "position": 1
+      }
+    ],
+    "returns": "int",
+    "security": "DEFINER",
+    "sqlMode": "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+  }
+}

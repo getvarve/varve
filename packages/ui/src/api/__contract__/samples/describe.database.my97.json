@@ -1,0 +1,15 @@
+{
+  "engine": "mysql",
+  "object": {
+    "charset": "utf8mb4",
+    "collation": "utf8mb4_0900_ai_ci",
+    "comment": null,
+    "encryption": false,
+    "kind": "database",
+    "name": "m2_uisamples",
+    "readOnly": false,
+    "sizeBytes": null,
+    "system": false,
+    "tableCount": 1
+  }
+}

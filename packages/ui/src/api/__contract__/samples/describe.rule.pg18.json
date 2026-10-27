@@ -1,0 +1,14 @@
+{
+  "engine": "postgres",
+  "object": {
+    "comment": null,
+    "definition": "CREATE RULE r AS\n    ON DELETE TO m2_uisamples.t DO INSTEAD NOTHING",
+    "enabled": "origin",
+    "event": "delete",
+    "instead": true,
+    "kind": "rule",
+    "name": "r",
+    "schema": "m2_uisamples",
+    "table": "t"
+  }
+}
