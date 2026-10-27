@@ -1,0 +1,112 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "1155.44"
+    },
+    "ordering_operation": {
+      "using_filesort": true,
+      "grouping_operation": {
+        "using_temporary_table": true,
+        "using_filesort": false,
+        "nested_loop": [
+          {
+            "table": {
+              "table_name": "o",
+              "access_type": "ALL",
+              "possible_keys": [
+                "idx_customer"
+              ],
+              "rows_examined_per_scan": 3000,
+              "rows_produced_per_join": 999,
+              "filtered": "33.33",
+              "cost_info": {
+                "read_cost": "202.26",
+                "eval_cost": "99.99",
+                "prefix_cost": "302.25",
+                "data_read_per_join": "23K"
+              },
+              "used_columns": [
+                "id",
+                "customer_id",
+                "amount",
+                "created"
+              ],
+              "attached_condition": "(`m2_explain_cap`.`o`.`created` > DATE'2026-03-01')"
+            }
+          },
+          {
+            "table": {
+              "table_name": "c",
+              "access_type": "eq_ref",
+              "possible_keys": [
+                "PRIMARY",
+                "idx_country"
+              ],
+              "key": "PRIMARY",
+              "used_key_parts": [
+                "id"
+              ],
+              "key_length": "4",
+              "ref": [
+                "m2_explain_cap.o.customer_id"
+              ],
+              "rows_examined_per_scan": 1,
+              "rows_produced_per_join": 999,
+              "filtered": "100.00",
+              "cost_info": {
+                "read_cost": "249.97",
+                "eval_cost": "99.99",
+                "prefix_cost": "652.21",
+                "data_read_per_join": "210K"
+              },
+              "used_columns": [
+                "id",
+                "country"
+              ]
+            }
+          },
+          {
+            "table": {
+              "table_name": "<subquery2>",
+              "access_type": "eq_ref",
+              "key": "<auto_distinct_key>",
+              "key_length": "4",
+              "ref": [
+                "m2_explain_cap.o.customer_id"
+              ],
+              "rows_examined_per_scan": 1,
+              "materialized_from_subquery": {
+                "using_temporary_table": true,
+                "query_block": {
+                  "table": {
+                    "table_name": "orders",
+                    "access_type": "ALL",
+                    "possible_keys": [
+                      "idx_customer"
+                    ],
+                    "rows_examined_per_scan": 3000,
+                    "rows_produced_per_join": 999,
+                    "filtered": "33.33",
+                    "cost_info": {
+                      "read_cost": "202.26",
+                      "eval_cost": "99.99",
+                      "prefix_cost": "302.25",
+                      "data_read_per_join": "23K"
+                    },
+                    "used_columns": [
+                      "id",
+                      "customer_id",
+                      "amount"
+                    ],
+                    "attached_condition": "(`m2_explain_cap`.`orders`.`amount` > 90.00)"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

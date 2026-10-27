@@ -1,0 +1,58 @@
+{
+  "query_block": {
+    "union_result": {
+      "table_name": "<union1,2>",
+      "access_type": "ALL",
+      "r_loops": 1,
+      "r_rows": 5,
+      "query_specifications": [
+        {
+          "query_block": {
+            "select_id": 1,
+            "r_loops": 1,
+            "r_total_time_ms": 0.044,
+            "table": {
+              "table_name": "customers",
+              "access_type": "ALL",
+              "possible_keys": ["idx_country"],
+              "r_loops": 1,
+              "rows": 200,
+              "r_rows": 200,
+              "r_table_time_ms": 0.02,
+              "r_other_time_ms": 0.021,
+              "r_engine_stats": {
+                "pages_accessed": 1
+              },
+              "filtered": 33,
+              "r_filtered": 33,
+              "attached_condition": "customers.country = 'NL'"
+            }
+          }
+        },
+        {
+          "query_block": {
+            "select_id": 2,
+            "operation": "UNION",
+            "r_loops": 1,
+            "r_total_time_ms": 0.289,
+            "table": {
+              "table_name": "orders",
+              "access_type": "ALL",
+              "r_loops": 1,
+              "rows": 3000,
+              "r_rows": 3000,
+              "r_table_time_ms": 0.197,
+              "r_other_time_ms": 0.091,
+              "r_engine_stats": {
+                "pages_accessed": 9
+              },
+              "filtered": 100,
+              "r_filtered": 1,
+              "attached_condition": "orders.amount > 95"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

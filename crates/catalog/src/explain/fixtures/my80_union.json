@@ -1,0 +1,119 @@
+{
+  "query_block": {
+    "union_result": {
+      "using_temporary_table": true,
+      "select_id": 4,
+      "table_name": "<union1,2>",
+      "access_type": "ALL",
+      "using_filesort": true,
+      "query_specifications": [
+        {
+          "dependent": false,
+          "cacheable": true,
+          "query_block": {
+            "select_id": 1,
+            "cost_info": {
+              "query_cost": "7.35"
+            },
+            "table": {
+              "table_name": "customers",
+              "access_type": "ref",
+              "possible_keys": [
+                "idx_country"
+              ],
+              "key": "idx_country",
+              "used_key_parts": [
+                "country"
+              ],
+              "key_length": "9",
+              "ref": [
+                "const"
+              ],
+              "rows_examined_per_scan": 66,
+              "rows_produced_per_join": 66,
+              "filtered": "100.00",
+              "index_condition": "(`m2_explain_cap`.`customers`.`country` = 'NL')",
+              "cost_info": {
+                "read_cost": "0.75",
+                "eval_cost": "6.60",
+                "prefix_cost": "7.35",
+                "data_read_per_join": "13K"
+              },
+              "used_columns": [
+                "name",
+                "country"
+              ]
+            }
+          }
+        },
+        {
+          "dependent": false,
+          "cacheable": true,
+          "query_block": {
+            "select_id": 2,
+            "cost_info": {
+              "query_cost": "136.90"
+            },
+            "nested_loop": [
+              {
+                "table": {
+                  "table_name": "customers",
+                  "access_type": "ALL",
+                  "possible_keys": [
+                    "PRIMARY"
+                  ],
+                  "rows_examined_per_scan": 200,
+                  "rows_produced_per_join": 22,
+                  "filtered": "11.11",
+                  "cost_info": {
+                    "read_cost": "18.03",
+                    "eval_cost": "2.22",
+                    "prefix_cost": "20.25",
+                    "data_read_per_join": "4K"
+                  },
+                  "used_columns": [
+                    "id",
+                    "name"
+                  ],
+                  "attached_condition": "(`m2_explain_cap`.`customers`.`name` like 'c1%')"
+                }
+              },
+              {
+                "table": {
+                  "table_name": "orders",
+                  "access_type": "ref",
+                  "possible_keys": [
+                    "idx_customer"
+                  ],
+                  "key": "idx_customer",
+                  "used_key_parts": [
+                    "customer_id"
+                  ],
+                  "key_length": "4",
+                  "ref": [
+                    "m2_explain_cap.customers.id"
+                  ],
+                  "rows_examined_per_scan": 15,
+                  "rows_produced_per_join": 111,
+                  "filtered": "33.33",
+                  "cost_info": {
+                    "read_cost": "83.33",
+                    "eval_cost": "11.11",
+                    "prefix_cost": "136.91",
+                    "data_read_per_join": "2K"
+                  },
+                  "used_columns": [
+                    "id",
+                    "customer_id",
+                    "amount"
+                  ],
+                  "attached_condition": "(`m2_explain_cap`.`orders`.`amount` > 95.00)"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

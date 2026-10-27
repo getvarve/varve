@@ -1,0 +1,13 @@
+-> Sort: total DESC  (actual time=2.72..2.72 rows=2 loops=1)
+    -> Table scan on <temporary>  (actual time=2.71..2.71 rows=2 loops=1)
+        -> Aggregate using temporary table  (actual time=2.71..2.71 rows=2 loops=1)
+            -> Nested loop inner join  (cost=100732 rows=999800) (actual time=0.448..2.39 rows=2155 loops=1)
+                -> Nested loop inner join  (cost=652 rows=1000) (actual time=0.0554..1.37 rows=2400 loops=1)
+                    -> Filter: (o.created > DATE'2026-03-01')  (cost=302 rows=1000) (actual time=0.0442..0.45 rows=2400 loops=1)
+                        -> Table scan on o  (cost=302 rows=3000) (actual time=0.0385..0.353 rows=3000 loops=1)
+                    -> Single-row index lookup on c using PRIMARY (id=o.customer_id)  (cost=0.25 rows=1) (actual time=294e-6..310e-6 rows=1 loops=2400)
+                -> Single-row index lookup on <subquery2> using <auto_distinct_key> (customer_id=o.customer_id)  (cost=402..402 rows=1) (actual time=309e-6..349e-6 rows=0.898 loops=2400)
+                    -> Materialize with deduplication  (cost=402..402 rows=1000) (actual time=0.39..0.39 rows=180 loops=1)
+                        -> Filter: (orders.amount > 90.00)  (cost=302 rows=1000) (actual time=0.0264..0.372 rows=180 loops=1)
+                            -> Table scan on orders  (cost=302 rows=3000) (actual time=0.0197..0.297 rows=3000 loops=1)
+

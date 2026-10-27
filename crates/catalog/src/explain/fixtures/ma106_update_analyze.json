@@ -1,0 +1,24 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "r_total_time_ms": 0.083,
+    "table": {
+      "update": 1,
+      "table_name": "orders",
+      "access_type": "range",
+      "possible_keys": ["idx_customer"],
+      "key": "idx_customer",
+      "key_length": "4",
+      "used_key_parts": ["customer_id"],
+      "rows": 15,
+      "r_rows": 15,
+      "r_filtered": 100,
+      "r_total_time_ms": 0.067,
+      "r_engine_stats": {
+        "pages_accessed": 50,
+        "pages_updated": 33
+      },
+      "attached_condition": "orders.customer_id = 5"
+    }
+  }
+}

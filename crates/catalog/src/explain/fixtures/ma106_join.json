@@ -1,0 +1,87 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "filesort": {
+      "sort_key": "sum(b.total) desc",
+      "temporary_table": {
+        "table": {
+          "table_name": "c",
+          "access_type": "index",
+          "possible_keys": ["PRIMARY"],
+          "key": "idx_country",
+          "key_length": "9",
+          "used_key_parts": ["country"],
+          "rows": 200,
+          "filtered": 100,
+          "using_index": true
+        },
+        "table": {
+          "table_name": "<subquery4>",
+          "access_type": "eq_ref",
+          "possible_keys": ["distinct_key"],
+          "key": "distinct_key",
+          "key_length": "4",
+          "used_key_parts": ["customer_id"],
+          "ref": ["func"],
+          "rows": 1,
+          "filtered": 100,
+          "materialized": {
+            "unique": 1,
+            "query_block": {
+              "select_id": 4,
+              "table": {
+                "table_name": "orders",
+                "access_type": "ALL",
+                "possible_keys": ["idx_customer"],
+                "rows": 3000,
+                "filtered": 100,
+                "attached_condition": "orders.amount > 90"
+              }
+            }
+          }
+        },
+        "table": {
+          "table_name": "<derived2>",
+          "access_type": "ref",
+          "possible_keys": ["key0"],
+          "key": "key0",
+          "key_length": "4",
+          "used_key_parts": ["customer_id"],
+          "ref": ["m2_explain_cap.c.id"],
+          "rows": 15,
+          "filtered": 100,
+          "materialized": {
+            "query_block": {
+              "select_id": 2,
+              "filesort": {
+                "sort_key": "orders.customer_id",
+                "temporary_table": {
+                  "table": {
+                    "table_name": "orders",
+                    "access_type": "ALL",
+                    "possible_keys": ["idx_customer"],
+                    "rows": 3000,
+                    "filtered": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "subqueries": [
+          {
+            "query_block": {
+              "select_id": 3,
+              "table": {
+                "table_name": "orders",
+                "access_type": "ALL",
+                "rows": 3000,
+                "filtered": 100
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

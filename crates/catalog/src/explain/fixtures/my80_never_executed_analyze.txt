@@ -1,0 +1,13 @@
+-> Filter: ((c.id = 5) or (<in_optimizer>(c.id,c.id in (select #2)) and exists(select #3)))  (cost=20.2 rows=200) (actual time=0.414..0.443 rows=1 loops=1)
+    -> Table scan on c  (cost=20.2 rows=200) (actual time=0.0188..0.0397 rows=200 loops=1)
+    -> Select #2 (subquery in condition; run only once)
+        -> Filter: ((c.id = `<materialized_subquery>`.customer_id))  (cost=402..402 rows=1) (actual time=0.389..0.389 rows=0 loops=1)
+            -> Limit: 1 row(s)  (cost=402..402 rows=1) (actual time=0.387..0.387 rows=0 loops=1)
+                -> Index lookup on <materialized_subquery> using <auto_distinct_key> (customer_id=c.id)  (actual time=0.386..0.386 rows=0 loops=1)
+                    -> Materialize with deduplication  (cost=402..402 rows=1000) (actual time=0.384..0.384 rows=0 loops=1)
+                        -> Filter: (orders.amount > 1000.00)  (cost=302 rows=1000) (actual time=0.382..0.382 rows=0 loops=1)
+                            -> Table scan on orders  (cost=302 rows=3001) (actual time=0.02..0.299 rows=3000 loops=1)
+    -> Select #3 (subquery in condition; dependent)
+        -> Limit: 1 row(s)  (cost=1.75 rows=1) (never executed)
+            -> Covering index lookup on o using idx_customer (customer_id=c.id)  (cost=1.75 rows=15) (never executed)
+

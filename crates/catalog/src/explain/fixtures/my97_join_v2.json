@@ -1,0 +1,155 @@
+{
+  "query": "/* select#1 */ select `c`.`country` AS `country`,count(0) AS `n`,sum(`o`.`amount`) AS `total` from `m2_explain_cap`.`customers` `c` join `m2_explain_cap`.`orders` `o` semi join (`m2_explain_cap`.`orders`) where ((`c`.`id` = `o`.`customer_id`) and (`<subquery2>`.`customer_id` = `o`.`customer_id`) and (`o`.`created` > DATE'2026-03-01') and (`m2_explain_cap`.`orders`.`amount` > 90.00)) group by `c`.`country` order by `total` desc",
+  "query_plan": {
+    "inputs": [
+      {
+        "inputs": [
+          {
+            "inputs": [
+              {
+                "inputs": [
+                  {
+                    "inputs": [
+                      {
+                        "inputs": [
+                          {
+                            "alias": "o",
+                            "operation": "Table scan on o",
+                            "table_name": "orders",
+                            "access_type": "table",
+                            "schema_name": "m2_explain_cap",
+                            "used_columns": [
+                              "id",
+                              "customer_id",
+                              "amount",
+                              "created"
+                            ],
+                            "estimated_rows": 3000.0,
+                            "estimated_total_cost": 302.25
+                          }
+                        ],
+                        "condition": "(o.created > DATE'2026-03-01')",
+                        "operation": "Filter: (o.created > DATE'2026-03-01')",
+                        "access_type": "filter",
+                        "estimated_rows": 999.8999834060669,
+                        "filter_columns": [
+                          "o.created"
+                        ],
+                        "estimated_total_cost": 302.25
+                      },
+                      {
+                        "alias": "c",
+                        "covering": false,
+                        "operation": "Single-row index lookup on c using PRIMARY (id = o.customer_id)",
+                        "index_name": "PRIMARY",
+                        "table_name": "customers",
+                        "access_type": "index",
+                        "key_columns": [
+                          "id"
+                        ],
+                        "schema_name": "m2_explain_cap",
+                        "used_columns": [
+                          "id",
+                          "country"
+                        ],
+                        "estimated_rows": 1.0,
+                        "lookup_condition": "id = o.customer_id",
+                        "index_access_type": "index_lookup",
+                        "lookup_references": [
+                          "m2_explain_cap.o.customer_id"
+                        ],
+                        "estimated_total_cost": 0.2501000100026598
+                      }
+                    ],
+                    "join_type": "inner join",
+                    "operation": "Nested loop inner join",
+                    "access_type": "join",
+                    "estimated_rows": 999.8999834060669,
+                    "join_algorithm": "nested_loop",
+                    "estimated_total_cost": 652.2149941921234
+                  },
+                  {
+                    "inputs": [
+                      {
+                        "inputs": [
+                          {
+                            "inputs": [
+                              {
+                                "operation": "Table scan on orders",
+                                "table_name": "orders",
+                                "access_type": "table",
+                                "schema_name": "m2_explain_cap",
+                                "used_columns": [
+                                  "id",
+                                  "customer_id",
+                                  "amount"
+                                ],
+                                "estimated_rows": 3000.0,
+                                "estimated_total_cost": 302.25
+                              }
+                            ],
+                            "condition": "(orders.amount > 90.00)",
+                            "operation": "Filter: (orders.amount > 90.00)",
+                            "access_type": "filter",
+                            "estimated_rows": 999.8999834060669,
+                            "filter_columns": [
+                              "m2_explain_cap.orders.amount"
+                            ],
+                            "estimated_total_cost": 302.25
+                          }
+                        ],
+                        "operation": "Materialize with deduplication",
+                        "access_type": "materialize",
+                        "deduplication": true,
+                        "estimated_rows": 999.8999834060669,
+                        "estimated_total_cost": 532.6417012456375,
+                        "estimated_first_row_cost": 532.6417012456375
+                      }
+                    ],
+                    "covering": false,
+                    "operation": "Single-row index lookup on <subquery2> using <auto_distinct_key> (customer_id = o.customer_id)",
+                    "index_name": "<auto_distinct_key>",
+                    "table_name": "<subquery2>",
+                    "access_type": "index",
+                    "key_columns": [
+                      "customer_id"
+                    ],
+                    "used_columns": [
+                      "customer_id"
+                    ],
+                    "estimated_rows": 1.0,
+                    "lookup_condition": "customer_id = o.customer_id",
+                    "index_access_type": "index_lookup",
+                    "lookup_references": [
+                      "m2_explain_cap.o.customer_id"
+                    ],
+                    "estimated_total_cost": 532.7418012556401,
+                    "estimated_first_row_cost": 532.7418012556401
+                  }
+                ],
+                "join_type": "inner join",
+                "operation": "Nested loop inner join",
+                "access_type": "join",
+                "estimated_rows": 999799.9768154528,
+                "join_algorithm": "nested_loop",
+                "estimated_total_cost": 100732.20267407801
+              }
+            ],
+            "operation": "Aggregate using temporary table",
+            "access_type": "temp_table_aggregate"
+          }
+        ],
+        "operation": "Table scan on <temporary>",
+        "table_name": "<temporary>",
+        "access_type": "table"
+      }
+    ],
+    "operation": "Sort: total DESC",
+    "access_type": "sort",
+    "sort_fields": [
+      "total DESC"
+    ]
+  },
+  "query_type": "select",
+  "json_schema_version": "2.0"
+}

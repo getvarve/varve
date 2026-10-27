@@ -1,0 +1,120 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost": 3.031389023,
+    "filesort": {
+      "sort_key": "sum(b.total) desc",
+      "temporary_table": {
+        "nested_loop": [
+          {
+            "table": {
+              "table_name": "c",
+              "access_type": "index",
+              "possible_keys": ["PRIMARY"],
+              "key": "idx_country",
+              "key_length": "9",
+              "used_key_parts": ["country"],
+              "loops": 1,
+              "rows": 200,
+              "cost": 0.03598292,
+              "filtered": 100,
+              "using_index": true
+            }
+          },
+          {
+            "table": {
+              "table_name": "<derived2>",
+              "access_type": "ref",
+              "possible_keys": ["key0"],
+              "key": "key0",
+              "key_length": "4",
+              "used_key_parts": ["customer_id"],
+              "ref": ["m2_explain_cap.c.id"],
+              "loops": 200,
+              "rows": 1,
+              "cost": 1.934740103,
+              "filtered": 100,
+              "materialized": {
+                "query_block": {
+                  "select_id": 2,
+                  "cost": 0.033494826,
+                  "filesort": {
+                    "sort_key": "orders.customer_id",
+                    "temporary_table": {
+                      "nested_loop": [
+                        {
+                          "table": {
+                            "table_name": "orders",
+                            "access_type": "ALL",
+                            "possible_keys": ["idx_customer"],
+                            "loops": 1,
+                            "rows": 3000,
+                            "cost": 0.5066932,
+                            "filtered": 100
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "table": {
+              "table_name": "<subquery4>",
+              "access_type": "eq_ref",
+              "possible_keys": ["distinct_key"],
+              "key": "distinct_key",
+              "key_length": "4",
+              "used_key_parts": ["customer_id"],
+              "ref": ["func"],
+              "rows": 1,
+              "filtered": 100,
+              "materialized": {
+                "unique": 1,
+                "query_block": {
+                  "select_id": 4,
+                  "nested_loop": [
+                    {
+                      "table": {
+                        "table_name": "orders",
+                        "access_type": "ALL",
+                        "possible_keys": ["idx_customer"],
+                        "loops": 1,
+                        "rows": 3000,
+                        "cost": 0.5066932,
+                        "filtered": 100,
+                        "attached_condition": "orders.amount > 90"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "subqueries": [
+          {
+            "query_block": {
+              "select_id": 3,
+              "cost": 0.5066932,
+              "nested_loop": [
+                {
+                  "table": {
+                    "table_name": "orders",
+                    "access_type": "ALL",
+                    "loops": 1,
+                    "rows": 3000,
+                    "cost": 0.5066932,
+                    "filtered": 100
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

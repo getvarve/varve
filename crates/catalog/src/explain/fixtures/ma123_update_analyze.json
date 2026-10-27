@@ -1,0 +1,29 @@
+{
+  "query_optimization": {
+    "r_total_time_ms": 0.057095171
+  },
+  "query_block": {
+    "select_id": 1,
+    "r_total_time_ms": 0.073056814,
+    "table": {
+      "update": 1,
+      "table_name": "orders",
+      "access_type": "range",
+      "possible_keys": ["idx_customer"],
+      "key": "idx_customer",
+      "key_length": "4",
+      "used_key_parts": ["customer_id"],
+      "rows": 15,
+      "r_rows": 15,
+      "r_total_filtered": 100,
+      "r_table_time_ms": 0.058845534,
+      "r_other_time_ms": 0.008960191,
+      "r_engine_stats": {
+        "pages_accessed": 81,
+        "pages_updated": 33
+      },
+      "attached_condition": "orders.customer_id = 5",
+      "r_filtered": 100
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "4.06"
+    },
+    "table": {
+      "table_name": "o",
+      "access_type": "range",
+      "possible_keys": [
+        "PRIMARY",
+        "idx_customer"
+      ],
+      "key": "PRIMARY",
+      "used_key_parts": [
+        "id"
+      ],
+      "key_length": "4",
+      "rows_examined_per_scan": 19,
+      "rows_produced_per_join": 19,
+      "filtered": "100.00",
+      "cost_info": {
+        "read_cost": "2.17",
+        "eval_cost": "1.90",
+        "prefix_cost": "4.07",
+        "data_read_per_join": "456"
+      },
+      "used_columns": [
+        "id",
+        "customer_id"
+      ],
+      "attached_condition": "(`m2_explain_cap`.`o`.`id` < 20)"
+    },
+    "select_list_subqueries": [
+      {
+        "dependent": true,
+        "cacheable": false,
+        "query_block": {
+          "select_id": 2,
+          "cost_info": {
+            "query_cost": "5.25"
+          },
+          "table": {
+            "table_name": "o2",
+            "access_type": "ref",
+            "possible_keys": [
+              "idx_customer"
+            ],
+            "key": "idx_customer",
+            "used_key_parts": [
+              "customer_id"
+            ],
+            "key_length": "4",
+            "ref": [
+              "m2_explain_cap.o.customer_id"
+            ],
+            "rows_examined_per_scan": 15,
+            "rows_produced_per_join": 15,
+            "filtered": "100.00",
+            "cost_info": {
+              "read_cost": "3.75",
+              "eval_cost": "1.50",
+              "prefix_cost": "5.25",
+              "data_read_per_join": "360"
+            },
+            "used_columns": [
+              "customer_id",
+              "amount"
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

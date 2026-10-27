@@ -1,0 +1,11 @@
+-> Sort: c.`name`
+    -> Stream results  (cost=6.66 rows=2)
+        -> Nested loop left join  (cost=6.66 rows=2)
+            -> Table scan on s  (cost=4.45..5.71 rows=2)
+                -> Materialize recursive CTE s  (cost=3.19..3.19 rows=2)
+                    -> Rows fetched before execution  (cost=0..0 rows=1)
+                    -> Repeat until convergence
+                        -> Filter: (s.n < 5)  (cost=2.73 rows=1)
+                            -> Scan new records on s  (cost=2.73 rows=2)
+            -> Filter: (c.id = s.n)  (cost=0.283 rows=1)
+                -> Single-row index lookup on c using PRIMARY (id = s.n)  (cost=0.283 rows=1)

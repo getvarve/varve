@@ -1,0 +1,5 @@
+-> Insert into orders
+    -> Table scan on <temporary>  (cost=2.1..4.01 rows=4) (actual time=0.0575..0.0578 rows=4 loops=1)
+        -> Temporary table  (cost=1.46..1.46 rows=4) (actual time=0.0562..0.0562 rows=4 loops=1)
+            -> Filter: (orders.id < 5)  (cost=1.06 rows=4) (actual time=0.0288..0.0353 rows=4 loops=1)
+                -> Index range scan on orders using PRIMARY over (id < 5)  (cost=1.06 rows=4) (actual time=0.0171..0.0234 rows=4 loops=1)

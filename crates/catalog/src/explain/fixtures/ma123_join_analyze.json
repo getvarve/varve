@@ -1,0 +1,190 @@
+{
+  "query_optimization": {
+    "r_total_time_ms": 0.145280121
+  },
+  "query_block": {
+    "select_id": 1,
+    "cost": 3.031389023,
+    "r_loops": 1,
+    "r_total_time_ms": 1.271972056,
+    "filesort": {
+      "sort_key": "sum(b.total) desc",
+      "r_loops": 1,
+      "r_total_time_ms": 0.001833714,
+      "r_used_priority_queue": false,
+      "r_output_rows": 2,
+      "r_buffer_size": "632",
+      "r_sort_mode": "sort_key,rowid",
+      "temporary_table": {
+        "nested_loop": [
+          {
+            "table": {
+              "table_name": "c",
+              "access_type": "index",
+              "possible_keys": ["PRIMARY"],
+              "key": "idx_country",
+              "key_length": "9",
+              "used_key_parts": ["country"],
+              "loops": 1,
+              "r_loops": 1,
+              "rows": 200,
+              "r_rows": 200,
+              "cost": 0.03598292,
+              "r_table_time_ms": 0.024046652,
+              "r_other_time_ms": 0.007793282,
+              "r_engine_stats": {
+                "pages_accessed": 1
+              },
+              "filtered": 100,
+              "r_total_filtered": 100,
+              "r_filtered": 100,
+              "using_index": true
+            }
+          },
+          {
+            "table": {
+              "table_name": "<derived2>",
+              "access_type": "ref",
+              "possible_keys": ["key0"],
+              "key": "key0",
+              "key_length": "4",
+              "used_key_parts": ["customer_id"],
+              "ref": ["m2_explain_cap.c.id"],
+              "loops": 200,
+              "r_loops": 200,
+              "rows": 1,
+              "r_rows": 1,
+              "cost": 1.934740103,
+              "r_table_time_ms": 0.02175451,
+              "r_other_time_ms": 0.029297741,
+              "filtered": 100,
+              "r_total_filtered": 100,
+              "r_filtered": 100,
+              "materialized": {
+                "query_block": {
+                  "select_id": 2,
+                  "cost": 0.033494826,
+                  "r_loops": 1,
+                  "r_total_time_ms": 0.664804503,
+                  "filesort": {
+                    "sort_key": "orders.customer_id",
+                    "r_loops": 1,
+                    "r_total_time_ms": 0.017128551,
+                    "r_used_priority_queue": false,
+                    "r_output_rows": 200,
+                    "r_buffer_size": "4KiB",
+                    "r_sort_mode": "sort_key,rowid",
+                    "temporary_table": {
+                      "nested_loop": [
+                        {
+                          "table": {
+                            "table_name": "orders",
+                            "access_type": "ALL",
+                            "possible_keys": ["idx_customer"],
+                            "loops": 1,
+                            "r_loops": 1,
+                            "rows": 3000,
+                            "r_rows": 3000,
+                            "cost": 0.5066932,
+                            "r_table_time_ms": 0.229964346,
+                            "r_other_time_ms": 0.380120478,
+                            "r_engine_stats": {
+                              "pages_accessed": 9
+                            },
+                            "filtered": 100,
+                            "r_total_filtered": 100,
+                            "r_filtered": 100
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "table": {
+              "table_name": "<subquery4>",
+              "access_type": "eq_ref",
+              "possible_keys": ["distinct_key"],
+              "key": "distinct_key",
+              "key_length": "4",
+              "used_key_parts": ["customer_id"],
+              "ref": ["func"],
+              "r_loops": 200,
+              "r_table_loops": 380,
+              "rows": 1,
+              "r_rows": 0.9,
+              "r_table_time_ms": 0.012044164,
+              "r_other_time_ms": 0.031923285,
+              "filtered": 100,
+              "r_total_filtered": 100,
+              "r_filtered": 100,
+              "materialized": {
+                "unique": 1,
+                "query_block": {
+                  "select_id": 4,
+                  "nested_loop": [
+                    {
+                      "table": {
+                        "table_name": "orders",
+                        "access_type": "ALL",
+                        "possible_keys": ["idx_customer"],
+                        "loops": 1,
+                        "r_loops": 1,
+                        "rows": 3000,
+                        "r_rows": 3000,
+                        "cost": 0.5066932,
+                        "r_table_time_ms": 0.178662043,
+                        "r_other_time_ms": 0.084642549,
+                        "r_engine_stats": {
+                          "pages_accessed": 9
+                        },
+                        "filtered": 100,
+                        "r_total_filtered": 6,
+                        "attached_condition": "orders.amount > 90",
+                        "r_filtered": 6
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "subqueries": [
+          {
+            "query_block": {
+              "select_id": 3,
+              "cost": 0.5066932,
+              "r_loops": 1,
+              "r_total_time_ms": 0.231548008,
+              "nested_loop": [
+                {
+                  "table": {
+                    "table_name": "orders",
+                    "access_type": "ALL",
+                    "loops": 1,
+                    "r_loops": 1,
+                    "rows": 3000,
+                    "r_rows": 3000,
+                    "cost": 0.5066932,
+                    "r_table_time_ms": 0.12815157,
+                    "r_other_time_ms": 0.102104503,
+                    "r_engine_stats": {
+                      "pages_accessed": 9
+                    },
+                    "filtered": 100,
+                    "r_total_filtered": 100,
+                    "r_filtered": 100
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

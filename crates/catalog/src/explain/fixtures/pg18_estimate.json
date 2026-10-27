@@ -1,0 +1,104 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Append",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 41.09,
+      "Total Cost": 6252.48,
+      "Plan Rows": 99961,
+      "Plan Width": 9,
+      "Disabled": false,
+      "Subplans Removed": 0,
+      "Plans": [
+        {
+          "Node Type": "Hash Join",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Join Type": "Right",
+          "Startup Cost": 41.09,
+          "Total Cost": 5744.24,
+          "Plan Rows": 99952,
+          "Plan Width": 9,
+          "Disabled": false,
+          "Inner Unique": true,
+          "Hash Cond": "(o.customer_id = c.id)",
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "orders",
+              "Alias": "o",
+              "Startup Cost": 0.00,
+              "Total Cost": 4913.57,
+              "Plan Rows": 300157,
+              "Plan Width": 8,
+              "Disabled": false
+            },
+            {
+              "Node Type": "Hash",
+              "Parent Relationship": "Inner",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 32.76,
+              "Total Cost": 32.76,
+              "Plan Rows": 666,
+              "Plan Width": 9,
+              "Disabled": false,
+              "Plans": [
+                {
+                  "Node Type": "Bitmap Heap Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Relation Name": "customers",
+                  "Alias": "c",
+                  "Startup Cost": 13.44,
+                  "Total Cost": 32.76,
+                  "Plan Rows": 666,
+                  "Plan Width": 9,
+                  "Disabled": false,
+                  "Recheck Cond": "(country = 'NL'::bpchar)",
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Index Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Index Name": "idx_country",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 13.27,
+                      "Plan Rows": 666,
+                      "Plan Width": 0,
+                      "Disabled": false,
+                      "Index Cond": "(country = 'NL'::bpchar)"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "customers_pkey",
+          "Relation Name": "customers",
+          "Alias": "customers",
+          "Startup Cost": 0.28,
+          "Total Cost": 8.43,
+          "Plan Rows": 9,
+          "Plan Width": 37,
+          "Disabled": false,
+          "Index Cond": "(id < 10)"
+        }
+      ]
+    }
+  }
+]

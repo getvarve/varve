@@ -1,0 +1,6 @@
+-> Limit: 1 row(s)  (actual time=0.0908..0.0908 rows=1 loops=1)
+    -> Sort: `COUNT(*)` DESC  (actual time=0.0768..0.0768 rows=1 loops=1)
+        -> Filter: (`count(0)` > 1)  (actual time=0.0624..0.0701 rows=2 loops=1)
+            -> Stream results  (cost=66.3 rows=2) (actual time=0.0589..0.0665 rows=2 loops=1)
+                -> Group aggregate: count(0), count(0)  (cost=66.3 rows=2) (actual time=0.0418..0.0492 rows=2 loops=1)
+                    -> Covering index scan on customers using idx_country  (cost=20.2 rows=200) (actual time=0.0113..0.0283 rows=200 loops=1)

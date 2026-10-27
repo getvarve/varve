@@ -1,0 +1,145 @@
+{
+  "query": "/* select#1 */ select `m2_explain_cap`.`customers`.`name` AS `name` from `m2_explain_cap`.`customers` where (`m2_explain_cap`.`customers`.`country` = 'NL') union /* select#2 */ select concat('x',`m2_explain_cap`.`orders`.`id`) AS `CONCAT('x',id)` from `m2_explain_cap`.`customers` join `m2_explain_cap`.`orders` where ((`m2_explain_cap`.`orders`.`customer_id` = `m2_explain_cap`.`customers`.`id`) and (`m2_explain_cap`.`orders`.`amount` > 95.00) and (`m2_explain_cap`.`customers`.`name` like 'c1%')) order by `name` limit 5",
+  "query_plan": {
+    "limit": 5,
+    "inputs": [
+      {
+        "inputs": [
+          {
+            "inputs": [
+              {
+                "union": true,
+                "inputs": [
+                  {
+                    "covering": false,
+                    "operation": "Index lookup on customers using idx_country (country = 'NL'), with index condition: (customers.country = 'NL')",
+                    "index_name": "idx_country",
+                    "table_name": "customers",
+                    "access_type": "index",
+                    "key_columns": [
+                      "country"
+                    ],
+                    "schema_name": "m2_explain_cap",
+                    "used_columns": [
+                      "name",
+                      "country"
+                    ],
+                    "estimated_rows": 66.0,
+                    "lookup_condition": "country = 'NL'",
+                    "index_access_type": "index_lookup",
+                    "lookup_references": [
+                      "const"
+                    ],
+                    "estimated_total_cost": 7.3500000000000005,
+                    "pushed_index_condition": "(customers.country = 'NL')"
+                  },
+                  {
+                    "inputs": [
+                      {
+                        "inputs": [
+                          {
+                            "operation": "Table scan on customers",
+                            "table_name": "customers",
+                            "access_type": "table",
+                            "schema_name": "m2_explain_cap",
+                            "used_columns": [
+                              "id",
+                              "name"
+                            ],
+                            "estimated_rows": 200.0,
+                            "estimated_total_cost": 20.25
+                          }
+                        ],
+                        "condition": "(customers.`name` like 'c1%')",
+                        "operation": "Filter: (customers.`name` like 'c1%')",
+                        "access_type": "filter",
+                        "estimated_rows": 22.220000624656677,
+                        "filter_columns": [
+                          "m2_explain_cap.customers.`name`"
+                        ],
+                        "estimated_total_cost": 20.25
+                      },
+                      {
+                        "inputs": [
+                          {
+                            "covering": false,
+                            "operation": "Index lookup on orders using idx_customer (customer_id = customers.id)",
+                            "index_name": "idx_customer",
+                            "table_name": "orders",
+                            "access_type": "index",
+                            "key_columns": [
+                              "customer_id"
+                            ],
+                            "schema_name": "m2_explain_cap",
+                            "used_columns": [
+                              "id",
+                              "customer_id",
+                              "amount"
+                            ],
+                            "estimated_rows": 15.0,
+                            "lookup_condition": "customer_id = customers.id",
+                            "index_access_type": "index_lookup",
+                            "lookup_references": [
+                              "m2_explain_cap.customers.id"
+                            ],
+                            "estimated_total_cost": 3.7724999989940713
+                          }
+                        ],
+                        "condition": "(orders.amount > 95.00)",
+                        "operation": "Filter: (orders.amount > 95.00)",
+                        "access_type": "filter",
+                        "estimated_rows": 4.9994999170303345,
+                        "filter_columns": [
+                          "m2_explain_cap.orders.amount"
+                        ],
+                        "estimated_total_cost": 3.7724999989940713
+                      }
+                    ],
+                    "join_type": "inner join",
+                    "operation": "Nested loop inner join",
+                    "access_type": "join",
+                    "estimated_rows": 111.08889127938504,
+                    "join_algorithm": "nested_loop",
+                    "estimated_total_cost": 136.90500327944756
+                  }
+                ],
+                "operation": "Union materialize with deduplication",
+                "access_type": "materialize",
+                "deduplication": true,
+                "estimated_rows": 177.08889127938505,
+                "estimated_total_cost": 185.05889527930586,
+                "estimated_first_row_cost": 185.05889527930586
+              }
+            ],
+            "operation": "Table scan on <union temporary>",
+            "table_name": "<union temporary>",
+            "access_type": "table",
+            "used_columns": [
+              "name"
+            ],
+            "estimated_rows": 177.08889127938505,
+            "estimated_total_cost": 189.77139527930586,
+            "estimated_first_row_cost": 185.0855062087998
+          }
+        ],
+        "operation": "Sort: `name`, limit input to 5 row(s) per chunk",
+        "access_type": "sort",
+        "sort_fields": [
+          "`name`"
+        ],
+        "estimated_rows": 5.0,
+        "per_chunk_limit": 5,
+        "estimated_total_cost": 251.35173781052677,
+        "estimated_first_row_cost": 251.35173781052677
+      }
+    ],
+    "operation": "Limit: 5 row(s)",
+    "access_type": "limit",
+    "limit_offset": 0,
+    "estimated_rows": 5.0,
+    "estimated_total_cost": 251.35173781052677,
+    "estimated_first_row_cost": 251.35173781052677
+  },
+  "query_type": "select",
+  "json_schema_version": "2.0"
+}
