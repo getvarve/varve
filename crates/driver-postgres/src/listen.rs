@@ -112,20 +112,34 @@ impl QueueBudget {
     }
 
     fn reserve(&self, bytes: usize) -> bool {
-        self.used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
-                used.checked_add(bytes)
-                    .filter(|total| *total <= self.max_bytes)
-            })
-            .is_ok()
+        let mut used = self.used.load(Ordering::Acquire);
+        loop {
+            let Some(total) = used.checked_add(bytes).filter(|t| *t <= self.max_bytes) else {
+                return false;
+            };
+            match self
+                .used
+                .compare_exchange_weak(used, total, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => return true,
+                Err(now) => used = now,
+            }
+        }
     }
 
     fn release(&self, bytes: usize) {
-        let _ = self
-            .used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
-                Some(used.saturating_sub(bytes))
-            });
+        let mut used = self.used.load(Ordering::Acquire);
+        loop {
+            match self.used.compare_exchange_weak(
+                used,
+                used.saturating_sub(bytes),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(now) => used = now,
+            }
+        }
     }
 }
 

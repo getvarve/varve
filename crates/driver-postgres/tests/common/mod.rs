@@ -248,15 +248,7 @@ pub async fn rewriting_proxy_rules(
                     } else if frame[0] == b'Q' {
                         let query = frame.get(5..frame.len() - 1).unwrap_or_default().to_vec();
                         for (from, to, left) in rules.iter() {
-                            if query == from.as_bytes()
-                                && left
-                                    .fetch_update(
-                                        std::sync::atomic::Ordering::SeqCst,
-                                        std::sync::atomic::Ordering::SeqCst,
-                                        |n| n.checked_sub(1),
-                                    )
-                                    .is_ok()
-                            {
+                            if query == from.as_bytes() && take_one(left) {
                                 frame = query_message(to);
                                 break;
                             }
@@ -623,4 +615,19 @@ pub async fn dropped_discard_all_keeps_the_init_sql(
     }
     assert!(dropped > 20, "only {dropped} calls were given up");
     Ok(())
+}
+
+/// Takes one use from `left`; false when none are left.
+fn take_one(left: &std::sync::atomic::AtomicUsize) -> bool {
+    use std::sync::atomic::Ordering;
+    let mut n = left.load(Ordering::SeqCst);
+    loop {
+        let Some(after) = n.checked_sub(1) else {
+            return false;
+        };
+        match left.compare_exchange_weak(n, after, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(now) => n = now,
+        }
+    }
 }

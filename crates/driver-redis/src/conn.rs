@@ -683,12 +683,21 @@ impl ReadBudget {
     /// Takes `bytes` from the budget; false (and marked exceeded) when they
     /// do not fit.
     fn take(&self, bytes: u64) -> bool {
-        let fits = self
-            .remaining
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
-                left.checked_sub(bytes)
-            })
-            .is_ok();
+        let mut left = self.remaining.load(Ordering::SeqCst);
+        let fits = loop {
+            let Some(after) = left.checked_sub(bytes) else {
+                break false;
+            };
+            match self.remaining.compare_exchange_weak(
+                left,
+                after,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break true,
+                Err(now) => left = now,
+            }
+        };
         if !fits {
             self.exceeded.store(true, Ordering::SeqCst);
         }
