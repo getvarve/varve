@@ -1,0 +1,54 @@
+# PostgreSQL 13 and 18 for `tests/client_key.rs`: the role varve_cert
+# (password varve_dev) may only log in over TLS with a client certificate
+# for its name (clientcert=verify-full) signed by ca.pem. The test writes
+# the certificates to a fresh directory, starts this file with
+# VARVE_TLSKEY_DIR pointing at it under its own compose project, and tears
+# it down again. Host ports are picked by Docker.
+#
+# Credentials are local test values only.
+
+x-postgres: &postgres
+  environment:
+    POSTGRES_USER: varve
+    POSTGRES_PASSWORD: varve_dev
+    POSTGRES_DB: varve
+  volumes:
+    - ${VARVE_TLSKEY_DIR:?set by tests/client_key.rs}:/certs:ro
+  entrypoint:
+    - sh
+    - -c
+    - >-
+      mkdir -p /run/pgtls &&
+      cp /certs/ca.pem /certs/server-cert.pem /certs/server-key.pem /run/pgtls/ &&
+      printf '%s\n'
+      'local all all trust'
+      'hostssl all varve_cert all scram-sha-256 clientcert=verify-full'
+      'host all varve_cert all reject'
+      'host all all all scram-sha-256'
+      > /run/pgtls/pg_hba.conf &&
+      printf '%s\n' "SET password_encryption = 'scram-sha-256';"
+      "CREATE ROLE varve_cert LOGIN PASSWORD 'varve_dev';"
+      > /docker-entrypoint-initdb.d/varve-cert.sql &&
+      chown -R postgres:postgres /run/pgtls &&
+      chmod 600 /run/pgtls/server-key.pem &&
+      exec docker-entrypoint.sh postgres
+      -c ssl=on
+      -c ssl_cert_file=/run/pgtls/server-cert.pem
+      -c ssl_key_file=/run/pgtls/server-key.pem
+      -c ssl_ca_file=/run/pgtls/ca.pem
+      -c hba_file=/run/pgtls/pg_hba.conf
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U varve -d varve"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+  tmpfs: ["/var/lib/postgresql"]
+  ports: ["127.0.0.1::5432"]
+
+services:
+  postgres-13:
+    <<: *postgres
+    image: postgres:13-alpine
+  postgres-18:
+    <<: *postgres
+    image: postgres:18-alpine

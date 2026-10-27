@@ -10,6 +10,32 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+varve-core.workspace = true
+varve-driver.workspace = true
+varve-secrets.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["time", "net"] }
+tracing.workspace = true
+# Pinned exactly: the command-tag tap (src/tap.rs) relies on how this version
+# drives the protocol (one request in flight, no internal queries inside a
+# simple query, tags read before the client sees the completion). Check
+# those invariants and the tap tests before moving to another version.
+# The root Cargo.toml patches it with vendor/tokio-postgres, whose type
+# lookup queries are qualified with pg_catalog (vendor/tokio-postgres/
+# VARVE-PATCH.md); src/tap.rs holds the same texts.
+tokio-postgres = { version = "=0.7.18", default-features = false, features = ["runtime"] }
+tokio-postgres-rustls = { version = "0.14.0", default-features = false, features = ["ring"] }
+rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
+rustls-native-certs = "0.8.5"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+serde_json.workspace = true
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+tempfile = "3.27.0"
+# Encrypting the client keys of tests/client_key.rs.
+pkcs8 = { version = "0.11.0", default-features = false, features = ["std", "encryption", "pem"] }
 
 [lints]
 workspace = true

@@ -1,0 +1,54 @@
+# PostgreSQL 18 with TLS on, for the TLS integration tests of
+# varve-driver-postgres. No certificate is committed: generate a fresh set
+# first and point VARVE_PG_TLS_DIR at it (the tests read the same variable):
+#
+#   export VARVE_PG_TLS_DIR="$(mktemp -d)"
+#   cargo run -p varve-driver-postgres --example tls-test-certs -- "$VARVE_PG_TLS_DIR"
+#   docker compose -p varve-m1-pg -f crates/driver-postgres/tests/tls/compose.yml up -d --wait
+#   docker compose -p varve-m1-pg -f crates/driver-postgres/tests/tls/compose.yml down -v
+#
+# The server certificate (server.crt, server.key) names localhost and
+# 127.0.0.1 and is signed by ca.crt. ca.crt is also the ssl_ca_file for
+# client certificates: the role varve_cert (password varve_dev) may only log
+# in over TLS with a client certificate for its name (clientcert=verify-full)
+# plus its password. Every other role logs in with a password, with or
+# without TLS.
+
+services:
+  postgres-tls:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: varve
+      POSTGRES_PASSWORD: varve_dev
+      POSTGRES_DB: varve
+    ports: ["${VARVE_PG_TLS_PORT:-54390}:5432"]
+    volumes:
+      - ${VARVE_PG_TLS_DIR:?set VARVE_PG_TLS_DIR to a directory written by the tls-test-certs example}:/certs:ro
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        mkdir -p /run/pgtls &&
+        cp /certs/ca.crt /certs/server.crt /certs/server.key /run/pgtls/ &&
+        printf '%s\n'
+        'local all all trust'
+        'hostssl all varve_cert all scram-sha-256 clientcert=verify-full'
+        'host all varve_cert all reject'
+        'host all all all scram-sha-256'
+        > /run/pgtls/pg_hba.conf &&
+        printf '%s\n' "CREATE ROLE varve_cert LOGIN PASSWORD 'varve_dev';"
+        > /docker-entrypoint-initdb.d/varve-cert.sql &&
+        chown -R postgres:postgres /run/pgtls &&
+        chmod 600 /run/pgtls/server.key &&
+        exec docker-entrypoint.sh postgres
+        -c ssl=on
+        -c ssl_cert_file=/run/pgtls/server.crt
+        -c ssl_key_file=/run/pgtls/server.key
+        -c ssl_ca_file=/run/pgtls/ca.crt
+        -c hba_file=/run/pgtls/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U varve -d varve"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs: ["/var/lib/postgresql"]

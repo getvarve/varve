@@ -1,0 +1,31 @@
+# PostgreSQL servers for `tests/cleartext_password.rs`, without TLS: one
+# whose pg_hba asks for the password in clear text (`password` method,
+# AuthenticationCleartextPassword), one with the default SCRAM. The test
+# starts this file under its own compose project and tears it down again.
+# Docker picks the host ports.
+#
+# Credentials are local test values only.
+
+x-postgres: &postgres
+  image: postgres:18-alpine
+  environment: &env
+    POSTGRES_USER: varve
+    POSTGRES_PASSWORD: varve_dev
+    POSTGRES_DB: varve
+  tmpfs: ["/var/lib/postgresql"]
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U varve -d varve -h 127.0.0.1"]
+    interval: 1s
+    timeout: 3s
+    retries: 60
+
+services:
+  password:
+    <<: *postgres
+    environment:
+      <<: *env
+      POSTGRES_HOST_AUTH_METHOD: password
+    ports: ["127.0.0.1::5432"]
+  scram:
+    <<: *postgres
+    ports: ["127.0.0.1::5432"]
