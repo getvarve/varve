@@ -1,0 +1,188 @@
+name: Release
+
+# Builds the installers for a version tag and publishes them as a GitHub
+# release with SHA256SUMS. CI calls this workflow once every check of the
+# tagged commit has passed, so a release never ships a red commit.
+# install.sh and install.ps1 download these assets by their fixed names.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.asset }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - asset: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - asset: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          # Ubuntu 22.04 keeps the glibc floor at 2.35: an AppImage does not bundle glibc.
+          # Moving to a newer runner raises that floor; update install.sh and the README with it.
+          - asset: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+          - asset: linux-arm64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: appimage,deb
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build Varve Community
+        shell: bash
+        env:
+          # Ad-hoc signature: no Apple certificate yet, but a valid signature
+          # lets macOS offer "Open Anyway" instead of calling the app damaged.
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+        run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+      - name: Collect assets under fixed names
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+          BUNDLE: target/${{ matrix.target }}/release/bundle
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Exactly one file per glob, or the release would ship the wrong one.
+          one() {
+            local matches=()
+            while IFS= read -r -d '' path; do matches+=("$path"); done < <(find "$1" -maxdepth 1 -name "$2" -print0)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "expected one $2 in $1, found ${#matches[@]}" >&2
+              ls -la "$1" >&2 || true
+              exit 1
+            fi
+            printf '%s\n' "${matches[0]}"
+          }
+          case "$ASSET" in
+            macos-*)
+              app="$(one "$BUNDLE/macos" '*.app')"
+              # COPYFILE_DISABLE keeps macOS metadata files out of the archive.
+              COPYFILE_DISABLE=1 tar -czf "dist/varve-${ASSET}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
+              cp "$(one "$BUNDLE/dmg" '*.dmg')" "dist/varve-${ASSET}.dmg"
+              ;;
+            windows-*)
+              cp "$(one "$BUNDLE/nsis" '*-setup.exe')" "dist/varve-${ASSET}-setup.exe"
+              cp "$(one "$BUNDLE/msi" '*.msi')" "dist/varve-${ASSET}.msi"
+              ;;
+            linux-*)
+              cp "$(one "$BUNDLE/appimage" '*.AppImage')" "dist/varve-${ASSET}.AppImage"
+              cp "$(one "$BUNDLE/deb" '*.deb')" "dist/varve-${ASSET}.deb"
+              ;;
+          esac
+          ls -la dist
+      - uses: actions/upload-artifact@v6
+        with:
+          name: varve-${{ matrix.asset }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: bundle
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Icon for the Linux desktop entry
+        run: cp app/src-tauri/icons/128x128.png dist/varve-icon-128.png
+      - name: Write SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          expected=(
+            varve-macos-arm64.app.tar.gz varve-macos-arm64.dmg
+            varve-macos-x64.app.tar.gz varve-macos-x64.dmg
+            varve-windows-x64-setup.exe varve-windows-x64.msi
+            varve-linux-x64.AppImage varve-linux-x64.deb
+            varve-linux-arm64.AppImage varve-linux-arm64.deb
+            varve-icon-128.png
+          )
+          for name in "${expected[@]}"; do
+            if [ ! -f "$name" ]; then
+              echo "missing release asset: $name" >&2
+              ls -la
+              exit 1
+            fi
+          done
+          sha256sum "${expected[@]}" | LC_ALL=C sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'EOF'
+          ## Install
+
+          macOS and Linux:
+
+          ```bash
+          curl -fsSL https://sherin.dev/varve/install.sh | bash
+          ```
+
+          Windows (PowerShell):
+
+          ```powershell
+          powershell -c "irm https://sherin.dev/varve/install.ps1|iex"
+          ```
+
+          Or download an installer below. Every file is listed in `SHA256SUMS`.
+          The macOS builds are not notarized yet: after opening the `.dmg`, use
+          **System Settings > Privacy & Security > Open Anyway** once.
+          EOF
+          # A rerun after a partial upload replaces the assets instead of failing.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --verify-tag \
+              --title "Varve ${TAG}" \
+              --notes-file notes.md \
+              --generate-notes
+          fi
