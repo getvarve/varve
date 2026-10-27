@@ -1,6 +1,6 @@
 {
   "name": "@varve/ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The Varve app UI: shell, extension slots and design tokens.",
   "license": "Apache-2.0",
   "private": true,
