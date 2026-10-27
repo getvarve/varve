@@ -15,10 +15,12 @@ import { singleFlight } from '../../lib/async';
 import { domId } from '../../lib/domId';
 import { renameFormSchema } from '../../lib/forms';
 import type { MenuItem } from '../../lib/menu';
+import { firstTime } from '../../lib/motion';
 import { requiredFields } from '../../lib/schemaRequired';
 import { findNode, neighbourDrop, objectExpandable, planDrop, sidebarRows } from '../../lib/tree';
 import type { DropPosition, ObjNode, SidebarRow, TreeNode } from '../../lib/tree';
 import ContextMenu from '../common/ContextMenu.vue';
+import VarveMark from '../VarveMark.vue';
 import EngineTile from '../common/EngineTile.vue';
 import Icon from '../common/Icon.vue';
 import { defaultAction, isObjectAction, objectMenuItems, runObjectAction } from '../tree/objectActions';
@@ -27,6 +29,20 @@ import ObjectIcon from '../tree/ObjectIcon.vue';
 import { openConnectionOverview } from '../tree/openConnection';
 
 const workspace = useWorkspace();
+
+/**
+ * The year rings of the empty workspace draw in the first time it shows in
+ * this window, never again (also not after the last connection is removed).
+ */
+const drawEmptyMark = ref(false);
+watch(
+  () => workspace.isEmpty.value,
+  (empty) => {
+    if (empty && firstTime('empty-workspace-mark')) drawEmptyMark.value = true;
+    else if (!empty) drawEmptyMark.value = false;
+  },
+  { immediate: true },
+);
 const actions = useWorkspaceActions();
 const tabs = useTabs();
 const toasts = useToasts();
@@ -728,7 +744,14 @@ function objectTitle(node: ObjNode): string | undefined {
     <div
       v-if="workspace.isEmpty.value"
       class="empty"
+      :class="{ drawing: drawEmptyMark }"
     >
+      <VarveMark
+        :size="40"
+        :draw="drawEmptyMark"
+        class="empty-mark"
+        aria-hidden="true"
+      />
       <strong>No connections yet</strong>
       <span>Connections and saved queries you create appear here, in folders you choose.</span>
     </div>
@@ -1033,6 +1056,29 @@ function objectTitle(node: ObjNode): string | undefined {
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
+}
+
+.empty-mark {
+  margin-bottom: 6px;
+}
+
+/* The text follows the drawing rings 80ms later; it only fades, also with reduced motion. */
+.empty.drawing strong,
+.empty.drawing span {
+  animation: empty-text-in var(--dur-fast) var(--ease-out) 80ms both;
+}
+
+@keyframes empty-text-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty.drawing strong,
+  .empty.drawing span {
+    animation-delay: 0ms;
+  }
 }
 
 .tree {

@@ -6,5 +6,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Stylesheets stay empty in tests, except when a test reads one as text (`?raw`).
+    css: { include: [/\.css\?raw$/] },
   },
 });

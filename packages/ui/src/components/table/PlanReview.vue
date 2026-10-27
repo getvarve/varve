@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { useCrossFade } from '../../composables/useCrossFade';
 import Modal from '../common/Modal.vue';
 import type { PlanStep } from './planFlow';
 
@@ -7,7 +8,9 @@ import type { PlanStep } from './planFlow';
  * Shows the SQL the server planned for designer changes, step by step,
  * with warnings and what each step does to locks and transactions, and
  * applies them on request. The parent runs the apply and updates the
- * steps' statuses; this dialog only shows them.
+ * steps' statuses; this dialog only shows them. The steps settle in when
+ * they appear and cross-fade (120ms) when the planned SQL changes; status
+ * changes during the apply are not animated.
  */
 const props = defineProps<{
   /** Dialog title, for example "Save changes to public.orders". */
@@ -25,6 +28,9 @@ const emit = defineEmits<{ apply: []; close: [] }>();
 const pending = computed(() => props.steps.filter((s) => s.status === 'pending').length);
 const done = computed(() => props.steps.length > 0 && props.steps.every((s) => s.status === 'applied'));
 const destructive = computed(() => props.steps.some((s) => s.status === 'pending' && s.plan.destructive));
+
+const stepsEl = ref<HTMLElement | null>(null);
+useCrossFade(stepsEl, () => props.steps.map((s) => s.plan.statements.join(';\n')).join('\n\n'), 120);
 
 const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
   pending: { text: 'Not run yet', tone: 'tone-neutral' },
@@ -56,69 +62,75 @@ const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
       >
         {{ steps.length }} steps run one after another. A step that fails stops the rest; steps before it stay applied.
       </p>
-      <section
-        v-for="(step, i) in steps"
-        :key="step.planId"
-        class="step"
-        :aria-label="`Step ${i + 1}: ${step.label}`"
+      <div
+        v-if="steps.length > 0"
+        ref="stepsEl"
+        class="steps"
       >
-        <header class="step-head">
-          <span class="step-n mono">{{ i + 1 }}</span>
-          <span class="step-label">{{ step.label }}</span>
-          <span
-            v-if="step.plan.transactional"
-            class="pill tone-neutral"
-            title="Runs as one transaction: all statements or none"
-          >One transaction</span>
-          <span
-            v-else-if="step.plan.statements.length > 1"
-            class="pill tone-warning"
-            title="Statements run one by one; a failure leaves the ones before it applied"
-          >Statement by statement</span>
-          <span
-            v-if="step.plan.destructive"
-            class="pill tone-danger"
-          ><span class="dot" />Destructive</span>
-          <span class="spacer" />
-          <span
-            class="pill"
-            :class="STATUS[step.status].tone"
-          >{{ STATUS[step.status].text }}</span>
-        </header>
-        <pre
-          class="sql mono"
-          :aria-label="`SQL of step ${i + 1}`"
-        >{{ step.plan.statements.map((s) => `${s};`).join('\n') }}</pre>
-        <ul
-          v-if="step.notes.length > 0"
-          class="notice tone-danger notes"
-          role="note"
+        <section
+          v-for="(step, i) in steps"
+          :key="step.planId"
+          class="step"
+          :aria-label="`Step ${i + 1}: ${step.label}`"
         >
-          <li
-            v-for="n in step.notes"
-            :key="n"
+          <header class="step-head">
+            <span class="step-n mono">{{ i + 1 }}</span>
+            <span class="step-label">{{ step.label }}</span>
+            <span
+              v-if="step.plan.transactional"
+              class="pill tone-neutral"
+              title="Runs as one transaction: all statements or none"
+            >One transaction</span>
+            <span
+              v-else-if="step.plan.statements.length > 1"
+              class="pill tone-warning"
+              title="Statements run one by one; a failure leaves the ones before it applied"
+            >Statement by statement</span>
+            <span
+              v-if="step.plan.destructive"
+              class="pill tone-danger"
+            ><span class="dot" />Destructive</span>
+            <span class="spacer" />
+            <span
+              class="pill"
+              :class="STATUS[step.status].tone"
+            >{{ STATUS[step.status].text }}</span>
+          </header>
+          <pre
+            class="sql mono"
+            :aria-label="`SQL of step ${i + 1}`"
+          >{{ step.plan.statements.map((s) => `${s};`).join('\n') }}</pre>
+          <ul
+            v-if="step.notes.length > 0"
+            class="notice tone-danger notes"
+            role="note"
           >
-            {{ n }}
-          </li>
-        </ul>
-        <ul
-          v-if="step.plan.warnings.length > 0"
-          class="warnings"
-        >
-          <li
-            v-for="w in step.plan.warnings"
-            :key="w"
+            <li
+              v-for="n in step.notes"
+              :key="n"
+            >
+              {{ n }}
+            </li>
+          </ul>
+          <ul
+            v-if="step.plan.warnings.length > 0"
+            class="warnings"
           >
-            {{ w }}
-          </li>
-        </ul>
-        <p
-          v-if="step.error"
-          class="notice tone-danger"
-        >
-          {{ step.error }}
-        </p>
-      </section>
+            <li
+              v-for="w in step.plan.warnings"
+              :key="w"
+            >
+              {{ w }}
+            </li>
+          </ul>
+          <p
+            v-if="step.error"
+            class="notice tone-danger"
+          >
+            {{ step.error }}
+          </p>
+        </section>
+      </div>
     </div>
 
     <template #footer>
@@ -156,9 +168,37 @@ const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
 }
 
 .review {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: plan-in 180ms var(--ease-out);
+}
+
+@keyframes plan-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes plan-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: a short fade only, no movement. The cross-fade is opacity only. */
+@media (prefers-reduced-motion: reduce) {
+  .steps {
+    animation-name: plan-fade-in;
+  }
 }
 
 .lede {

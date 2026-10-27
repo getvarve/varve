@@ -3,14 +3,30 @@ import { useToasts } from '../../composables/useToasts';
 import Icon from './Icon.vue';
 
 const { toasts, dismiss } = useToasts();
+
+/**
+ * A leaving toast is taken out of the flow so the others can slide into its
+ * place. The stack is anchored to the bottom, so pin it by its bottom edge
+ * where it is now instead of letting it jump to the top of the stack.
+ */
+function pinLeaving(el: Element): void {
+  if (!(el instanceof HTMLElement) || !(el.offsetParent instanceof HTMLElement)) return;
+  const stack = el.offsetParent;
+  el.style.width = `${el.offsetWidth}px`;
+  el.style.left = `${el.offsetLeft}px`;
+  el.style.bottom = `${stack.clientHeight - el.offsetTop - el.offsetHeight}px`;
+}
 </script>
 
 <template>
-  <div
+  <TransitionGroup
+    tag="div"
+    name="toast"
     class="toasts"
     role="region"
     aria-label="Notifications"
     aria-live="polite"
+    @before-leave="pinLeaving"
   >
     <div
       v-for="t in toasts"
@@ -32,7 +48,7 @@ const { toasts, dismiss } = useToasts();
         <Icon name="close" />
       </button>
     </div>
-  </div>
+  </TransitionGroup>
 </template>
 
 <style scoped>
@@ -58,6 +74,47 @@ const { toasts, dismiss } = useToasts();
   background: var(--surface);
   box-shadow: var(--shadow-dialog);
   pointer-events: auto;
+}
+
+.toast-enter-active {
+  transition:
+    opacity 200ms var(--ease-out),
+    transform 200ms var(--ease-out);
+}
+
+.toast-leave-active {
+  position: absolute;
+  transition:
+    opacity var(--dur-fast) ease-in,
+    transform var(--dur-fast) ease-in;
+  pointer-events: none;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.toast-move {
+  transition: transform 200ms var(--ease-out);
+}
+
+/* Reduced motion: a short fade only, no sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active,
+  .toast-leave-active {
+    transition: opacity var(--dur-fast) ease-out;
+  }
+
+  .toast-enter-from,
+  .toast-leave-to {
+    transform: none;
+  }
+
+  .toast-move {
+    transition: none;
+  }
 }
 
 .edge-success {

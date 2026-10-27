@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue';
+import { leaveCopy } from '../../lib/motion';
 import Icon from './Icon.vue';
 
 /**
  * A modal dialog: focus moves into it, Tab and Shift+Tab stay inside it,
  * Escape closes it, and focus returns to where it was when it closes.
+ * It fades and scales in; on close an inert copy fades out (120ms, opacity
+ * only) while focus already moves back, so closing never waits.
  */
 withDefaults(
   defineProps<{ title: string; width?: number; role?: 'dialog' | 'alertdialog'; describedBy?: string }>(),
@@ -13,7 +16,11 @@ withDefaults(
 const emit = defineEmits<{ close: [] }>();
 
 const titleId = useId();
+const backdrop = ref<HTMLElement | null>(null);
 const panel = ref<HTMLElement | null>(null);
+
+/** Length of the closing fade, in ms. */
+const CLOSE_MS = 120;
 let previous: Element | null = null;
 
 const FOCUSABLE =
@@ -57,6 +64,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  if (backdrop.value) leaveCopy(backdrop.value, CLOSE_MS, (copy) => document.body.append(copy));
   if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
 });
 
@@ -64,7 +72,10 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="backdrop">
+    <div
+      ref="backdrop"
+      class="backdrop"
+    >
       <div
         ref="panel"
         class="panel"
@@ -120,6 +131,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   padding: 24px;
   background: var(--backdrop);
+  animation: backdrop-in var(--dur-fast) var(--ease-out);
 }
 
 .panel {
@@ -131,6 +143,33 @@ onBeforeUnmount(() => {
   background: var(--surface);
   box-shadow: var(--shadow-dialog);
   outline: none;
+  animation: panel-in 200ms var(--ease-out);
+}
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes panel-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: the panel fades in without scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation-name: panel-fade-in;
+  }
 }
 
 .head {

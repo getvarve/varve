@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { MenuItem, MenuLeaf } from '../../lib/menu';
 
 /**
  * A context menu at a point, with arrow-key navigation. Closing returns
  * focus to the opener. An entry with `children` opens a submenu (hover,
  * click, Enter or ArrowRight); ArrowLeft or Escape closes it again.
+ * The menu grows in from the point it was opened at; submenus and closing
+ * are not animated.
  */
 const props = defineProps<{ items: MenuItem[]; x: number; y: number; label: string }>();
 const emit = defineEmits<{ select: [id: string]; close: [] }>();
@@ -17,6 +19,9 @@ const openSub = ref<string | null>(null);
 /** Where the open submenu sits: flipped to the left and moved up when it would leave the window. */
 const subPlacement = ref({ flip: false, shift: 0 });
 let opener: Element | null = null;
+
+/** The opening point inside the menu, so it grows from where it was asked for even when moved to fit the window. */
+const origin = computed(() => `${props.x - position.value.left}px ${props.y - position.value.top}px`);
 
 /** The enabled entries of the (sub)menu that holds `from`, in order. */
 function buttons(from: Element | null = document.activeElement): HTMLButtonElement[] {
@@ -37,6 +42,28 @@ function subButton(id: string): HTMLButtonElement | null {
   return menu.value?.querySelector<HTMLButtonElement>(`button[data-sub="${CSS.escape(id)}"]`) ?? null;
 }
 
+/**
+ * Right and bottom edge of `el` in the window from layout offsets, not the
+ * bounding box: while the menu still grows in, its scale would make the box
+ * look smaller than it ends up.
+ */
+function layoutEdges(el: HTMLElement): { right: number; bottom: number } {
+  let left = 0;
+  let top = 0;
+  let node: HTMLElement | null = el;
+  while (node && node !== menu.value) {
+    left += node.offsetLeft;
+    top += node.offsetTop;
+    const parent: HTMLElement | null = node.offsetParent instanceof HTMLElement ? node.offsetParent : null;
+    if (parent) {
+      left += parent.clientLeft;
+      top += parent.clientTop;
+    }
+    node = parent;
+  }
+  return { right: position.value.left + left + el.offsetWidth, bottom: position.value.top + top + el.offsetHeight };
+}
+
 async function showSub(item: MenuItem, focusFirst: boolean): Promise<void> {
   if (item.disabled || !item.children) return;
   if (openSub.value !== item.id) {
@@ -44,11 +71,11 @@ async function showSub(item: MenuItem, focusFirst: boolean): Promise<void> {
     subPlacement.value = { flip: false, shift: 0 };
     await nextTick();
     const sub = menu.value?.querySelector<HTMLElement>('.submenu');
-    const rect = sub?.getBoundingClientRect();
-    if (rect) {
+    if (sub) {
+      const edges = layoutEdges(sub);
       subPlacement.value = {
-        flip: rect.right > window.innerWidth - 4,
-        shift: Math.min(0, window.innerHeight - 4 - rect.bottom),
+        flip: edges.right > window.innerWidth - 4,
+        shift: Math.min(0, window.innerHeight - 4 - edges.bottom),
       };
     }
   }
@@ -115,11 +142,12 @@ onMounted(async () => {
   opener = document.activeElement;
   document.addEventListener('pointerdown', onPointerDown, true);
   await nextTick();
-  const rect = menu.value?.getBoundingClientRect();
-  if (rect) {
+  // Layout size, not the bounding box: the opening scale must not shrink the measure.
+  const el = menu.value;
+  if (el) {
     position.value = {
-      left: Math.max(4, Math.min(props.x, window.innerWidth - rect.width - 4)),
-      top: Math.max(4, Math.min(props.y, window.innerHeight - rect.height - 4)),
+      left: Math.max(4, Math.min(props.x, window.innerWidth - el.offsetWidth - 4)),
+      top: Math.max(4, Math.min(props.y, window.innerHeight - el.offsetHeight - 4)),
     };
   }
   buttons(menu.value)[0]?.focus();
@@ -135,10 +163,10 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div
       ref="menu"
-      class="menu"
+      class="menu root"
       role="menu"
       :aria-label="label"
-      :style="{ left: `${position.left}px`, top: `${position.top}px` }"
+      :style="{ left: `${position.left}px`, top: `${position.top}px`, transformOrigin: origin }"
       @keydown="onKeydown"
     >
       <template
@@ -231,6 +259,30 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-panel);
   background: var(--surface);
   box-shadow: var(--shadow-dialog);
+}
+
+.root {
+  animation: menu-in 120ms var(--ease-out);
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes menu-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: a short fade only, no scaling. */
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    animation-name: menu-fade-in;
+  }
 }
 
 .sub {

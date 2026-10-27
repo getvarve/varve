@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { Engine } from '../../api/records';
+import { useCrossFade } from '../../composables/useCrossFade';
+import { stepsSql } from '../../lib/ddlApply';
 import PlanPreview from './PlanPreview.vue';
 import type { ChangePlan } from './useChangePlan';
 
@@ -8,7 +10,8 @@ import type { ChangePlan } from './useChangePlan';
  * The plan preview of an editor in its two modes: saving the form, or
  * dropping the object (with CASCADE where the engine and kind have it).
  * The `drop` slot shows what the drop affects (`DropImpactPanel.vue`) and
- * drop options of the kind.
+ * drop options of the kind. The preview settles in when it appears and
+ * cross-fades (120ms) when the planned SQL changes.
  */
 const props = withDefaults(
   defineProps<{
@@ -37,6 +40,10 @@ const label = computed(() => {
   if (props.saveLabel) return props.saveLabel;
   return props.creating ? 'Create' : 'Save';
 });
+
+const preview = ref<InstanceType<typeof PlanPreview> | null>(null);
+const previewEl = computed(() => (preview.value?.$el instanceof HTMLElement ? preview.value.$el : null));
+useCrossFade(previewEl, () => stepsSql(props.plan.state.steps), 120);
 </script>
 
 <template>
@@ -69,6 +76,8 @@ const label = computed(() => {
       name="drop"
     />
     <PlanPreview
+      ref="preview"
+      class="plan-in"
       :plan="plan"
       :engine="engine"
       :read-only="readOnly"
@@ -84,9 +93,34 @@ const label = computed(() => {
 
 <style scoped>
 .panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.plan-in {
+  animation: plan-in 180ms var(--ease-out);
+}
+
+@keyframes plan-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes plan-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Reduced motion: a short fade only, no movement. The cross-fade is opacity only. */
+@media (prefers-reduced-motion: reduce) {
+  .plan-in {
+    animation-name: plan-fade-in;
+  }
 }
 
 .drop {

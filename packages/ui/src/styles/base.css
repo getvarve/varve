@@ -12,8 +12,14 @@
   background: var(--surface);
   color: var(--text);
   font-size: 13px;
+  position: relative;
   white-space: nowrap;
   cursor: pointer;
+  transition: transform 120ms var(--ease-out);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn:hover:not(:disabled) {
@@ -84,8 +90,26 @@
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
+  position: relative;
   color: var(--text-muted);
   cursor: pointer;
+  transition: transform 120ms var(--ease-out);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/*
+ * The press scale must not shrink the hit area: while pressed, an invisible
+ * layer reaches 2% past each edge (more than the 1.5% the scale takes away),
+ * so a release near the edge still lands on the button and the click counts.
+ */
+.btn:active:not(:disabled)::after,
+.icon-btn:active:not(:disabled)::after {
+  content: '';
+  position: absolute;
+  inset: -2%;
 }
 
 .icon-btn:hover:not(:disabled) {
@@ -319,4 +343,29 @@
   .switch::after {
     transition: none;
   }
+
+  /* Pressed buttons keep their size: no movement with reduced motion. */
+  .btn,
+  .icon-btn {
+    transition: none;
+  }
+
+  .btn:active:not(:disabled),
+  .icon-btn:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/*
+ * Fading copies left by lib/motion.ts (dialog close, plan cross-fade). The copy
+ * only fades as a whole: CSS animations and transitions inside it stay off so
+ * it does not replay the entrance of what it copies (lib/motion.ts freezes a
+ * running entrance at its current state instead), and no part of it can take
+ * a click, whatever its own pointer-events say.
+ */
+.motion-copy,
+.motion-copy * {
+  animation: none !important;
+  transition: none !important;
+  pointer-events: none !important;
 }
