@@ -1,0 +1,13 @@
+[package]
+name = "varve-redis-syntax"
+description = "Redis console syntax (redis-cli compatible argument splitting) shared by the Varve Redis driver and the activity redactor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

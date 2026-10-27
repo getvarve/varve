@@ -1,0 +1,77 @@
+# TLS-only Redis and Valkey servers for `tests/tls_prefer.rs`. The test generates a CA
+# and a server certificate with rcgen, writes them to a temporary directory,
+# starts this file with VARVE_REDIS_TLS_DIR pointing at it, and tears it
+# down again.
+#
+# Both servers listen only on their TLS port (`--port 0`), so a session that
+# connects at all speaks TLS. The server certificate is issued for
+# db.varve.invalid only, so it does not match 127.0.0.1.
+#
+# Host ports are picked by Docker (the test asks `docker compose port`), and
+# the compose project name carries the test's process id, so parallel runs
+# do not collide.
+#
+# Credentials are local test values only.
+
+x-redis-tls: &redis-tls
+  volumes: ["${VARVE_REDIS_TLS_DIR:?set by tests/tls_prefer.rs}:/certs:ro"]
+  command:
+    - redis-server
+    - --port
+    - "0"
+    - --tls-port
+    - "6379"
+    - --tls-cert-file
+    - /certs/server-cert.pem
+    - --tls-key-file
+    - /certs/server-key.pem
+    - --tls-ca-cert-file
+    - /certs/ca.pem
+    - --tls-auth-clients
+    - "no"
+    - --requirepass
+    - varve_dev
+    - --save
+    - ""
+  healthcheck:
+    test: ["CMD-SHELL", "redis-cli --tls --insecure -a varve_dev --no-auth-warning ping | grep PONG"]
+    interval: 1s
+    timeout: 3s
+    retries: 30
+
+services:
+  redis-6.2:
+    <<: *redis-tls
+    image: redis:6.2-alpine
+    ports: ["127.0.0.1::6379"]
+  redis-8.10:
+    <<: *redis-tls
+    image: redis:8.10-alpine
+    ports: ["127.0.0.1::6379"]
+  valkey-9:
+    <<: *redis-tls
+    image: valkey/valkey:9-alpine
+    command:
+      - valkey-server
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /certs/server-cert.pem
+      - --tls-key-file
+      - /certs/server-key.pem
+      - --tls-ca-cert-file
+      - /certs/ca.pem
+      - --tls-auth-clients
+      - "no"
+      - --requirepass
+      - varve_dev
+      - --save
+      - ""
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli --tls --insecure -a varve_dev --no-auth-warning ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    ports: ["127.0.0.1::6379"]

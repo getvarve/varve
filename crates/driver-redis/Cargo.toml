@@ -10,6 +10,25 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+varve-core.workspace = true
+varve-driver.workspace = true
+varve-secrets.workspace = true
+varve-redis-syntax.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "time", "rt", "io-util"] }
+tracing.workspace = true
+redis = { version = "1.7.1", default-features = false, features = ["tokio-comp"] }
+rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
+rustls-native-certs = "0.8.5"
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["logging", "tls12", "ring"] }
+
+[dev-dependencies]
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "io-util"] }
+# Encrypting the client keys of tests/client_key.rs.
+pkcs8 = { version = "0.11.0", default-features = false, features = ["std", "encryption", "pem"] }
 
 [lints]
 workspace = true
