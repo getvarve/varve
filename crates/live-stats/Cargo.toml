@@ -1,6 +1,6 @@
 [package]
 name = "varve-live-stats"
-description = "Live server status for Varve."
+description = "Current server status for Varve: process lists, server variables, cluster status and Redis server panels. No history (that is a closed feature)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,23 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+varve-core.workspace = true
+varve-driver.workspace = true
+varve-catalog = { path = "../catalog" }
+varve-activity = { path = "../activity" }
+varve-redis-syntax.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+varve-driver-postgres = { path = "../driver-postgres" }
+varve-driver-mysql = { path = "../driver-mysql" }
+varve-driver-redis = { path = "../driver-redis" }
+varve-secrets.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
 
 [lints]
 workspace = true

@@ -1,0 +1,9774 @@
+{
+ "CLIENT ID": {
+  "columns": [
+   {
+    "name": "integer",
+    "typeName": "integer"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 291
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "CLIENT LIST": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "id=291 addr=10.0.0.2:58270 laddr=10.0.0.2:6379 fd=20 name=m2_redislive_capture age=0 idle=0 flags=N db=10 sub=0 psub=0 ssub=0 multi=-1 watch=0 qbuf=26 qbuf-free=20448 argv-mem=10 multi-mem=0 rbs=16384 rbp=843 obl=0 oll=0 omem=0 omem-shared=0 omem-unshared=0 tot-mem=38170 events=r cmd=client|list user=default redir=-1 resp=2 lib-name=varve lib-ver=0.0.3 io-thread=0 tot-net-in=1313 tot-net-out=2185 tot-cmds=27 read-events=26 avg-pipeline-len-sum=28 avg-pipeline-len-cnt=28\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "CLUSTER NODES": {
+  "code": "ERR",
+  "error": "ERR This instance has cluster support disabled"
+ },
+ "CLUSTER SHARDS": {
+  "code": "ERR",
+  "error": "ERR This instance has cluster support disabled"
+ },
+ "CONFIG GET *": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-bus-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "text",
+     "v": "search-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 4
+    },
+    {
+     "t": "text",
+     "v": "500"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 5
+    },
+    {
+     "t": "text",
+     "v": "cluster-slave-no-failover"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 6
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 7
+    },
+    {
+     "t": "text",
+     "v": "dbfilename"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 8
+    },
+    {
+     "t": "text",
+     "v": "dump.rdb"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 9
+    },
+    {
+     "t": "text",
+     "v": "no-appendfsync-on-rewrite"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 10
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 11
+    },
+    {
+     "t": "text",
+     "v": "tls-cert-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 12
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 13
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-human-nodename"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 14
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 15
+    },
+    {
+     "t": "text",
+     "v": "search-fork-gc-sleep-before-exit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 16
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 17
+    },
+    {
+     "t": "text",
+     "v": "oom-score-adj"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 18
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 19
+    },
+    {
+     "t": "text",
+     "v": "dynamic-hz"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 20
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 21
+    },
+    {
+     "t": "text",
+     "v": "stream-idmp-duration"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 22
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 23
+    },
+    {
+     "t": "text",
+     "v": "search-workers"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 24
+    },
+    {
+     "t": "text",
+     "v": "12"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 25
+    },
+    {
+     "t": "text",
+     "v": "hz"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 26
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 27
+    },
+    {
+     "t": "text",
+     "v": "hll-sparse-max-bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 28
+    },
+    {
+     "t": "text",
+     "v": "3000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 29
+    },
+    {
+     "t": "text",
+     "v": "protected-mode"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 30
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 31
+    },
+    {
+     "t": "text",
+     "v": "syslog-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 32
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 33
+    },
+    {
+     "t": "text",
+     "v": "cf-bucket-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 34
+    },
+    {
+     "t": "text",
+     "v": "2"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 35
+    },
+    {
+     "t": "text",
+     "v": "server-cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 36
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 37
+    },
+    {
+     "t": "text",
+     "v": "unixsocketperm"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 38
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 39
+    },
+    {
+     "t": "text",
+     "v": "requirepass"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 40
+    },
+    {
+     "t": "text",
+     "v": "fixture-secret"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 41
+    },
+    {
+     "t": "text",
+     "v": "appendonly"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 42
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 43
+    },
+    {
+     "t": "text",
+     "v": "enable-protected-configs"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 44
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 45
+    },
+    {
+     "t": "text",
+     "v": "proc-title-template"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 46
+    },
+    {
+     "t": "text",
+     "v": "{title} {listen-addr} {server-mode}"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 47
+    },
+    {
+     "t": "text",
+     "v": "cluster-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 48
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 49
+    },
+    {
+     "t": "text",
+     "v": "hide-user-data-from-log"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 50
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 51
+    },
+    {
+     "t": "text",
+     "v": "slowlog-entry-max-string-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 52
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 53
+    },
+    {
+     "t": "text",
+     "v": "ts-duplicate-policy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 54
+    },
+    {
+     "t": "text",
+     "v": "block"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 55
+    },
+    {
+     "t": "text",
+     "v": "slowlog-entry-max-argc"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 56
+    },
+    {
+     "t": "text",
+     "v": "32"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 57
+    },
+    {
+     "t": "text",
+     "v": "masteruser"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 58
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 59
+    },
+    {
+     "t": "text",
+     "v": "bind-source-addr"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 60
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 61
+    },
+    {
+     "t": "text",
+     "v": "crash-log-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 62
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 63
+    },
+    {
+     "t": "text",
+     "v": "bgsave_cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 64
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 65
+    },
+    {
+     "t": "text",
+     "v": "latency-monitor-threshold"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 66
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 67
+    },
+    {
+     "t": "text",
+     "v": "array-slice-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 68
+    },
+    {
+     "t": "text",
+     "v": "4096"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 69
+    },
+    {
+     "t": "text",
+     "v": "databases"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 70
+    },
+    {
+     "t": "text",
+     "v": "16"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 71
+    },
+    {
+     "t": "text",
+     "v": "search-max-search-results"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 72
+    },
+    {
+     "t": "text",
+     "v": "1000000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 73
+    },
+    {
+     "t": "text",
+     "v": "search-multi-text-slop"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 74
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 75
+    },
+    {
+     "t": "text",
+     "v": "search-_numeric-compress"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 76
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 77
+    },
+    {
+     "t": "text",
+     "v": "search-on-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 78
+    },
+    {
+     "t": "text",
+     "v": "return"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 79
+    },
+    {
+     "t": "text",
+     "v": "ts-libmr-protocol"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 80
+    },
+    {
+     "t": "text",
+     "v": "INTERNAL"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 81
+    },
+    {
+     "t": "text",
+     "v": "logfile"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 82
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 83
+    },
+    {
+     "t": "text",
+     "v": "bgsave-cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 84
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 85
+    },
+    {
+     "t": "text",
+     "v": "cluster-allow-replica-migration"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 86
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 87
+    },
+    {
+     "t": "text",
+     "v": "search-_min-trim-delay-ms"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 88
+    },
+    {
+     "t": "text",
+     "v": "2000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 89
+    },
+    {
+     "t": "text",
+     "v": "io-threads"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 90
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 91
+    },
+    {
+     "t": "text",
+     "v": "hash-max-listpack-value"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 92
+    },
+    {
+     "t": "text",
+     "v": "64"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 93
+    },
+    {
+     "t": "text",
+     "v": "cluster-slot-migration-handoff-max-lag-bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 94
+    },
+    {
+     "t": "text",
+     "v": "1048576"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 95
+    },
+    {
+     "t": "text",
+     "v": "min-slaves-to-write"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 96
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 97
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-max-scan-fields"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 98
+    },
+    {
+     "t": "text",
+     "v": "1000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 99
+    },
+    {
+     "t": "text",
+     "v": "cluster-migration-barrier"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 100
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 101
+    },
+    {
+     "t": "text",
+     "v": "always-show-logo"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 102
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 103
+    },
+    {
+     "t": "text",
+     "v": "search-vss-max-resize"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 104
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 105
+    },
+    {
+     "t": "text",
+     "v": "search-union-iterator-heap"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 106
+    },
+    {
+     "t": "text",
+     "v": "20"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 107
+    },
+    {
+     "t": "text",
+     "v": "list-max-ziplist-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 108
+    },
+    {
+     "t": "text",
+     "v": "-2"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 109
+    },
+    {
+     "t": "text",
+     "v": "shutdown-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 110
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 111
+    },
+    {
+     "t": "text",
+     "v": "tls-session-cache-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 112
+    },
+    {
+     "t": "text",
+     "v": "300"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 113
+    },
+    {
+     "t": "text",
+     "v": "tls-auth-clients"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 114
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 115
+    },
+    {
+     "t": "text",
+     "v": "repl-ping-slave-period"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 116
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 117
+    },
+    {
+     "t": "text",
+     "v": "search-indexer-yield-every-ops"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 118
+    },
+    {
+     "t": "text",
+     "v": "1000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 119
+    },
+    {
+     "t": "text",
+     "v": "slaveof"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 120
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 121
+    },
+    {
+     "t": "text",
+     "v": "cluster-preferred-endpoint-type"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 122
+    },
+    {
+     "t": "text",
+     "v": "ip"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 123
+    },
+    {
+     "t": "text",
+     "v": "ts-topology-events"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 124
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 125
+    },
+    {
+     "t": "text",
+     "v": "repl-diskless-load"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 126
+    },
+    {
+     "t": "text",
+     "v": "disabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 127
+    },
+    {
+     "t": "text",
+     "v": "lfu-log-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 128
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 129
+    },
+    {
+     "t": "text",
+     "v": "search-bm25std-tanh-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 130
+    },
+    {
+     "t": "text",
+     "v": "4"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 131
+    },
+    {
+     "t": "text",
+     "v": "cf-max-iterations"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 132
+    },
+    {
+     "t": "text",
+     "v": "20"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 133
+    },
+    {
+     "t": "text",
+     "v": "search-max-aggregate-groups"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 134
+    },
+    {
+     "t": "text",
+     "v": "1000000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 135
+    },
+    {
+     "t": "text",
+     "v": "aof-use-rdb-preamble"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 136
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 137
+    },
+    {
+     "t": "text",
+     "v": "tls-key-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 138
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 139
+    },
+    {
+     "t": "text",
+     "v": "rdb-del-sync-files"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 140
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 141
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-cycle-min"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 142
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 143
+    },
+    {
+     "t": "text",
+     "v": "disable-thp"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 144
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 145
+    },
+    {
+     "t": "text",
+     "v": "cluster-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 146
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 147
+    },
+    {
+     "t": "text",
+     "v": "tls-replication"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 148
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 149
+    },
+    {
+     "t": "text",
+     "v": "tracking-table-max-keys"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 150
+    },
+    {
+     "t": "text",
+     "v": "1000000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 151
+    },
+    {
+     "t": "text",
+     "v": "loglevel"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 152
+    },
+    {
+     "t": "text",
+     "v": "notice"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 153
+    },
+    {
+     "t": "text",
+     "v": "active-expire-effort"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 154
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 155
+    },
+    {
+     "t": "text",
+     "v": "search-_trimming-state-check-delay-ms"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 156
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 157
+    },
+    {
+     "t": "text",
+     "v": "tls-auth-clients-user"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 158
+    },
+    {
+     "t": "text",
+     "v": "off"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 159
+    },
+    {
+     "t": "text",
+     "v": "slowlog-log-slower-than"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 160
+    },
+    {
+     "t": "text",
+     "v": "10000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 161
+    },
+    {
+     "t": "text",
+     "v": "activedefrag"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 162
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 163
+    },
+    {
+     "t": "text",
+     "v": "search-no-gc"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 164
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 165
+    },
+    {
+     "t": "text",
+     "v": "supervised"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 166
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 167
+    },
+    {
+     "t": "text",
+     "v": "rdbchecksum"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 168
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 169
+    },
+    {
+     "t": "text",
+     "v": "maxmemory"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 170
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 171
+    },
+    {
+     "t": "text",
+     "v": "replica-ignore-disk-write-errors"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 172
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 173
+    },
+    {
+     "t": "text",
+     "v": "jemalloc-bg-thread"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 174
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 175
+    },
+    {
+     "t": "text",
+     "v": "hash-max-listpack-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 176
+    },
+    {
+     "t": "text",
+     "v": "512"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 177
+    },
+    {
+     "t": "text",
+     "v": "bf-error-rate"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 178
+    },
+    {
+     "t": "text",
+     "v": "0.01"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 179
+    },
+    {
+     "t": "text",
+     "v": "repl-diskless-sync-delay"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 180
+    },
+    {
+     "t": "text",
+     "v": "5"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 181
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-threshold-lower"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 182
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 183
+    },
+    {
+     "t": "text",
+     "v": "search-no-mem-pools"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 184
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 185
+    },
+    {
+     "t": "text",
+     "v": "tls-client-cert-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 186
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 187
+    },
+    {
+     "t": "text",
+     "v": "appendfsync"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 188
+    },
+    {
+     "t": "text",
+     "v": "everysec"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 189
+    },
+    {
+     "t": "text",
+     "v": "acllog-max-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 190
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 191
+    },
+    {
+     "t": "text",
+     "v": "dir"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 192
+    },
+    {
+     "t": "text",
+     "v": "/data"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 193
+    },
+    {
+     "t": "text",
+     "v": "lfu-decay-time"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 194
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 195
+    },
+    {
+     "t": "text",
+     "v": "cluster-allow-reads-when-down"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 196
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 197
+    },
+    {
+     "t": "text",
+     "v": "syslog-ident"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 198
+    },
+    {
+     "t": "text",
+     "v": "redis"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 199
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-ignore-bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 200
+    },
+    {
+     "t": "text",
+     "v": "104857600"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 201
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-tls-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 202
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 203
+    },
+    {
+     "t": "text",
+     "v": "maxclients"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 204
+    },
+    {
+     "t": "text",
+     "v": "10000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 205
+    },
+    {
+     "t": "text",
+     "v": "activerehashing"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 206
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 207
+    },
+    {
+     "t": "text",
+     "v": "hash-max-template-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 208
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 209
+    },
+    {
+     "t": "text",
+     "v": "zset-max-ziplist-value"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 210
+    },
+    {
+     "t": "text",
+     "v": "64"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 211
+    },
+    {
+     "t": "text",
+     "v": "lazyfree-lazy-eviction"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 212
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 213
+    },
+    {
+     "t": "text",
+     "v": "stream-node-max-bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 214
+    },
+    {
+     "t": "text",
+     "v": "4096"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 215
+    },
+    {
+     "t": "text",
+     "v": "locale-collate"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 216
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 217
+    },
+    {
+     "t": "text",
+     "v": "socket-mark-id"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 218
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 219
+    },
+    {
+     "t": "text",
+     "v": "shutdown-on-sigterm"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 220
+    },
+    {
+     "t": "text",
+     "v": "default"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 221
+    },
+    {
+     "t": "text",
+     "v": "syslog-facility"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 222
+    },
+    {
+     "t": "text",
+     "v": "local0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 223
+    },
+    {
+     "t": "text",
+     "v": "tls-ciphersuites"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 224
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 225
+    },
+    {
+     "t": "text",
+     "v": "repl-backlog-ttl"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 226
+    },
+    {
+     "t": "text",
+     "v": "3600"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 227
+    },
+    {
+     "t": "text",
+     "v": "search-tiered-hnsw-buffer-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 228
+    },
+    {
+     "t": "text",
+     "v": "1024"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 229
+    },
+    {
+     "t": "text",
+     "v": "cluster-replica-validity-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 230
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 231
+    },
+    {
+     "t": "text",
+     "v": "stop-writes-on-bgsave-error"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 232
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 233
+    },
+    {
+     "t": "text",
+     "v": "repl-diskless-sync-max-replicas"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 234
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 235
+    },
+    {
+     "t": "text",
+     "v": "key-memory-histograms"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 236
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 237
+    },
+    {
+     "t": "text",
+     "v": "tcp-keepalive"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 238
+    },
+    {
+     "t": "text",
+     "v": "300"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 239
+    },
+    {
+     "t": "text",
+     "v": "slave-lazy-flush"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 240
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 241
+    },
+    {
+     "t": "text",
+     "v": "search-cursor-max-idle"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 242
+    },
+    {
+     "t": "text",
+     "v": "300000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 243
+    },
+    {
+     "t": "text",
+     "v": "min-replicas-max-lag"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 244
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 245
+    },
+    {
+     "t": "text",
+     "v": "search-on-oom"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 246
+    },
+    {
+     "t": "text",
+     "v": "return"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 247
+    },
+    {
+     "t": "text",
+     "v": "replica-serve-stale-data"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 248
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 249
+    },
+    {
+     "t": "text",
+     "v": "slowlog-max-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 250
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 251
+    },
+    {
+     "t": "text",
+     "v": "ts-retention-policy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 252
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 253
+    },
+    {
+     "t": "text",
+     "v": "tls-prefer-server-ciphers"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 254
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 255
+    },
+    {
+     "t": "text",
+     "v": "latency-tracking-info-percentiles"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 256
+    },
+    {
+     "t": "text",
+     "v": "50 99 99.9"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 257
+    },
+    {
+     "t": "text",
+     "v": "max-new-connections-per-cycle"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 258
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 259
+    },
+    {
+     "t": "text",
+     "v": "search-index-cursor-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 260
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 261
+    },
+    {
+     "t": "text",
+     "v": "slave-ignore-maxmemory"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 262
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 263
+    },
+    {
+     "t": "text",
+     "v": "tls-ciphers"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 264
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 265
+    },
+    {
+     "t": "text",
+     "v": "replica-announce-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 266
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 267
+    },
+    {
+     "t": "text",
+     "v": "aof_rewrite_cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 268
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 269
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 270
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 271
+    },
+    {
+     "t": "text",
+     "v": "busy-reply-threshold"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 272
+    },
+    {
+     "t": "text",
+     "v": "5000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 273
+    },
+    {
+     "t": "text",
+     "v": "set-max-listpack-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 274
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 275
+    },
+    {
+     "t": "text",
+     "v": "replica-announced"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 276
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 277
+    },
+    {
+     "t": "text",
+     "v": "set-max-listpack-value"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 278
+    },
+    {
+     "t": "text",
+     "v": "64"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 279
+    },
+    {
+     "t": "text",
+     "v": "search-min-prefix"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 280
+    },
+    {
+     "t": "text",
+     "v": "2"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 281
+    },
+    {
+     "t": "text",
+     "v": "zset-max-ziplist-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 282
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 283
+    },
+    {
+     "t": "text",
+     "v": "aof-load-corrupt-tail-max-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 284
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 285
+    },
+    {
+     "t": "text",
+     "v": "ts-chunk-size-bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 286
+    },
+    {
+     "t": "text",
+     "v": "4096"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 287
+    },
+    {
+     "t": "text",
+     "v": "tcp-backlog"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 288
+    },
+    {
+     "t": "text",
+     "v": "511"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 289
+    },
+    {
+     "t": "text",
+     "v": "cluster-require-full-coverage"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 290
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 291
+    },
+    {
+     "t": "text",
+     "v": "cluster-allow-pubsubshard-when-down"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 292
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 293
+    },
+    {
+     "t": "text",
+     "v": "tls-key-file-pass"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 294
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 295
+    },
+    {
+     "t": "text",
+     "v": "search-fork-gc-clean-threshold"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 296
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 297
+    },
+    {
+     "t": "text",
+     "v": "aof-rewrite-incremental-fsync"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 298
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 299
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-cycle-max"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 300
+    },
+    {
+     "t": "text",
+     "v": "25"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 301
+    },
+    {
+     "t": "text",
+     "v": "replica-full-sync-buffer-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 302
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 303
+    },
+    {
+     "t": "text",
+     "v": "notify-keyspace-events"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 304
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 305
+    },
+    {
+     "t": "text",
+     "v": "bf-initial-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 306
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 307
+    },
+    {
+     "t": "text",
+     "v": "latency-tracking"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 308
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 309
+    },
+    {
+     "t": "text",
+     "v": "cluster-slot-stats-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 310
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 311
+    },
+    {
+     "t": "text",
+     "v": "masterauth"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 312
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 313
+    },
+    {
+     "t": "text",
+     "v": "aclfile"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 314
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 315
+    },
+    {
+     "t": "text",
+     "v": "set-max-intset-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 316
+    },
+    {
+     "t": "text",
+     "v": "512"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 317
+    },
+    {
+     "t": "text",
+     "v": "search-min-stem-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 318
+    },
+    {
+     "t": "text",
+     "v": "4"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 319
+    },
+    {
+     "t": "text",
+     "v": "search-partial-indexed-docs"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 320
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 321
+    },
+    {
+     "t": "text",
+     "v": "bio-cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 322
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 323
+    },
+    {
+     "t": "text",
+     "v": "lazyfree-lazy-expire"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 324
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 325
+    },
+    {
+     "t": "text",
+     "v": "proto-max-bulk-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 326
+    },
+    {
+     "t": "text",
+     "v": "536870912"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 327
+    },
+    {
+     "t": "text",
+     "v": "backupdirname"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 328
+    },
+    {
+     "t": "text",
+     "v": "backupdir"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 329
+    },
+    {
+     "t": "text",
+     "v": "search-_max-trim-delay-ms"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 330
+    },
+    {
+     "t": "text",
+     "v": "5000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 331
+    },
+    {
+     "t": "text",
+     "v": "search-gc-scan-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 332
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 333
+    },
+    {
+     "t": "text",
+     "v": "auto-aof-rewrite-percentage"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 334
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 335
+    },
+    {
+     "t": "text",
+     "v": "slave-announce-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 336
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 337
+    },
+    {
+     "t": "text",
+     "v": "tls-ca-cert-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 338
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 339
+    },
+    {
+     "t": "text",
+     "v": "replica-ignore-maxmemory"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 340
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 341
+    },
+    {
+     "t": "text",
+     "v": "replica-read-only"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 342
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 343
+    },
+    {
+     "t": "text",
+     "v": "search-_info-on-zero-indexes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 344
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 345
+    },
+    {
+     "t": "text",
+     "v": "appendfilename"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 346
+    },
+    {
+     "t": "text",
+     "v": "appendonly.aof"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 347
+    },
+    {
+     "t": "text",
+     "v": "search-_max-foreground-timeout-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 348
+    },
+    {
+     "t": "text",
+     "v": "60000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 349
+    },
+    {
+     "t": "text",
+     "v": "search-friso-ini"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 350
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 351
+    },
+    {
+     "t": "text",
+     "v": "search-disk-buffer-percentage"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 352
+    },
+    {
+     "t": "text",
+     "v": "20"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 353
+    },
+    {
+     "t": "text",
+     "v": "search-workers-priority-bias-threshold"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 354
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 355
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-eviction-tenacity"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 356
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 357
+    },
+    {
+     "t": "text",
+     "v": "acl-pubsub-default"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 358
+    },
+    {
+     "t": "text",
+     "v": "resetchannels"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 359
+    },
+    {
+     "t": "text",
+     "v": "search-default-scorer"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 360
+    },
+    {
+     "t": "text",
+     "v": "BM25STD"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 361
+    },
+    {
+     "t": "text",
+     "v": "cf-expansion-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 362
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 363
+    },
+    {
+     "t": "text",
+     "v": "tls-expected-peer-name"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 364
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 365
+    },
+    {
+     "t": "text",
+     "v": "lazyfree-lazy-user-del"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 366
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 367
+    },
+    {
+     "t": "text",
+     "v": "search-disk-drop-read-cache"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 368
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 369
+    },
+    {
+     "t": "text",
+     "v": "repl-disable-tcp-nodelay"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 370
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 371
+    },
+    {
+     "t": "text",
+     "v": "bf-expansion-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 372
+    },
+    {
+     "t": "text",
+     "v": "2"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 373
+    },
+    {
+     "t": "text",
+     "v": "repl-diskless-sync"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 374
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 375
+    },
+    {
+     "t": "text",
+     "v": "hash-rdb-load-template-disassembly-threshold"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 376
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 377
+    },
+    {
+     "t": "text",
+     "v": "search-min-operation-workers"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 378
+    },
+    {
+     "t": "text",
+     "v": "4"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 379
+    },
+    {
+     "t": "text",
+     "v": "array-sparse-kmin"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 380
+    },
+    {
+     "t": "text",
+     "v": "5"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 381
+    },
+    {
+     "t": "text",
+     "v": "auto-aof-rewrite-min-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 382
+    },
+    {
+     "t": "text",
+     "v": "67108864"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 383
+    },
+    {
+     "t": "text",
+     "v": "client-output-buffer-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 384
+    },
+    {
+     "t": "text",
+     "v": "normal 0 0 0 slave 268435456 67108864 60 pubsub 33554432 8388608 60"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 385
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-ip"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 386
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 387
+    },
+    {
+     "t": "text",
+     "v": "repl-ping-replica-period"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 388
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 389
+    },
+    {
+     "t": "text",
+     "v": "search-fork-gc-run-interval"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 390
+    },
+    {
+     "t": "text",
+     "v": "30"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 391
+    },
+    {
+     "t": "text",
+     "v": "lua-time-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 392
+    },
+    {
+     "t": "text",
+     "v": "5000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 393
+    },
+    {
+     "t": "text",
+     "v": "pidfile"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 394
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 395
+    },
+    {
+     "t": "text",
+     "v": "daemonize"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 396
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 397
+    },
+    {
+     "t": "text",
+     "v": "active-defrag-threshold-upper"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 398
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 399
+    },
+    {
+     "t": "text",
+     "v": "cluster-node-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 400
+    },
+    {
+     "t": "text",
+     "v": "15000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 401
+    },
+    {
+     "t": "text",
+     "v": "ignore-warnings"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 402
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 403
+    },
+    {
+     "t": "text",
+     "v": "search-_numeric-ranges-parents"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 404
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 405
+    },
+    {
+     "t": "text",
+     "v": "set-proc-title"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 406
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 407
+    },
+    {
+     "t": "text",
+     "v": "replica-lazy-flush"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 408
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 409
+    },
+    {
+     "t": "text",
+     "v": "bind"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 410
+    },
+    {
+     "t": "text",
+     "v": "* -::*"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 411
+    },
+    {
+     "t": "text",
+     "v": "cf-max-expansions"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 412
+    },
+    {
+     "t": "text",
+     "v": "32"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 413
+    },
+    {
+     "t": "text",
+     "v": "search-_prioritize-intersect-union-children"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 414
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 415
+    },
+    {
+     "t": "text",
+     "v": "ts-ignore-max-time-diff"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 416
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 417
+    },
+    {
+     "t": "text",
+     "v": "ts-compaction-policy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 418
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 419
+    },
+    {
+     "t": "text",
+     "v": "server_cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 420
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 421
+    },
+    {
+     "t": "text",
+     "v": "rdb-save-incremental-fsync"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 422
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 423
+    },
+    {
+     "t": "text",
+     "v": "search-bg-index-sleep-duration-us"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 424
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 425
+    },
+    {
+     "t": "text",
+     "v": "enable-debug-command"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 426
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 427
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-policy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 428
+    },
+    {
+     "t": "text",
+     "v": "noeviction"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 429
+    },
+    {
+     "t": "text",
+     "v": "tls-client-key-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 430
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 431
+    },
+    {
+     "t": "text",
+     "v": "min-replicas-to-write"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 432
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 433
+    },
+    {
+     "t": "text",
+     "v": "replica-announce-ip"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 434
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 435
+    },
+    {
+     "t": "text",
+     "v": "cf-initial-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 436
+    },
+    {
+     "t": "text",
+     "v": "1024"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 437
+    },
+    {
+     "t": "text",
+     "v": "list-compress-depth"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 438
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 439
+    },
+    {
+     "t": "text",
+     "v": "ts-encoding"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 440
+    },
+    {
+     "t": "text",
+     "v": "compressed"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 441
+    },
+    {
+     "t": "text",
+     "v": "search-max-doctablesize"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 442
+    },
+    {
+     "t": "text",
+     "v": "1000000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 443
+    },
+    {
+     "t": "text",
+     "v": "port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 444
+    },
+    {
+     "t": "text",
+     "v": "6379"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 445
+    },
+    {
+     "t": "text",
+     "v": "search-_simulate-in-flex"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 446
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 447
+    },
+    {
+     "t": "text",
+     "v": "stream-idmp-maxsize"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 448
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 449
+    },
+    {
+     "t": "text",
+     "v": "tls-dh-params-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 450
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 451
+    },
+    {
+     "t": "text",
+     "v": "search-monitor-expiration"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 452
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 453
+    },
+    {
+     "t": "text",
+     "v": "cluster-slot-migration-write-pause-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 454
+    },
+    {
+     "t": "text",
+     "v": "10000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 455
+    },
+    {
+     "t": "text",
+     "v": "lookahead"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 456
+    },
+    {
+     "t": "text",
+     "v": "16"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 457
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-samples"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 458
+    },
+    {
+     "t": "text",
+     "v": "5"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 459
+    },
+    {
+     "t": "text",
+     "v": "repl-timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 460
+    },
+    {
+     "t": "text",
+     "v": "60"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 461
+    },
+    {
+     "t": "text",
+     "v": "search-_bg-index-oom-pause-time"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 462
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 463
+    },
+    {
+     "t": "text",
+     "v": "vset-force-single-threaded-execution"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 464
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 465
+    },
+    {
+     "t": "text",
+     "v": "search-default-dialect"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 466
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 467
+    },
+    {
+     "t": "text",
+     "v": "shutdown-on-sigint"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 468
+    },
+    {
+     "t": "text",
+     "v": "default"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 469
+    },
+    {
+     "t": "text",
+     "v": "ts-ignore-max-val-diff"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 470
+    },
+    {
+     "t": "text",
+     "v": "0.000000"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 471
+    },
+    {
+     "t": "text",
+     "v": "search-_fallback-to-main-thread-when-block-client-unavailable"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 472
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 473
+    },
+    {
+     "t": "text",
+     "v": "lazyfree-lazy-user-flush"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 474
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 475
+    },
+    {
+     "t": "text",
+     "v": "repl-backlog-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 476
+    },
+    {
+     "t": "text",
+     "v": "1048576"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 477
+    },
+    {
+     "t": "text",
+     "v": "slave-read-only"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 478
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 479
+    },
+    {
+     "t": "text",
+     "v": "search-max-prefix-expansions"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 480
+    },
+    {
+     "t": "text",
+     "v": "200"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 481
+    },
+    {
+     "t": "text",
+     "v": "search-max-aggregate-results"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 482
+    },
+    {
+     "t": "text",
+     "v": "2147483648"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 483
+    },
+    {
+     "t": "text",
+     "v": "search-_bg-index-mem-pct-thr"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 484
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 485
+    },
+    {
+     "t": "text",
+     "v": "slave-priority"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 486
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 487
+    },
+    {
+     "t": "text",
+     "v": "search-fork-gc-retry-interval"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 488
+    },
+    {
+     "t": "text",
+     "v": "5"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 489
+    },
+    {
+     "t": "text",
+     "v": "appenddirname"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 490
+    },
+    {
+     "t": "text",
+     "v": "appendonlydir"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 491
+    },
+    {
+     "t": "text",
+     "v": "propagation-error-behavior"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 492
+    },
+    {
+     "t": "text",
+     "v": "ignore"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 493
+    },
+    {
+     "t": "text",
+     "v": "slave-serve-stale-data"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 494
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 495
+    },
+    {
+     "t": "text",
+     "v": "search-disk-use-direct-reads"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 496
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 497
+    },
+    {
+     "t": "text",
+     "v": "tls-protocols"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 498
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 499
+    },
+    {
+     "t": "text",
+     "v": "unixsocket"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 500
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 501
+    },
+    {
+     "t": "text",
+     "v": "cluster-link-sendbuf-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 502
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 503
+    },
+    {
+     "t": "text",
+     "v": "preload-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 504
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 505
+    },
+    {
+     "t": "text",
+     "v": "enable-module-command"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 506
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 507
+    },
+    {
+     "t": "text",
+     "v": "search-_free-resource-on-thread"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 508
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 509
+    },
+    {
+     "t": "text",
+     "v": "save"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 510
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 511
+    },
+    {
+     "t": "text",
+     "v": "aof-timestamp-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 512
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 513
+    },
+    {
+     "t": "text",
+     "v": "zset-max-listpack-value"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 514
+    },
+    {
+     "t": "text",
+     "v": "64"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 515
+    },
+    {
+     "t": "text",
+     "v": "tls-ca-cert-dir"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 516
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 517
+    },
+    {
+     "t": "text",
+     "v": "search-min-phonetic-term-len"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 518
+    },
+    {
+     "t": "text",
+     "v": "3"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 519
+    },
+    {
+     "t": "text",
+     "v": "max-new-tls-connections-per-cycle"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 520
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 521
+    },
+    {
+     "t": "text",
+     "v": "ts-num-threads"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 522
+    },
+    {
+     "t": "text",
+     "v": "3"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 523
+    },
+    {
+     "t": "text",
+     "v": "cluster-config-file"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 524
+    },
+    {
+     "t": "text",
+     "v": "nodes.conf"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 525
+    },
+    {
+     "t": "text",
+     "v": "aof-rewrite-cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 526
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 527
+    },
+    {
+     "t": "text",
+     "v": "list-max-listpack-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 528
+    },
+    {
+     "t": "text",
+     "v": "-2"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 529
+    },
+    {
+     "t": "text",
+     "v": "timeout"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 530
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 531
+    },
+    {
+     "t": "text",
+     "v": "hash-max-ziplist-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 532
+    },
+    {
+     "t": "text",
+     "v": "512"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 533
+    },
+    {
+     "t": "text",
+     "v": "search-bg-index-sleep-gap"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 534
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 535
+    },
+    {
+     "t": "text",
+     "v": "cluster-compatibility-sample-ratio"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 536
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 537
+    },
+    {
+     "t": "text",
+     "v": "hash-max-ziplist-value"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 538
+    },
+    {
+     "t": "text",
+     "v": "64"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 539
+    },
+    {
+     "t": "text",
+     "v": "backup-sealed-ttl"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 540
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 541
+    },
+    {
+     "t": "text",
+     "v": "replica-priority"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 542
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 543
+    },
+    {
+     "t": "text",
+     "v": "tls-port"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 544
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 545
+    },
+    {
+     "t": "text",
+     "v": "sanitize-dump-payload"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 546
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 547
+    },
+    {
+     "t": "text",
+     "v": "tls-session-caching"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 548
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 549
+    },
+    {
+     "t": "text",
+     "v": "client-query-buffer-limit"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 550
+    },
+    {
+     "t": "text",
+     "v": "1073741824"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 551
+    },
+    {
+     "t": "text",
+     "v": "bio_cpulist"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 552
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 553
+    },
+    {
+     "t": "text",
+     "v": "replicaof"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 554
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 555
+    },
+    {
+     "t": "text",
+     "v": "slave-announce-ip"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 556
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 557
+    },
+    {
+     "t": "text",
+     "v": "oom-score-adj-values"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 558
+    },
+    {
+     "t": "text",
+     "v": "0 200 800"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 559
+    },
+    {
+     "t": "text",
+     "v": "hash-min-template-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 560
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 561
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-clients"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 562
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 563
+    },
+    {
+     "t": "text",
+     "v": "zset-max-listpack-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 564
+    },
+    {
+     "t": "text",
+     "v": "128"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 565
+    },
+    {
+     "t": "text",
+     "v": "cluster-bus-port-protected-mode"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 566
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 567
+    },
+    {
+     "t": "text",
+     "v": "hash-rdb-load-max-template-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 568
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 569
+    },
+    {
+     "t": "text",
+     "v": "stream-node-max-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 570
+    },
+    {
+     "t": "text",
+     "v": "100"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 571
+    },
+    {
+     "t": "text",
+     "v": "rdbcompression"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 572
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 573
+    },
+    {
+     "t": "text",
+     "v": "aof-load-truncated"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 574
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 575
+    },
+    {
+     "t": "text",
+     "v": "array-sparse-kmax"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 576
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 577
+    },
+    {
+     "t": "text",
+     "v": "tls-cluster"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 578
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 579
+    },
+    {
+     "t": "text",
+     "v": "search-raw-docid-encoding"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 580
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 581
+    },
+    {
+     "t": "text",
+     "v": "search-enable-unstable-features"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 582
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 583
+    },
+    {
+     "t": "text",
+     "v": "cluster-replica-no-failover"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 584
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 585
+    },
+    {
+     "t": "text",
+     "v": "tls-client-key-file-pass"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 586
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 587
+    },
+    {
+     "t": "text",
+     "v": "search-disk-max-open-files"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 588
+    },
+    {
+     "t": "text",
+     "v": "1024"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 589
+    },
+    {
+     "t": "text",
+     "v": "lazyfree-lazy-server-del"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 590
+    },
+    {
+     "t": "text",
+     "v": "no"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 591
+    },
+    {
+     "t": "text",
+     "v": "min-slaves-max-lag"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 592
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 593
+    },
+    {
+     "t": "text",
+     "v": "cluster-slave-validity-factor"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 594
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 595
+    },
+    {
+     "t": "text",
+     "v": "search-_print-profile-clock"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 596
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 597
+    },
+    {
+     "t": "text",
+     "v": "search-ext-load"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 598
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 599
+    },
+    {
+     "t": "text",
+     "v": "tls-session-cache-size"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 600
+    },
+    {
+     "t": "text",
+     "v": "20480"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 601
+    },
+    {
+     "t": "text",
+     "v": "cluster-announce-hostname"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 602
+    },
+    {
+     "t": "text",
+     "v": ""
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 603
+    },
+    {
+     "t": "text",
+     "v": "crash-memcheck-enabled"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 604
+    },
+    {
+     "t": "text",
+     "v": "yes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 605
+    },
+    {
+     "t": "text",
+     "v": "hash-rdb-load-min-template-entries"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 606
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "CONFIG GET databases": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "databases"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "16"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "CONFIG GET maxmemory*": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "maxmemory"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-policy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 4
+    },
+    {
+     "t": "text",
+     "v": "noeviction"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 5
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-clients"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 6
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 7
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-samples"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 8
+    },
+    {
+     "t": "text",
+     "v": "5"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 9
+    },
+    {
+     "t": "text",
+     "v": "maxmemory-eviction-tenacity"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 10
+    },
+    {
+     "t": "text",
+     "v": "10"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "CONFIG GET requirepass": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "requirepass"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "fixture-secret"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "FUNCTION LIST LIBRARYNAME m2_redislive*": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "library_name"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive_lib"
+      },
+      {
+       "t": "text",
+       "v": "engine"
+      },
+      {
+       "t": "text",
+       "v": "LUA"
+      },
+      {
+       "t": "text",
+       "v": "functions"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "name"
+          },
+          {
+           "t": "text",
+           "v": "m2_redislive_f"
+          },
+          {
+           "t": "text",
+           "v": "description"
+          },
+          {
+           "t": "null"
+          },
+          {
+           "t": "text",
+           "v": "flags"
+          },
+          {
+           "t": "array",
+           "v": []
+          }
+         ]
+        },
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "name"
+          },
+          {
+           "t": "text",
+           "v": "m2_redislive_ro"
+          },
+          {
+           "t": "text",
+           "v": "description"
+          },
+          {
+           "t": "text",
+           "v": "read only"
+          },
+          {
+           "t": "text",
+           "v": "flags"
+          },
+          {
+           "t": "array",
+           "v": [
+            {
+             "t": "text",
+             "v": "no-writes"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "FUNCTION LIST WITHCODE LIBRARYNAME m2_redislive*": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "library_name"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive_lib"
+      },
+      {
+       "t": "text",
+       "v": "engine"
+      },
+      {
+       "t": "text",
+       "v": "LUA"
+      },
+      {
+       "t": "text",
+       "v": "functions"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "name"
+          },
+          {
+           "t": "text",
+           "v": "m2_redislive_f"
+          },
+          {
+           "t": "text",
+           "v": "description"
+          },
+          {
+           "t": "null"
+          },
+          {
+           "t": "text",
+           "v": "flags"
+          },
+          {
+           "t": "array",
+           "v": []
+          }
+         ]
+        },
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "name"
+          },
+          {
+           "t": "text",
+           "v": "m2_redislive_ro"
+          },
+          {
+           "t": "text",
+           "v": "description"
+          },
+          {
+           "t": "text",
+           "v": "read only"
+          },
+          {
+           "t": "text",
+           "v": "flags"
+          },
+          {
+           "t": "array",
+           "v": [
+            {
+             "t": "text",
+             "v": "no-writes"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "library_code"
+      },
+      {
+       "t": "text",
+       "v": "#!lua name=m2_redislive_lib\nredis.register_function('m2_redislive_f', function(keys, args) return 1 end)\nredis.register_function{function_name='m2_redislive_ro', callback=function(keys, args) return 2 end, flags={'no-writes'}, description='read only'}"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "INFO everything": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Server\nredis_version:8.10.2\nredis_git_sha1:00000000\nredis_git_dirty:1\nredis_build_id:733afb4c18605b55\nredis_mode:standalone\nos:Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64\narch_bits:64\nmonotonic_clock:ARM CNTVCT @ 24 ticks/us\nmultiplexing_api:epoll\natomicvar_api:c11-builtin\ngcc_version:15.2.0\nprocess_id:1\nprocess_supervised:no\nrun_id:2fd29ea5958683b4d3cca4f05bc20d5aa85ff997\ntcp_port:6379\nserver_time_usec:1792378750537304\nuptime_in_seconds:77\nuptime_in_days:0\nhz:10\nconfigured_hz:10\nlru_clock:13993854\nexecutable:/data/redis-server\nconfig_file:\nio_threads_active:0\nlistener0:name=tcp,bind=*,bind=-::*,port=6379\n\n# Clients\nconnected_clients:1\ncluster_connections:0\nmaxclients:10000\nclient_recent_max_input_buffer:0\nclient_recent_max_output_buffer:0\nblocked_clients:0\ntracking_clients:0\npubsub_clients:0\nwatching_clients:0\nclients_in_timeout_table:0\nactive_clients:1\ntotal_watched_keys:0\ntotal_blocking_keys:0\ntotal_blocking_keys_on_nokey:0\n\n# Memory\nused_memory:1504840\nused_memory_human:1.44M\nused_memory_rss:18313216\nused_memory_rss_human:17.46M\nused_memory_peak:1505160\nused_memory_peak_human:1.44M\nused_memory_peak_time:1792378750\nused_memory_peak_perc:100.13%\nused_memory_overhead:1482472\nused_memory_startup:1414624\nused_memory_dataset:22368\nused_memory_dataset_perc:24.79%\nallocator_allocated:22609120\nallocator_active:27852800\nallocator_resident:30867456\nallocator_muzzy:0\ntotal_system_memory:16819298304\ntotal_system_memory_human:15.66G\nused_memory_lua:32768\nused_memory_vm_eval:32768\nused_memory_lua_human:32.00K\nused_memory_scripts_eval:0\nnumber_of_cached_scripts:0\nnumber_of_functions:0\nnumber_of_libraries:0\nused_memory_vm_functions:34816\nused_memory_vm_total:67584\nused_memory_vm_total_human:66.00K\nused_memory_functions:192\nused_memory_hash_templates:72\nused_memory_scripts:192\nused_memory_scripts_human:192B\nmaxmemory:0\nmaxmemory_human:0B\nmaxmemory_policy:noeviction\nallocator_frag_ratio:1.27\nallocator_frag_bytes:3415776\nallocator_rss_ratio:1.11\nallocator_rss_bytes:3014656\nrss_overhead_ratio:0.59\nrss_overhead_bytes:-12554240\nmem_fragmentation_ratio:12.33\nmem_fragmentation_bytes:16828400\nmem_not_counted_for_evict:0\nmem_replication_backlog:0\nmem_total_replication_buffers:0\nmem_replica_full_sync_buffer:0\nmem_clients_slaves:0\nmem_clients_normal:0\nmem_clients_normal_shared:0\nmem_clients_normal_unshared:0\nmem_cluster_slot_migration_output_buffer:0\nmem_cluster_slot_migration_input_buffer:0\nmem_cluster_slot_migration_input_buffer_peak:0\nmem_cluster_links:0\nmem_aof_buffer:0\nmem_allocator:jemalloc-5.3.0\nmem_overhead_db_hashtable_rehashing:0\nactive_defrag_running:0\nlazyfree_pending_objects:0\nlazyfreed_objects:0\n\n# Persistence\nloading:0\nasync_loading:0\ncurrent_cow_peak:0\ncurrent_cow_size:0\ncurrent_cow_size_age:0\ncurrent_fork_perc:0.00\ncurrent_save_keys_processed:0\ncurrent_save_keys_total:0\nrdb_changes_since_last_save:0\nrdb_bgsave_in_progress:0\nrdb_last_save_time:1792378673\nrdb_last_bgsave_status:ok\nrdb_last_bgsave_time_sec:-1\nrdb_current_bgsave_time_sec:-1\nrdb_saves:0\nrdb_saves_consecutive_failures:0\nrdb_last_cow_size:0\nrdb_last_load_keys_expired:0\nrdb_last_load_keys_loaded:0\naof_enabled:0\naof_rewrite_in_progress:0\naof_rewrite_scheduled:0\naof_last_rewrite_time_sec:-1\naof_current_rewrite_time_sec:-1\naof_last_bgrewrite_status:ok\naof_rewrites:0\naof_rewrites_consecutive_failures:0\naof_last_write_status:ok\naof_last_cow_size:0\nbackup_in_progress:0\nmodule_fork_in_progress:0\nmodule_fork_last_cow_size:0\n\n# Threads\nio_thread_0:clients=1,reads=47,writes=31\n\n# Stats\ntotal_connections_received:16\ntotal_commands_processed:39\ninstantaneous_ops_per_sec:1\ntotal_net_input_bytes:705\ntotal_net_output_bytes:185\ntotal_net_repl_input_bytes:0\ntotal_net_repl_output_bytes:0\ninstantaneous_input_kbps:0.02\ninstantaneous_output_kbps:0.01\ninstantaneous_input_repl_kbps:0.00\ninstantaneous_output_repl_kbps:0.00\nrejected_connections:0\nsync_full:0\nsync_partial_ok:0\nsync_partial_err:0\nexpired_subkeys:0\nexpired_subkeys_active:0\nexpired_keys:0\nexpired_keys_active:0\nexpired_stale_perc:0.00\nexpired_time_cap_reached_count:0\nexpire_cycle_cpu_milliseconds:1\nevicted_keys:0\nevicted_clients:0\nevicted_scripts:0\ntotal_eviction_exceeded_time:0\ncurrent_eviction_exceeded_time:0\nkeyspace_hits:0\nkeyspace_misses:0\npubsub_channels:0\npubsub_patterns:0\npubsubshard_channels:0\nlatest_fork_usec:0\ntotal_forks:0\nmigrate_cached_sockets:0\nslave_expires_tracked_keys:0\nactive_defrag_hits:0\nactive_defrag_misses:0\nactive_defrag_key_hits:0\nactive_defrag_key_misses:0\ntotal_active_defrag_time:0\ncurrent_active_defrag_time:0\ntracking_total_keys:0\ntracking_total_items:0\ntracking_total_prefixes:0\nunexpected_error_replies:0\ntotal_error_replies:0\ndump_payload_sanitizations:0\ntotal_reads_processed:47\ntotal_writes_processed:31\nio_threaded_reads_processed:0\nio_threaded_writes_processed:0\nio_threaded_total_prefetch_batches:0\nio_threaded_total_prefetch_entries:0\nclient_query_buffer_limit_disconnections:0\nclient_output_buffer_limit_disconnections:0\nreply_buffer_shrinks:0\nreply_buffer_expands:0\neventloop_cycles:812\neventloop_duration_sum:133660\neventloop_duration_cmd_sum:85\ninstantaneous_eventloop_cycles_per_sec:11\ninstantaneous_eventloop_duration_usec:145\neventloop_cycles_with_clients_processing:31\ntotal_client_processing_events:32\navg_pipeline_length_sum:32\navg_pipeline_length_cnt:32\navg_pipeline_length:1.00\nslowlog_commands_count:0\nslowlog_commands_time_ms_max:0.00\nslowlog_commands_time_ms_sum:0.00\nhash_templates:0\nhash_template_keys:0\nacl_access_denied_auth:0\nacl_access_denied_cmd:0\nacl_access_denied_key:0\nacl_access_denied_channel:0\nacl_access_denied_tls_cert:0\n\n# Replication\nrole:master\nconnected_slaves:0\nmaster_failover_state:no-failover\nmaster_replid:07f2ae578fbbf9270f499954a5e437bc0f4285e2\nmaster_replid2:0000000000000000000000000000000000000000\nmaster_repl_offset:0\nsecond_repl_offset:-1\nrepl_backlog_active:0\nrepl_backlog_size:1048576\nrepl_backlog_first_byte_offset:0\nrepl_backlog_histlen:0\n\n# CPU\nused_cpu_sys:0.062732\nused_cpu_user:0.129282\nused_cpu_sys_children:0.000891\nused_cpu_user_children:0.003925\nused_cpu_sys_main_thread:0.062264\nused_cpu_user_main_thread:0.128822\n\n# Hotkeys\n\n# Modules\nmodule:name=timeseries,ver=81001,api=1,filters=0,usedby=[],using=[],options=[handle-io-errors]\nmodule:name=vectorset,ver=1,api=1,filters=0,usedby=[],using=[],options=[handle-io-errors|handle-repl-async-load]\nmodule:name=search,ver=81001,api=1,filters=0,usedby=[],using=[ReJSON],options=[handle-io-errors]\nmodule:name=bf,ver=81001,api=1,filters=0,usedby=[],using=[],options=[handle-io-errors]\nmodule:name=ReJSON,ver=81000,api=1,filters=0,usedby=[search],using=[],options=[handle-io-errors]\n\n# Commandstats\ncmdstat_ping:calls=15,usec=6,usec_per_call=0.40,rejected_calls=0,failed_calls=0\ncmdstat_config|get:calls=2,usec=5,usec_per_call=2.50,rejected_calls=0,failed_calls=0\ncmdstat_auth:calls=16,usec=79,usec_per_call=4.94,rejected_calls=0,failed_calls=0\ncmdstat_info:calls=6,usec=52,usec_per_call=8.67,rejected_calls=0,failed_calls=0\n\n# Errorstats\n\n# Latencystats\nlatency_percentiles_usec_ping:p50=0.001,p99=1.003,p99.9=1.003\nlatency_percentiles_usec_config|get:p50=2.007,p99=3.007,p99.9=3.007\nlatency_percentiles_usec_auth:p50=4.015,p99=12.031,p99.9=12.031\nlatency_percentiles_usec_info:p50=3.007,p99=28.031,p99.9=28.031\n\n# Cluster\ncluster_enabled:0\n\n# Keyspace\n\n# Keysizes\n\n# search_version\nsearch_version:8.10.1\nsearch_redis_version:8.10.2 - oss\n\n# search_indexes\nsearch_number_of_indexes:0\nsearch_number_of_active_indexes:0\nsearch_number_of_active_indexes_running_queries:0\nsearch_number_of_active_indexes_indexing:0\nsearch_total_active_write_threads:0\nsearch_total_indexing_time:0\nsearch_total_num_docs_in_indexes:0\nsearch_total_inverted_index_blocks:0\n\n# search_runtime_configurations\nsearch_extension_load:\nsearch_friso_ini:\nsearch_default_scorer:BM25STD\nsearch_enableGC:ON\nsearch_minimal_term_prefix:2\nsearch_minimal_stem_length:4\nsearch_maximal_prefix_expansions:200\nsearch_query_timeout_ms:500\nsearch_timeout_policy:return\nsearch_oom_policy:return\nsearch_cursor_read_size:1000\nsearch_cursor_max_idle_time:300000\nsearch_max_doc_table_size:1000000\nsearch_max_search_results:1000000\nsearch_max_aggregate_results:2147483648\nsearch_max_aggregate_groups:1000000\nsearch_gc_scan_size:100\nsearch_min_phonetic_term_length:3\nsearch_bm25std_tanh_factor:4\nsearch_info_on_zero_indexes:OFF\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "LATENCY DOCTOR": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "Dave, I have observed latency spikes in this Redis instance. You don't mind talking about it, do you Dave?\n\n1. command: 1 latency spikes (average 24ms, mean deviation 0ms, period 1.00 sec). Worst all time event 24ms.\n\nI have a few advices for you:\n\n- Your current Slow Log configuration only logs events that are slower than your configured latency monitor threshold. Please use 'CONFIG SET slowlog-log-slower-than 1000'.\n- Check your Slow Log to understand what are the commands you are running which are too slow to execute. Please check https://redis.io/commands/slowlog for more information.\n- Deleting, expiring or evicting (because of maxmemory policy) large objects is a blocking operation. If you have very large objects that are often deleted, expired, or evicted, try to fragment those objects into multiple smaller objects.\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "LATENCY HISTORY command": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 1792380055
+      },
+      {
+       "t": "int",
+       "v": 24
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "LATENCY LATEST": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "command"
+      },
+      {
+       "t": "int",
+       "v": 1792380055
+      },
+      {
+       "t": "int",
+       "v": 24
+      },
+      {
+       "t": "int",
+       "v": 24
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "MEMORY DOCTOR": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "Hi Sam, this instance is empty or is using very little memory, my issues detector can't be used in these conditions. Please, leave for your mission on Earth and fill it with some data. The new Sam and I will be back to our programming as soon as I finished rebooting.\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "MEMORY STATS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "peak.allocated"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "int",
+     "v": 2645856
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "text",
+     "v": "total.allocated"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 4
+    },
+    {
+     "t": "int",
+     "v": 2625440
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 5
+    },
+    {
+     "t": "text",
+     "v": "startup.allocated"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 6
+    },
+    {
+     "t": "int",
+     "v": 1414624
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 7
+    },
+    {
+     "t": "text",
+     "v": "replication.backlog"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 8
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 9
+    },
+    {
+     "t": "text",
+     "v": "replica.fullsync.buffer"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 10
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 11
+    },
+    {
+     "t": "text",
+     "v": "clients.slaves"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 12
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 13
+    },
+    {
+     "t": "text",
+     "v": "clients.normal"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 14
+    },
+    {
+     "t": "int",
+     "v": 17664
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 15
+    },
+    {
+     "t": "text",
+     "v": "clients.normal.shared"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 16
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 17
+    },
+    {
+     "t": "text",
+     "v": "clients.normal.unshared"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 18
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 19
+    },
+    {
+     "t": "text",
+     "v": "cluster.links"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 20
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 21
+    },
+    {
+     "t": "text",
+     "v": "aof.buffer"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 22
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 23
+    },
+    {
+     "t": "text",
+     "v": "lua.caches"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 24
+    },
+    {
+     "t": "int",
+     "v": 320
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 25
+    },
+    {
+     "t": "text",
+     "v": "functions.caches"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 26
+    },
+    {
+     "t": "int",
+     "v": 192
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 27
+    },
+    {
+     "t": "text",
+     "v": "script.VMs"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 28
+    },
+    {
+     "t": "int",
+     "v": 69632
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 29
+    },
+    {
+     "t": "text",
+     "v": "hash.templates"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 30
+    },
+    {
+     "t": "int",
+     "v": 72
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 31
+    },
+    {
+     "t": "text",
+     "v": "db.10"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 32
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "overhead.hashtable.main"
+      },
+      {
+       "t": "int",
+       "v": 584
+      },
+      {
+       "t": "text",
+       "v": "overhead.hashtable.expires"
+      },
+      {
+       "t": "int",
+       "v": 344
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 33
+    },
+    {
+     "t": "text",
+     "v": "overhead.db.hashtable.lut"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 34
+    },
+    {
+     "t": "int",
+     "v": 96
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 35
+    },
+    {
+     "t": "text",
+     "v": "overhead.db.hashtable.rehashing"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 36
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 37
+    },
+    {
+     "t": "text",
+     "v": "overhead.total"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 38
+    },
+    {
+     "t": "int",
+     "v": 1503432
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 39
+    },
+    {
+     "t": "text",
+     "v": "db.dict.rehashing.count"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 40
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 41
+    },
+    {
+     "t": "text",
+     "v": "keys.count"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 42
+    },
+    {
+     "t": "int",
+     "v": 6
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 43
+    },
+    {
+     "t": "text",
+     "v": "keys.bytes-per-key"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 44
+    },
+    {
+     "t": "int",
+     "v": 187001
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 45
+    },
+    {
+     "t": "text",
+     "v": "dataset.bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 46
+    },
+    {
+     "t": "int",
+     "v": 1122008
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 47
+    },
+    {
+     "t": "text",
+     "v": "dataset.percentage"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 48
+    },
+    {
+     "t": "text",
+     "v": "92.66544342041016"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 49
+    },
+    {
+     "t": "text",
+     "v": "peak.percentage"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 50
+    },
+    {
+     "t": "text",
+     "v": "99.22837829589844"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 51
+    },
+    {
+     "t": "text",
+     "v": "allocator.allocated"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 52
+    },
+    {
+     "t": "int",
+     "v": 13912808
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 53
+    },
+    {
+     "t": "text",
+     "v": "allocator.active"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 54
+    },
+    {
+     "t": "int",
+     "v": 23920640
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 55
+    },
+    {
+     "t": "text",
+     "v": "allocator.resident"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 56
+    },
+    {
+     "t": "int",
+     "v": 27066368
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 57
+    },
+    {
+     "t": "text",
+     "v": "allocator.muzzy"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 58
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 59
+    },
+    {
+     "t": "text",
+     "v": "allocator-fragmentation.ratio"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 60
+    },
+    {
+     "t": "text",
+     "v": "3.0738961696624756"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 61
+    },
+    {
+     "t": "text",
+     "v": "allocator-fragmentation.bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 62
+    },
+    {
+     "t": "int",
+     "v": 8179928
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 63
+    },
+    {
+     "t": "text",
+     "v": "allocator-rss.ratio"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 64
+    },
+    {
+     "t": "text",
+     "v": "1.1315068006515503"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 65
+    },
+    {
+     "t": "text",
+     "v": "allocator-rss.bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 66
+    },
+    {
+     "t": "int",
+     "v": 3145728
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 67
+    },
+    {
+     "t": "text",
+     "v": "rss-overhead.ratio"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 68
+    },
+    {
+     "t": "text",
+     "v": "0.48108354210853577"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 69
+    },
+    {
+     "t": "text",
+     "v": "rss-overhead.bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 70
+    },
+    {
+     "t": "int",
+     "v": -14045184
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 71
+    },
+    {
+     "t": "text",
+     "v": "fragmentation"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 72
+    },
+    {
+     "t": "text",
+     "v": "4.96063232421875"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 73
+    },
+    {
+     "t": "text",
+     "v": "fragmentation.bytes"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 74
+    },
+    {
+     "t": "int",
+     "v": 10396280
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "MEMORY USAGE m2_redislive:nokey": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "nil"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "null"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "MEMORY USAGE m2_redislive:user:1": {
+  "columns": [
+   {
+    "name": "integer",
+    "typeName": "integer"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 56
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "PUBSUB CHANNELS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [],
+  "truncated": false
+ },
+ "PUBSUB NUMPAT": {
+  "columns": [
+   {
+    "name": "integer",
+    "typeName": "integer"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 0
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "PUBSUB NUMSUB a b": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "a"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "text",
+     "v": "b"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 4
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "PUBSUB SHARDCHANNELS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [],
+  "truncated": false
+ },
+ "PUBSUB SHARDNUMSUB a": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "a"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "SCAN 0 MATCH m2_redislive:* COUNT 100": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "0"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "m2_redislive:list:1"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive:stream:1"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive:hash:1"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive:zset:1"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive:user:1"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive:set:1"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "SCRIPT EXISTS e0e1f9fabfc9d4800c877a703b823ac0578ff8db ffffffffffffffffffffffffffffffffffffffff": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "int",
+     "v": 1
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "int",
+     "v": 0
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "SENTINEL MASTERS": {
+  "code": "ERR",
+  "error": "ERR unknown command 'SENTINEL', with args beginning with: 'MASTERS' "
+ },
+ "SLOWLOG GET 3": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 7
+      },
+      {
+       "t": "int",
+       "v": 1792380055
+      },
+      {
+       "t": "int",
+       "v": 24518
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "EVAL"
+        },
+        {
+         "t": "text",
+         "v": "local i=0 while i<3000000 do i=i+1 end return i"
+        },
+        {
+         "t": "text",
+         "v": "0"
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "10.0.0.2:58270"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive_capture"
+      },
+      {
+       "t": "int",
+       "v": 3
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 6
+      },
+      {
+       "t": "int",
+       "v": 1792380055
+      },
+      {
+       "t": "int",
+       "v": 11
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "CONFIG"
+        },
+        {
+         "t": "text",
+         "v": "SET"
+        },
+        {
+         "t": "text",
+         "v": "latency-monitor-threshold"
+        },
+        {
+         "t": "text",
+         "v": "1"
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "10.0.0.2:58270"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive_capture"
+      },
+      {
+       "t": "int",
+       "v": 4
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 5
+      },
+      {
+       "t": "int",
+       "v": 1792380055
+      },
+      {
+       "t": "int",
+       "v": 7977
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "CONFIG"
+        },
+        {
+         "t": "text",
+         "v": "SET"
+        },
+        {
+         "t": "text",
+         "v": "slowlog-log-slower-than"
+        },
+        {
+         "t": "text",
+         "v": "0"
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "10.0.0.2:58270"
+      },
+      {
+       "t": "text",
+       "v": "m2_redislive_capture"
+      },
+      {
+       "t": "int",
+       "v": 4
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "SLOWLOG LEN": {
+  "columns": [
+   {
+    "name": "integer",
+    "typeName": "integer"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 9
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CLUSTER INFO": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "cluster_state:ok\r\ncluster_slots_assigned:16384\r\ncluster_slots_ok:16384\r\ncluster_slots_pfail:0\r\ncluster_slots_fail:0\r\ncluster_known_nodes:6\r\ncluster_size:3\r\ncluster_current_epoch:6\r\ncluster_my_epoch:1\r\ncluster_stats_messages_ping_sent:60\r\ncluster_stats_messages_pong_sent:65\r\ncluster_stats_messages_sent:125\r\ncluster_stats_messages_ping_received:60\r\ncluster_stats_messages_pong_received:63\r\ncluster_stats_messages_meet_received:5\r\ncluster_stats_messages_received:128\r\ntotal_cluster_links_buffer_limit_exceeded:0\r\ncluster_slot_migration_active_tasks:0\r\ncluster_slot_migration_active_trim_running:0\r\ncluster_slot_migration_active_trim_current_job_keys:0\r\ncluster_slot_migration_active_trim_current_job_trimmed:0\r\ncluster_slot_migration_stats_active_trim_started:0\r\ncluster_slot_migration_stats_active_trim_completed:0\r\ncluster_slot_migration_stats_active_trim_cancelled:0\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CLUSTER MYID": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "0f70afea5b0cf86136934b445ef766721fcf0ebf"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CLUSTER NODES": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "cb12ecf684dab3082c002ea202c8e28488dce980 127.0.0.1:7004@17004 slave d718bdd39b484adcc3d2b5d75cc97d894a5ccf78 0 1792380328000 2 connected\n0f70afea5b0cf86136934b445ef766721fcf0ebf 127.0.0.1:7000@17000 myself,master - 0 0 1 connected 0-5460\n0a4f052ca1bc9a91723c2f19d1cd714d221e0f76 127.0.0.1:7002@17002 master - 0 1792380330805 3 connected 10923-16383\n93a13db08a0049f6507795485c7f4059b2a23666 127.0.0.1:7005@17005 slave 0a4f052ca1bc9a91723c2f19d1cd714d221e0f76 0 1792380328781 3 connected\nd718bdd39b484adcc3d2b5d75cc97d894a5ccf78 127.0.0.1:7001@17001 master - 0 1792380326750 2 connected 5461-10922\n9e00f912f366b2db8084fbc1058b499515f2df25 127.0.0.1:7003@17003 slave 0f70afea5b0cf86136934b445ef766721fcf0ebf 0 1792380329789 1 connected\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CLUSTER SHARDS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "slots"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "int",
+         "v": 5461
+        },
+        {
+         "t": "int",
+         "v": 10922
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "nodes"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "d718bdd39b484adcc3d2b5d75cc97d894a5ccf78"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7001
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "master"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        },
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "cb12ecf684dab3082c002ea202c8e28488dce980"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7004
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "replica"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "slots"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "int",
+         "v": 0
+        },
+        {
+         "t": "int",
+         "v": 5460
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "nodes"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "0f70afea5b0cf86136934b445ef766721fcf0ebf"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7000
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "master"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        },
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "9e00f912f366b2db8084fbc1058b499515f2df25"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7003
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "replica"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "slots"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "int",
+         "v": 10923
+        },
+        {
+         "t": "int",
+         "v": 16383
+        }
+       ]
+      },
+      {
+       "t": "text",
+       "v": "nodes"
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "0a4f052ca1bc9a91723c2f19d1cd714d221e0f76"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7002
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "master"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        },
+        {
+         "t": "array",
+         "v": [
+          {
+           "t": "text",
+           "v": "id"
+          },
+          {
+           "t": "text",
+           "v": "93a13db08a0049f6507795485c7f4059b2a23666"
+          },
+          {
+           "t": "text",
+           "v": "port"
+          },
+          {
+           "t": "int",
+           "v": 7005
+          },
+          {
+           "t": "text",
+           "v": "ip"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "endpoint"
+          },
+          {
+           "t": "text",
+           "v": "127.0.0.1"
+          },
+          {
+           "t": "text",
+           "v": "role"
+          },
+          {
+           "t": "text",
+           "v": "replica"
+          },
+          {
+           "t": "text",
+           "v": "replication-offset"
+          },
+          {
+           "t": "int",
+           "v": 70
+          },
+          {
+           "t": "text",
+           "v": "health"
+          },
+          {
+           "t": "text",
+           "v": "online"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CLUSTER SLOTS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 0
+      },
+      {
+       "t": "int",
+       "v": 5460
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7000
+        },
+        {
+         "t": "text",
+         "v": "0f70afea5b0cf86136934b445ef766721fcf0ebf"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7003
+        },
+        {
+         "t": "text",
+         "v": "9e00f912f366b2db8084fbc1058b499515f2df25"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 5461
+      },
+      {
+       "t": "int",
+       "v": 10922
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7001
+        },
+        {
+         "t": "text",
+         "v": "d718bdd39b484adcc3d2b5d75cc97d894a5ccf78"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7004
+        },
+        {
+         "t": "text",
+         "v": "cb12ecf684dab3082c002ea202c8e28488dce980"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      }
+     ]
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "int",
+       "v": 10923
+      },
+      {
+       "t": "int",
+       "v": 16383
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7002
+        },
+        {
+         "t": "text",
+         "v": "0a4f052ca1bc9a91723c2f19d1cd714d221e0f76"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      },
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "int",
+         "v": 7005
+        },
+        {
+         "t": "text",
+         "v": "93a13db08a0049f6507795485c7f4059b2a23666"
+        },
+        {
+         "t": "array",
+         "v": []
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: CONFIG GET databases": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "databases"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "1"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: DBSIZE": {
+  "columns": [
+   {
+    "name": "integer",
+    "typeName": "integer"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 0
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: INFO cluster": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Cluster\r\ncluster_enabled:1\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: INFO keyspace": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Keyspace\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "cluster: INFO server": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Server\r\nredis_version:8.10.2\r\nredis_git_sha1:00000000\r\nredis_git_dirty:1\r\nredis_build_id:733afb4c18605b55\r\nredis_mode:cluster\r\nos:Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64\r\narch_bits:64\r\nmonotonic_clock:ARM CNTVCT @ 24 ticks/us\r\nmultiplexing_api:epoll\r\natomicvar_api:c11-builtin\r\ngcc_version:15.2.0\r\nprocess_id:15\r\nprocess_supervised:no\r\nrun_id:4c915cb082b50993bb90467cb4ba18c7fdf9f691\r\ntcp_port:7000\r\nserver_time_usec:1792380330871707\r\nuptime_in_seconds:57\r\nuptime_in_days:0\r\nhz:10\r\nconfigured_hz:10\r\nlru_clock:13995434\r\nexecutable:/tmp/7000/redis-server\r\nconfig_file:\r\nio_threads_active:0\r\nlistener0:name=tcp,bind=*,bind=-::*,port=7000\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "master: INFO replication": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Replication\r\nrole:master\r\nconnected_slaves:1\r\nslave0:ip=127.0.0.1,port=6381,state=online,offset=8159,lag=1,io-thread=0\r\nmaster_failover_state:no-failover\r\nmaster_replid:19257548601e4954185bca39afe3b55503c23386\r\nmaster_replid2:0000000000000000000000000000000000000000\r\nmaster_repl_offset:8292\r\nsecond_repl_offset:-1\r\nrepl_backlog_active:1\r\nrepl_backlog_size:1048576\r\nrepl_backlog_first_byte_offset:1\r\nrepl_backlog_histlen:8292\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "master: ROLE": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "master"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "int",
+     "v": 8292
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "array",
+       "v": [
+        {
+         "t": "text",
+         "v": "127.0.0.1"
+        },
+        {
+         "t": "text",
+         "v": "6381"
+        },
+        {
+         "t": "text",
+         "v": "8159"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "replica: INFO replication": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Replication\r\nrole:slave\r\nmaster_host:127.0.0.1\r\nmaster_port:6380\r\nmaster_link_status:up\r\nmaster_last_io_seconds_ago:1\r\nmaster_sync_in_progress:0\r\nslave_read_repl_offset:8824\r\nslave_repl_offset:8824\r\nreplica_full_sync_buffer_size:0\r\nreplica_full_sync_buffer_peak:0\r\nmaster_current_sync_attempts:1\r\nmaster_total_sync_attempts:1\r\nmaster_link_up_since_seconds:68\r\nmaster_client_io_thread:0\r\ntotal_disconnect_time_sec:0\r\nslave_priority:100\r\nslave_read_only:1\r\nreplica_announced:1\r\nconnected_slaves:0\r\nmaster_failover_state:no-failover\r\nmaster_replid:19257548601e4954185bca39afe3b55503c23386\r\nmaster_replid2:0000000000000000000000000000000000000000\r\nmaster_repl_offset:8824\r\nsecond_repl_offset:-1\r\nrepl_backlog_active:1\r\nrepl_backlog_size:1048576\r\nrepl_backlog_first_byte_offset:290\r\nrepl_backlog_histlen:8535\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "replica: ROLE": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "slave"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "127.0.0.1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 3
+    },
+    {
+     "t": "int",
+     "v": 6380
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 4
+    },
+    {
+     "t": "text",
+     "v": "connected"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 5
+    },
+    {
+     "t": "int",
+     "v": 8824
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: INFO sentinel": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Sentinel\r\nsentinel_masters:1\r\nsentinel_tilt:0\r\nsentinel_tilt_since_seconds:-1\r\nsentinel_total_tilt:0\r\nsentinel_running_scripts:0\r\nsentinel_scripts_queue_length:0\r\nsentinel_simulate_failure_flags:0\r\nmaster0:name=mymaster,status=ok,address=127.0.0.1:6380,slaves=1,sentinels=2\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: INFO server": {
+  "columns": [
+   {
+    "name": "value",
+    "typeName": "bulk"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "text",
+     "v": "# Server\r\nredis_version:8.10.2\r\nredis_git_sha1:00000000\r\nredis_git_dirty:1\r\nredis_build_id:733afb4c18605b55\r\nredis_mode:sentinel\r\nos:Linux 7.0.14-orbstack-00380-ga7e0a2dc9535 aarch64\r\narch_bits:64\r\nmonotonic_clock:ARM CNTVCT @ 24 ticks/us\r\nmultiplexing_api:epoll\r\natomicvar_api:c11-builtin\r\ngcc_version:15.2.0\r\nprocess_id:74\r\nprocess_supervised:no\r\nrun_id:e06d75f20616a35807c190f592b2f6285bdd9cbd\r\ntcp_port:26379\r\nserver_time_usec:1792380335879202\r\nuptime_in_seconds:62\r\nuptime_in_days:0\r\nhz:18\r\nconfigured_hz:10\r\nlru_clock:13995439\r\nexecutable:/tmp/7005/redis-server\r\nconfig_file:/tmp/sentinel.conf\r\nio_threads_active:0\r\nlistener0:name=tcp,bind=*,bind=-::*,port=26379\r\n"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: ROLE": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "sentinel"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "mymaster"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: SENTINEL GET-MASTER-ADDR-BY-NAME mymaster": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "text",
+     "v": "127.0.0.1"
+    }
+   ],
+   [
+    {
+     "t": "int",
+     "v": 2
+    },
+    {
+     "t": "text",
+     "v": "6380"
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: SENTINEL MASTERS": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "name"
+      },
+      {
+       "t": "text",
+       "v": "mymaster"
+      },
+      {
+       "t": "text",
+       "v": "ip"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "port"
+      },
+      {
+       "t": "text",
+       "v": "6380"
+      },
+      {
+       "t": "text",
+       "v": "runid"
+      },
+      {
+       "t": "text",
+       "v": "4406e7abe2363bb108898fa70ec06d43b1fc6d38"
+      },
+      {
+       "t": "text",
+       "v": "flags"
+      },
+      {
+       "t": "text",
+       "v": "master"
+      },
+      {
+       "t": "text",
+       "v": "link-pending-commands"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "link-refcount"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-sent"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "last-ok-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "765"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "765"
+      },
+      {
+       "t": "text",
+       "v": "down-after-milliseconds"
+      },
+      {
+       "t": "text",
+       "v": "5000"
+      },
+      {
+       "t": "text",
+       "v": "info-refresh"
+      },
+      {
+       "t": "text",
+       "v": "1889"
+      },
+      {
+       "t": "text",
+       "v": "role-reported"
+      },
+      {
+       "t": "text",
+       "v": "master"
+      },
+      {
+       "t": "text",
+       "v": "role-reported-time"
+      },
+      {
+       "t": "text",
+       "v": "62131"
+      },
+      {
+       "t": "text",
+       "v": "config-epoch"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "num-slaves"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "num-other-sentinels"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "quorum"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "failover-timeout"
+      },
+      {
+       "t": "text",
+       "v": "180000"
+      },
+      {
+       "t": "text",
+       "v": "parallel-syncs"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: SENTINEL REPLICAS mymaster": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "name"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1:6381"
+      },
+      {
+       "t": "text",
+       "v": "ip"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "port"
+      },
+      {
+       "t": "text",
+       "v": "6381"
+      },
+      {
+       "t": "text",
+       "v": "runid"
+      },
+      {
+       "t": "text",
+       "v": "258a5e524767a21a2d8b0ed042245c934298a0fe"
+      },
+      {
+       "t": "text",
+       "v": "flags"
+      },
+      {
+       "t": "text",
+       "v": "slave"
+      },
+      {
+       "t": "text",
+       "v": "link-pending-commands"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "link-refcount"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-sent"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "last-ok-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "477"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "477"
+      },
+      {
+       "t": "text",
+       "v": "down-after-milliseconds"
+      },
+      {
+       "t": "text",
+       "v": "5000"
+      },
+      {
+       "t": "text",
+       "v": "info-refresh"
+      },
+      {
+       "t": "text",
+       "v": "6598"
+      },
+      {
+       "t": "text",
+       "v": "role-reported"
+      },
+      {
+       "t": "text",
+       "v": "slave"
+      },
+      {
+       "t": "text",
+       "v": "role-reported-time"
+      },
+      {
+       "t": "text",
+       "v": "62098"
+      },
+      {
+       "t": "text",
+       "v": "master-link-down-time"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "master-link-status"
+      },
+      {
+       "t": "text",
+       "v": "ok"
+      },
+      {
+       "t": "text",
+       "v": "master-host"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "master-port"
+      },
+      {
+       "t": "text",
+       "v": "6380"
+      },
+      {
+       "t": "text",
+       "v": "slave-priority"
+      },
+      {
+       "t": "text",
+       "v": "100"
+      },
+      {
+       "t": "text",
+       "v": "slave-repl-offset"
+      },
+      {
+       "t": "text",
+       "v": "6696"
+      },
+      {
+       "t": "text",
+       "v": "replica-announced"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: SENTINEL SENTINELS mymaster": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "name"
+      },
+      {
+       "t": "text",
+       "v": "6e0cba8ac6ab31dc4bd3446bd49640f955a40547"
+      },
+      {
+       "t": "text",
+       "v": "ip"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "port"
+      },
+      {
+       "t": "text",
+       "v": "26380"
+      },
+      {
+       "t": "text",
+       "v": "runid"
+      },
+      {
+       "t": "text",
+       "v": "6e0cba8ac6ab31dc4bd3446bd49640f955a40547"
+      },
+      {
+       "t": "text",
+       "v": "flags"
+      },
+      {
+       "t": "text",
+       "v": "sentinel"
+      },
+      {
+       "t": "text",
+       "v": "link-pending-commands"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "link-refcount"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-sent"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "last-ok-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "946"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "946"
+      },
+      {
+       "t": "text",
+       "v": "down-after-milliseconds"
+      },
+      {
+       "t": "text",
+       "v": "5000"
+      },
+      {
+       "t": "text",
+       "v": "last-hello-message"
+      },
+      {
+       "t": "text",
+       "v": "93"
+      },
+      {
+       "t": "text",
+       "v": "voted-leader"
+      },
+      {
+       "t": "text",
+       "v": "?"
+      },
+      {
+       "t": "text",
+       "v": "voted-leader-epoch"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ },
+ "sentinel: SENTINEL SLAVES mymaster": {
+  "columns": [
+   {
+    "name": "#",
+    "typeName": "integer"
+   },
+   {
+    "name": "value",
+    "typeName": "value"
+   }
+  ],
+  "kind": "rows",
+  "rows": [
+   [
+    {
+     "t": "int",
+     "v": 1
+    },
+    {
+     "t": "array",
+     "v": [
+      {
+       "t": "text",
+       "v": "name"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1:6381"
+      },
+      {
+       "t": "text",
+       "v": "ip"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "port"
+      },
+      {
+       "t": "text",
+       "v": "6381"
+      },
+      {
+       "t": "text",
+       "v": "runid"
+      },
+      {
+       "t": "text",
+       "v": "258a5e524767a21a2d8b0ed042245c934298a0fe"
+      },
+      {
+       "t": "text",
+       "v": "flags"
+      },
+      {
+       "t": "text",
+       "v": "slave"
+      },
+      {
+       "t": "text",
+       "v": "link-pending-commands"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "link-refcount"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-sent"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "last-ok-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "477"
+      },
+      {
+       "t": "text",
+       "v": "last-ping-reply"
+      },
+      {
+       "t": "text",
+       "v": "477"
+      },
+      {
+       "t": "text",
+       "v": "down-after-milliseconds"
+      },
+      {
+       "t": "text",
+       "v": "5000"
+      },
+      {
+       "t": "text",
+       "v": "info-refresh"
+      },
+      {
+       "t": "text",
+       "v": "6598"
+      },
+      {
+       "t": "text",
+       "v": "role-reported"
+      },
+      {
+       "t": "text",
+       "v": "slave"
+      },
+      {
+       "t": "text",
+       "v": "role-reported-time"
+      },
+      {
+       "t": "text",
+       "v": "62098"
+      },
+      {
+       "t": "text",
+       "v": "master-link-down-time"
+      },
+      {
+       "t": "text",
+       "v": "0"
+      },
+      {
+       "t": "text",
+       "v": "master-link-status"
+      },
+      {
+       "t": "text",
+       "v": "ok"
+      },
+      {
+       "t": "text",
+       "v": "master-host"
+      },
+      {
+       "t": "text",
+       "v": "127.0.0.1"
+      },
+      {
+       "t": "text",
+       "v": "master-port"
+      },
+      {
+       "t": "text",
+       "v": "6380"
+      },
+      {
+       "t": "text",
+       "v": "slave-priority"
+      },
+      {
+       "t": "text",
+       "v": "100"
+      },
+      {
+       "t": "text",
+       "v": "slave-repl-offset"
+      },
+      {
+       "t": "text",
+       "v": "6696"
+      },
+      {
+       "t": "text",
+       "v": "replica-announced"
+      },
+      {
+       "t": "text",
+       "v": "1"
+      }
+     ]
+    }
+   ]
+  ],
+  "truncated": false
+ }
+}
