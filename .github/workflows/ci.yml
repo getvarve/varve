@@ -78,7 +78,234 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
+      # The UI contract (packages/ui/src/api/__contract__): every sample
+      # against the real Rust types, and contract.generated.ts up to date.
+      # No database needed.
+      - name: UI contract
+        run: cargo test -p varve-app --test ui_contract
       - run: cargo test --workspace
+
+  # The ignored integration tests against real servers, on every push and PR.
+  # Only the newest version of each engine runs here (the `latest` profile of
+  # dev/docker-compose.yml plus Valkey 9 and the renamed-command Redis
+  # servers); the full version matrix stays a local run (README, design doc).
+  # Every suite builds and runs in its own job so they run side by side.
+  integration:
+    name: Integration (${{ matrix.suite }}, newest servers)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: driver-postgres
+            extra: ''
+          - suite: driver-mysql
+            extra: ''
+          - suite: driver-redis
+            extra: valkey-9 redis-8.10-renamed valkey-9-renamed
+          - suite: catalog
+            extra: ''
+          - suite: live-stats
+            extra: valkey-9
+          - suite: app
+            extra: valkey-9
+    env:
+      # Tests with a fixed server list keep only these compose services.
+      VARVE_ONLY_SERVERS: postgres-18,mysql-9.7,mariadb-12.3,redis-8.10,valkey-9
+      # varve-driver-postgres (tests/common/mod.rs) and the TLS server.
+      VARVE_PG_SERVERS: '18:54318'
+      VARVE_PG_TLS_PORT: '54390'
+      # varve-driver-redis (tests/matrix.rs, tests/partial.rs).
+      VARVE_REDIS_SERVERS: redis-8.10@127.0.0.1:63081,valkey-9@127.0.0.1:63190
+      VARVE_REDIS_RENAMED_SERVERS: redis-8.10@127.0.0.1:63084,valkey-9@127.0.0.1:63194
+      # Tests written for the shared M2 matrix (ports 355xx, 555xx, 640xx by
+      # default) point at the dev compose ports instead.
+      VARVE_PG18_PORT: '54318'
+      VARVE_M2_PG18_PORT: '54318'
+      VARVE_M2_PG_18_PORT: '54318'
+      VARVE_M2_MYSQL_9_7_PORT: '33097'
+      VARVE_M2_MARIADB_12_3_PORT: '33123'
+      VARVE_M2_MYSQL97_PORT: '33097'
+      VARVE_M2_MARIADB123_PORT: '33123'
+      VARVE_M2_MY97_PORT: '33097'
+      VARVE_M2_MA123_PORT: '33123'
+      VARVE_M2_REDIS810_PORT: '63081'
+      VARVE_M2_VALKEY9_PORT: '63190'
+      VARVE_M2_REDIS_SERVERS: redis-8.10=127.0.0.1:63081,valkey-9=127.0.0.1:63190
+      # The app services tunnel test (crates/tunnel/tests/docker-compose.yml).
+      VARVE_SERVICES_SSH_PORT: '22022'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies for Tauri
+        if: matrix.suite == 'app'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: integration-${{ matrix.suite }}
+      - name: Start the newest servers
+        timeout-minutes: 10
+        env:
+          EXTRA: ${{ matrix.extra }}
+        run: |
+          docker compose -f dev/docker-compose.yml --profile latest up -d --wait
+          if [ -n "$EXTRA" ]; then
+            # Word splitting is wanted: EXTRA is a list of service names.
+            # shellcheck disable=SC2086
+            docker compose -f dev/docker-compose.yml up -d --wait $EXTRA
+          fi
+      - name: Start the SSH tunnel servers
+        if: matrix.suite == 'app'
+        timeout-minutes: 10
+        # services: ssh_tunnel_asks_to_trust_the_host_key_then_connects goes
+        # through the OpenSSH server of crates/tunnel/tests to its Redis.
+        run: docker compose -f crates/tunnel/tests/docker-compose.yml up -d --wait
+      - name: Start the PostgreSQL TLS server
+        if: matrix.suite == 'driver-postgres'
+        timeout-minutes: 15
+        run: |
+          echo "VARVE_PG_TLS_DIR=$RUNNER_TEMP/pg-tls" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/pg-tls"
+          cargo run -p varve-driver-postgres --example tls-test-certs -- "$RUNNER_TEMP/pg-tls"
+          VARVE_PG_TLS_DIR="$RUNNER_TEMP/pg-tls" docker compose -p varve-pg-tls \
+            -f crates/driver-postgres/tests/tls/compose.yml up -d --wait
+      - name: Integration tests
+        timeout-minutes: 40
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          case "$SUITE" in
+            driver-postgres)
+              # VARVE_PG_SERVERS limits every test to PostgreSQL 18.
+              cargo test -p varve-driver-postgres --no-fail-fast -- --include-ignored
+              ;;
+            driver-mysql)
+              # tests/tls.rs starts its own MySQL and MariaDB TLS servers.
+              cargo test -p varve-driver-mysql --no-fail-fast -- --include-ignored
+              ;;
+            driver-redis)
+              # risk_tables_match_the_servers compares src/risk_table.rs, the
+              # union of Redis 6.2, Redis 8.10 and Valkey 9, with every one
+              # of them, so it needs the full matrix.
+              cargo test -p varve-driver-redis --no-fail-fast -- --include-ignored --exact \
+                --skip risk::generated_tests::risk_tables_match_the_servers
+              ;;
+            catalog)
+              # These tests are one per server version; the other files loop
+              # over the servers VARVE_ONLY_SERVERS selects.
+              cargo test -p varve-catalog --no-fail-fast -- --include-ignored --exact \
+                --skip postgres_13 --skip mysql_8_0 --skip mariadb_10_6 \
+                --skip round_trip_postgres_13 \
+                --skip sequence_state_after_restart_and_setval_on_postgres_13 \
+                --skip index_redefinition_round_trips_on_postgres_13 \
+                --skip index_redefinition_round_trips_on_postgres_18 \
+                --skip index_redefinition_round_trips_on_mysql_8_0 \
+                --skip index_redefinition_round_trips_on_mysql_9_7 \
+                --skip index_redefinition_round_trips_on_mariadb_10_6 \
+                --skip index_redefinition_round_trips_on_mariadb_12_3
+              # The table designer's index redefinition through the UI's
+              # samples (api/__contract__), on the newest servers.
+              cargo test -p varve-catalog --no-fail-fast --test ui_index_round_trip -- \
+                --include-ignored --exact \
+                index_redefinition_round_trips_on_postgres_18 \
+                index_redefinition_round_trips_on_mysql_9_7 \
+                index_redefinition_round_trips_on_mariadb_12_3
+              ;;
+            live-stats)
+              # The generated tables (src/sql/mysql_readonly.rs,
+              # src/redis/config_refusals.rs) come from every MySQL and Redis
+              # version and name their exact patch release, so they are
+              # checked against the full matrix only. The streaming replica
+              # tests need the M2 primary and standby pair, which the dev
+              # compose file does not have. sql_live changes global server
+              # variables, so the tests run one at a time.
+              cargo test -p varve-live-stats --no-fail-fast -- --include-ignored --exact --test-threads=1 \
+                --skip generate_mysql_readonly_table \
+                --skip mysql_readonly_table_matches_the_servers \
+                --skip generate_redis_config_refusals \
+                --skip redis_config_refusals_match_the_servers \
+                --skip postgres_standby_lag_and_disconnect \
+                --skip replication_status_never_runs_planted_objects
+              ;;
+            app)
+              # m2: these tests are written for MySQL 8.0 or 8.4 (collation
+              # restores, the second route to one server) or for two MariaDB
+              # twins started with docker run, so they need the full matrix.
+              cargo test -p varve-app --no-fail-fast --test services --test privileges --test m2 --test page_reload -- \
+                --include-ignored --exact \
+                --skip a_cancel_before_the_script_starts_stops_the_ddl \
+                --skip a_failed_run_keeps_a_valid_pending_restore_valid \
+                --skip collation_alters_do_not_block_a_database_in_use \
+                --skip collation_is_compared_with_the_current_one_not_the_recorded_one \
+                --skip collation_restore_never_commits_a_queued_user_transaction \
+                --skip ddl_collation_is_restored_after_failure_cancel_and_concurrency \
+                --skip mysql_tab_kills_its_own_query_and_grid_respects_transactions \
+                --skip pending_collation_restore_flow_survives_a_restart \
+                --skip pending_restores_follow_the_server_not_its_address \
+                --skip privileges_granted_before_a_failure_are_logged_when_they_persisted \
+                --skip runs_through_two_routes_to_one_server_are_serialized \
+                --skip stale_pending_restores_are_never_removed_by_a_run \
+                --skip mariadb_twins_with_equal_server_facts_keep_their_own_restores
+              ;;
+            *)
+              echo "::error::Unknown suite $SUITE"
+              exit 1
+              ;;
+          esac
+      - name: Server logs
+        if: failure()
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          docker compose -f dev/docker-compose.yml --profile all logs --no-color --tail 200
+          if [ -n "${VARVE_PG_TLS_DIR:-}" ]; then
+            docker compose -p varve-pg-tls -f crates/driver-postgres/tests/tls/compose.yml logs --no-color --tail 200
+          fi
+          if [ "$SUITE" = app ]; then
+            docker compose -f crates/tunnel/tests/docker-compose.yml logs --no-color --tail 200
+          fi
+
+  # The ignored SSH tunnel tests of crates/tunnel against the OpenSSH server
+  # and Redis of its own compose project. They need no database matrix and no
+  # Tauri libraries, so this job stays small. broken.rs pauses and stops the
+  # SSH container through docker compose, with the project and file below.
+  tunnel:
+    name: Integration (tunnel, OpenSSH)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      VARVE_TUNNEL_COMPOSE_PROJECT: varve-m1-ssh
+      VARVE_TUNNEL_COMPOSE_FILE: ${{ github.workspace }}/crates/tunnel/tests/docker-compose.yml
+      VARVE_TUNNEL_SSH_HOST: 127.0.0.1
+      VARVE_TUNNEL_SSH_PORT: '22022'
+      VARVE_TUNNEL_TARGET_HOST: redis
+      VARVE_TUNNEL_TARGET_PORT: '6379'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: integration-tunnel
+      - name: Start the SSH tunnel servers
+        timeout-minutes: 10
+        run: docker compose -p "$VARVE_TUNNEL_COMPOSE_PROJECT" -f "$VARVE_TUNNEL_COMPOSE_FILE" up -d --wait
+      - name: Integration tests
+        timeout-minutes: 20
+        # agent.rs starts its own ssh-agent and uses ssh-keygen and ssh-add
+        # from the runner's OpenSSH client.
+        run: cargo test -p varve-tunnel --no-fail-fast -- --include-ignored
+      - name: Server logs
+        if: failure()
+        run: docker compose -p "$VARVE_TUNNEL_COMPOSE_PROJECT" -f "$VARVE_TUNNEL_COMPOSE_FILE" logs --no-color --tail 200
 
   frontend:
     name: Frontend (typecheck, lint, test)
@@ -94,6 +321,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm test:scripts
 
   build:
     name: Build (${{ matrix.os }})
@@ -121,5 +349,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The dev wrapper's Tauri CLI resolution and cmd.exe quoting, on every OS.
+      - run: pnpm test:scripts
       - name: Build Varve Community
         run: pnpm tauri build --debug --no-bundle
