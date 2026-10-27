@@ -16,6 +16,23 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+zeroize.workspace = true
+# Decrypting client keys off the async worker threads (tls_key.rs).
+tokio = { workspace = true, features = ["rt", "time"] }
+# Keys the decrypted-key cache by file contents (tls_key.rs).
+sha2 = { version = "0.11.1", default-features = false }
+# Client key files: encrypted PKCS#8 (PBES2 with PBKDF2 or scrypt) and legacy
+# OpenSSL PEM encryption. `sha1-insecure` only adds the hmacWithSHA1 PRF that
+# OpenSSL 1.0 used for PBKDF2, so older key files still decrypt.
+pkcs8 = { version = "0.11.0", default-features = false, features = ["std", "encryption", "3des", "sha1-insecure"] }
+aes = "0.9.2"
+cbc = { version = "0.2.1", features = ["alloc"] }
+des = "0.9.0"
+md-5 = "0.11.0"
+base64ct = { version = "1.8.3", features = ["alloc"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

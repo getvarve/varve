@@ -154,8 +154,10 @@ fn validate_connection(input: &ConnectionInput) -> Result<ConnectionInput> {
         key_path: opt_text(ssh.key_path.as_deref()),
     };
     if out.ssh.enabled {
-        if out.ssh.host.is_empty() || out.ssh.host.chars().any(char::is_whitespace) {
-            return Err(invalid("Enter the SSH host."));
+        if !is_valid_ssh_host(&out.ssh.host) {
+            return Err(invalid(
+                "Enter the SSH host as a host name or an IP address (no spaces or wildcard characters).",
+            ));
         }
         if out.ssh.port == 0 {
             return Err(invalid("The SSH port must be between 1 and 65535."));
@@ -179,6 +181,18 @@ fn validate_connection(input: &ConnectionInput) -> Result<ConnectionInput> {
     }
     if options.init_sql.as_ref().is_some_and(|s| s.len() > 65_536) {
         return Err(invalid("Init SQL can be at most 64 KB."));
+    }
+    // Redis init commands run on every (re)connect: refuse the ones that
+    // would break or block the connection (MULTI, CLIENT REPLY, ...).
+    if input.engine == Engine::Redis
+        && let Some(script) = options.init_sql.as_deref()
+    {
+        varve_redis_syntax::check_init_script(script).map_err(|problem| {
+            invalid(format!(
+                "Init command on line {}: {}",
+                problem.line, problem.message
+            ))
+        })?;
     }
     if input.engine != Engine::Redis && options.redis_db != 0 {
         return Err(invalid(
@@ -702,6 +716,41 @@ impl Records {
         self.connection(id)
     }
 
+    /// Validates input and returns the profile it would create, without
+    /// storing it. Used to test a connection from the editor before saving.
+    /// The returned profile has the id `unsaved` and no saved secrets.
+    ///
+    /// # Errors
+    /// Validation errors.
+    pub fn preview_connection(
+        workspace_id: &str,
+        input: &ConnectionInput,
+    ) -> Result<ConnectionProfile> {
+        let input = validate_connection(input)?;
+        let now = now_ms();
+        Ok(ConnectionProfile {
+            id: "unsaved".into(),
+            workspace_id: workspace_id.to_string(),
+            folder_id: input.folder_id,
+            name: input.name,
+            color: input.color,
+            sort_order: 0,
+            engine: input.engine,
+            host: input.host,
+            port: input.port.unwrap_or_else(|| default_port(input.engine)),
+            database: input.database,
+            username: input.username,
+            environment: input.environment,
+            tls: input.tls,
+            ssh: input.ssh,
+            options: input.options,
+            saved_secrets: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            version: 0,
+        })
+    }
+
     /// Copies a profile next to the original. Secrets are not copied.
     ///
     /// # Errors
@@ -943,5 +992,46 @@ impl Records {
             tx.commit()?;
             Ok(())
         })
+    }
+}
+
+/// True for an SSH host that is a plain host name or IP address: letters,
+/// digits, `.`, `-`, `_`, and for IPv6 `:` (optionally in `[...]`, with a
+/// `%zone`). Anything else, in particular the OpenSSH `known_hosts` pattern
+/// characters `* ? ! , [ ] |` outside IPv6 brackets and whitespace, is
+/// refused, because the host ends up in `known_hosts` when its key is
+/// trusted.
+#[must_use]
+pub fn is_valid_ssh_host(host: &str) -> bool {
+    if host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    let inner = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    let (address, zone) = match inner.split_once('%') {
+        Some((address, zone)) => (address, Some(zone)),
+        None => (inner, None),
+    };
+    let zone_ok = zone.is_none_or(|z| {
+        !z.is_empty()
+            && z.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+    });
+    if inner.contains(':') {
+        // IPv6: hex digits, colons and dots (embedded IPv4) only.
+        zone_ok
+            && !address.is_empty()
+            && address
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.')
+    } else {
+        zone.is_none()
+            && inner == host
+            && !inner.starts_with(['-', '.'])
+            && inner
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
     }
 }

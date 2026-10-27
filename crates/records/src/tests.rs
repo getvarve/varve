@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use varve_core::Engine;
 use varve_driver::TlsMode;
-use varve_secrets::{MemoryStore, Secret, SecretKey, SecretKind, SecretStore};
+use varve_secrets::{
+    CountingStore, MemoryStore, Secret, SecretCache, SecretKey, SecretKind, SecretStore,
+};
 use varve_store::{Store, core_migrations};
 
 use crate::{
@@ -109,6 +111,122 @@ fn validation_messages_are_specific() -> TestResult {
     assert!(
         matches!(r.create_connection(WS, &tls), Err(RecordError::Invalid(m)) if m.contains("needs its key"))
     );
+    Ok(())
+}
+
+fn redis(init: &str) -> ConnectionInput {
+    let mut input = ConnectionInput {
+        engine: Engine::Redis,
+        database: None,
+        ..pg("cache")
+    };
+    input.options.init_sql = Some(init.into());
+    input
+}
+
+#[test]
+fn redis_init_commands_that_break_the_connection_are_refused() -> TestResult {
+    let r = records()?;
+    for (init, expected) in [
+        (
+            "MULTI",
+            "Init command on line 1: MULTI cannot be an init command",
+        ),
+        (
+            "SELECT 2\nCLIENT REPLY OFF",
+            "Init command on line 2: CLIENT cannot be an init command: it is not a connection setup command",
+        ),
+        (
+            "SELECT 1\n\nsubscribe news",
+            "Init command on line 3: SUBSCRIBE",
+        ),
+        (
+            "SET k \"open",
+            "Init command on line 1: unterminated double quote",
+        ),
+        (
+            "SELECT 2\nSHUTDOWN NOSAVE",
+            "Init command on line 2: SHUTDOWN cannot be an init command: it is not a connection setup command",
+        ),
+        (
+            "FLUSHALL",
+            "Init command on line 1: FLUSHALL cannot be an init command",
+        ),
+        (
+            "CLIENT PAUSE 3000 ALL",
+            "Init command on line 1: CLIENT cannot be an init command",
+        ),
+        (
+            "config set maxmemory 1",
+            "Init command on line 1: CONFIG cannot be an init command",
+        ),
+        // Only connection setup: writes and reads are refused too.
+        (
+            "DEL k",
+            "Init command on line 1: DEL cannot be an init command",
+        ),
+        (
+            "SAVE",
+            "Init command on line 1: SAVE cannot be an init command",
+        ),
+        (
+            "SELECT 1\nMOVE k 2",
+            "Init command on line 2: MOVE cannot be an init command",
+        ),
+        (
+            "CONFIG GET maxmemory",
+            "Init command on line 1: CONFIG cannot be an init command",
+        ),
+        (
+            "XREAD STREAMS BLOCK 0",
+            "Init command on line 1: XREAD cannot be an init command",
+        ),
+        (
+            "SELECT 70000",
+            "Init command on line 1: SELECT cannot be an init command: it selects a database number outside 0 to 65535",
+        ),
+        (
+            "AUTH app secret",
+            "Init command on line 1: AUTH cannot be an init command: it puts a password in the init text",
+        ),
+        (
+            "SELECT 1\nHELLO 2 AUTH app secret",
+            "Init command on line 2: HELLO cannot be an init command: it puts a password",
+        ),
+        (
+            "HELLO 3",
+            "Init command on line 1: HELLO cannot be an init command: it switches the protocol",
+        ),
+    ] {
+        match r.create_connection(WS, &redis(init)) {
+            Err(RecordError::Invalid(message)) => {
+                assert!(message.starts_with(expected), "{init}: {message}");
+            }
+            other => panic!("{init}: expected invalid input, got {other:?}"),
+        }
+    }
+    for init in [
+        "SELECT 2",
+        "HELLO 2",
+        "SELECT 2\nHELLO 2\nCLIENT SETNAME app",
+        "CLIENT NO-EVICT on\nCLIENT NO-TOUCH on\nCLIENT SETINFO LIB-NAME app",
+        "READONLY",
+        "HELLO 2 SETNAME auth",
+        "SELECT 65535",
+    ] {
+        r.create_connection(WS, &redis(init))?;
+    }
+    // Saving a change goes through the same check.
+    let saved = r.create_connection(WS, &redis("SELECT 2"))?;
+    let error = r.update_connection(&saved.id, &redis("MULTI"));
+    assert!(
+        matches!(&error, Err(RecordError::Invalid(m)) if m.contains("MULTI cannot be")),
+        "{error:?}"
+    );
+    // Other engines are not checked as Redis.
+    let mut postgres = pg("pg");
+    postgres.options.init_sql = Some("MULTI".into());
+    r.create_connection(WS, &postgres)?;
     Ok(())
 }
 
@@ -322,7 +440,7 @@ fn connect_params_use_keychain_and_tunnel() -> TestResult {
     )?;
 
     // Not marked as saved: no password even though the keychain has one.
-    let params = connect_params(&profile, &secrets, None, None)?;
+    let params = connect_params(&profile, &secrets, None, None, None)?;
     assert!(params.password.is_none());
 
     let profile = r.set_saved_secrets(&profile.id, &[SecretKindName::DbPassword])?;
@@ -330,7 +448,7 @@ fn connect_params_use_keychain_and_tunnel() -> TestResult {
         host: "127.0.0.1".into(),
         port: 61_000,
     };
-    let params = connect_params(&profile, &secrets, None, Some(&endpoint))?;
+    let params = connect_params(&profile, &secrets, None, None, Some(&endpoint))?;
     assert_eq!(params.password.as_ref().map(Secret::expose), Some("s3cret"));
     assert_eq!((params.host.as_str(), params.port), ("127.0.0.1", 61_000));
     assert_eq!(
@@ -344,8 +462,103 @@ fn connect_params_use_keychain_and_tunnel() -> TestResult {
     );
 
     // A prompted password wins over the keychain.
-    let params = connect_params(&profile, &secrets, Some(Secret::new("typed".into())), None)?;
+    let params = connect_params(
+        &profile,
+        &secrets,
+        Some(Secret::new("typed".into())),
+        None,
+        None,
+    )?;
     assert_eq!(params.password.as_ref().map(Secret::expose), Some("typed"));
     assert_eq!(params.tls.server_name, None);
+    Ok(())
+}
+
+#[test]
+fn connect_params_resolve_the_tls_key_passphrase() -> TestResult {
+    let r = records()?;
+    let mut input = pg("Client key");
+    input.tls.mode = TlsMode::Require;
+    input.tls.client_cert_path = Some("/certs/client.crt".into());
+    input.tls.client_key_path = Some("/certs/client.key".into());
+    let profile = r.create_connection(WS, &input)?;
+    let store = Arc::new(CountingStore::new(MemoryStore::default()));
+    store.set(
+        &SecretKey::new(profile.id.clone(), SecretKind::TlsKeyPassphrase)?,
+        &Secret::new("key-pass".into()),
+    )?;
+    let cache = SecretCache::new(Arc::clone(&store) as Arc<dyn SecretStore>, true);
+
+    // Not marked as saved: never read.
+    let params = connect_params(&profile, &cache, None, None, None)?;
+    assert!(params.tls.client_key_passphrase.is_none());
+    assert_eq!(store.reads(), 0);
+
+    let profile = r.set_saved_secrets(&profile.id, &[SecretKindName::TlsKeyPassphrase])?;
+    for _ in 0..3 {
+        let params = connect_params(&profile, &cache, None, None, None)?;
+        assert_eq!(
+            params
+                .tls
+                .client_key_passphrase
+                .as_ref()
+                .map(Secret::expose),
+            Some("key-pass")
+        );
+        // The database password is not saved: no read for it.
+        assert!(params.password.is_none());
+    }
+    assert_eq!(store.reads(), 1, "one keychain read per run");
+
+    // A typed passphrase wins and reads nothing.
+    let params = connect_params(
+        &profile,
+        store.as_ref(),
+        None,
+        Some(Secret::new("typed".into())),
+        None,
+    )?;
+    assert_eq!(
+        params
+            .tls
+            .client_key_passphrase
+            .as_ref()
+            .map(Secret::expose),
+        Some("typed")
+    );
+    assert_eq!(store.reads(), 1);
+
+    // TLS off or no client key: the passphrase is neither read nor passed.
+    // (Editing refuses TLS off with key files; resolving still checks it.)
+    let changes: [fn(&mut crate::ConnectionProfile); 2] = [
+        |p| p.tls.mode = TlsMode::Disable,
+        |p| {
+            p.tls.client_cert_path = None;
+            p.tls.client_key_path = None;
+        },
+    ];
+    for change in changes {
+        let mut other = profile.clone();
+        change(&mut other);
+        let params = connect_params(
+            &other,
+            store.as_ref(),
+            None,
+            Some(Secret::new("typed".into())),
+            None,
+        )?;
+        assert!(params.tls.client_key_passphrase.is_none());
+        let params = connect_params(&other, store.as_ref(), None, None, None)?;
+        assert!(params.tls.client_key_passphrase.is_none());
+    }
+    assert_eq!(store.reads(), 1);
+    // Never printed.
+    assert!(
+        !format!(
+            "{params:?}",
+            params = connect_params(&profile, &cache, None, None, None)?
+        )
+        .contains("key-pass")
+    );
     Ok(())
 }

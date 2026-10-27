@@ -17,5 +17,5 @@ pub use model::{
     FolderDeleteMode, PERSONAL_WORKSPACE, SavedQuery, SavedQueryInput, SecretKindName,
     SshAuthMethod, SshSettings, TlsSettings, default_port,
 };
-pub use repo::{RecordError, Records, ReorderKind};
+pub use repo::{RecordError, Records, ReorderKind, is_valid_ssh_host};
 pub use resolve::{TunnelEndpoint, connect_params};
