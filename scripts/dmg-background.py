@@ -24,6 +24,9 @@ WIDTH, HEIGHT = _DMG['windowSize']['width'], _DMG['windowSize']['height']
 APP = (_DMG['appPosition']['x'], _DMG['appPosition']['y'])
 APPLICATIONS = (_DMG['applicationFolderPosition']['x'], _DMG['applicationFolderPosition']['y'])
 
+# Violet slate with relative luminance 0.178: 4.57:1 against black text and 4.60:1 against white.
+LABEL_GROUND = '#74738B'
+
 SANS = "'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif"
 
 
@@ -33,28 +36,32 @@ def svg() -> str:
     # The arrow runs between the two 128 pt icons with room to spare, arching a little upward.
     x1, x2, y = ax + 92, bx - 98, ay - 6
     mid = (x1 + x2) / 2
+    # Finder draws the icon labels black in light mode and white in dark mode, over this image.
+    # LABEL_GROUND has a relative luminance of 0.178, which gives both 4.6:1 contrast (WCAG AA), so
+    # the labels read in either mode. The band behind the labels stays that exact flat color; the
+    # glow sits above the icons, never behind a label.
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FBFBFD"/><stop offset="1" stop-color="#EEEFF4"/>
-    </linearGradient>
-    <radialGradient id="glow"><stop offset="0" stop-color="#8B7CFF" stop-opacity="0.16"/><stop offset="1" stop-color="#8B7CFF" stop-opacity="0"/></radialGradient>
-    <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="#5B4BE0" fill-opacity="0.07"/></pattern>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#8B7CFF" stop-opacity="0.38"/><stop offset="1" stop-color="#8B7CFF" stop-opacity="0"/></radialGradient>
+    <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="#FFFFFF" fill-opacity="0.06"/></pattern>
     <marker id="head" viewBox="0 0 20 20" refX="12" refY="10" markerWidth="20" markerHeight="20" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M2 2.5 L13 10 L2 17.5" fill="none" stroke="#5B4BE0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M2 2.5 L13 10 L2 17.5" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
     <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#8B7CFF" stop-opacity="0.35"/><stop offset="1" stop-color="#5B4BE0"/>
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/><stop offset="1" stop-color="#FFFFFF"/>
     </linearGradient>
+    <clipPath id="above-labels"><rect width="{WIDTH}" height="{ay + 50}"/></clipPath>
   </defs>
-  <rect width="{WIDTH}" height="{HEIGHT}" fill="url(#bg)"/>
-  <rect width="{WIDTH}" height="{HEIGHT}" fill="url(#dots)"/>
-  <circle cx="{ax}" cy="{ay}" r="150" fill="url(#glow)"/>
-  <circle cx="{bx}" cy="{by}" r="150" fill="url(#glow)"/>
-  <text x="{WIDTH / 2}" y="58" text-anchor="middle" font-family="{SANS}" font-size="19" font-weight="600" fill="#14171C">Drag Varve to Applications</text>
-  <text x="{WIDTH / 2}" y="82" text-anchor="middle" font-family="{SANS}" font-size="12.5" fill="#6A7180">Then open it from your Applications folder or Spotlight.</text>
+  <rect width="{WIDTH}" height="{HEIGHT}" fill="{LABEL_GROUND}"/>
+  <g clip-path="url(#above-labels)">
+    <ellipse cx="{ax}" cy="{ay - 40}" rx="140" ry="90" fill="url(#glow)"/>
+    <ellipse cx="{bx}" cy="{by - 40}" rx="140" ry="90" fill="url(#glow)"/>
+    <rect width="{WIDTH}" height="{ay + 50}" fill="url(#dots)"/>
+  </g>
+  <text x="{WIDTH / 2}" y="58" text-anchor="middle" font-family="{SANS}" font-size="19" font-weight="600" fill="#FFFFFF">Drag Varve to Applications</text>
+  <text x="{WIDTH / 2}" y="82" text-anchor="middle" font-family="{SANS}" font-size="12.5" font-weight="500" fill="#FFFFFF">Then open it from your Applications folder or Spotlight.</text>
   <path d="M{x1} {y} Q {mid} {y - 34} {x2} {y}" fill="none" stroke="url(#arrow)" stroke-width="3" stroke-linecap="round" stroke-dasharray="0.1 9" marker-end="url(#head)"/>
-  <text x="{WIDTH / 2}" y="{HEIGHT - 52}" text-anchor="middle" font-family="{SANS}" font-size="11" fill="#9AA0AB">Varve Community  ·  github.com/getvarve/varve</text>
+  <text x="{WIDTH / 2}" y="{HEIGHT - 52}" text-anchor="middle" font-family="{SANS}" font-size="11" font-weight="500" fill="#FFFFFF">Varve Community  ·  github.com/getvarve/varve</text>
 </svg>
 '''
 
