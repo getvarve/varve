@@ -5,9 +5,9 @@ members = ["crates/*", "app/src-tauri"]
 [workspace.package]
 version = "0.0.3"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 license = "Apache-2.0"
-repository = "https://github.com/SherinBloemendaal/varve"
+repository = "https://github.com/getvarve/varve"
 homepage = "https://getvarve.com"
 authors = ["The Varve Authors"]
 publish = false
@@ -19,6 +19,7 @@ varve-store = { path = "crates/store" }
 varve-secrets = { path = "crates/secrets" }
 varve-driver = { path = "crates/driver" }
 varve-records = { path = "crates/records" }
+varve-redis-syntax = { path = "crates/redis-syntax" }
 varve-app = { path = "app/src-tauri" }
 
 async-trait = "0.1.92"
@@ -27,7 +28,7 @@ keyring = { version = "4.2", default-features = false, features = ["v1"] }
 refinery = { version = "0.10", default-features = false, features = ["rusqlite"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
+serde_json = { version = "1.0.154", features = ["raw_value"] }
 tauri = { version = "2.12.4", features = [] }
 tauri-build = { version = "2.7.3", features = [] }
 thiserror = "2.0.21"
@@ -49,3 +50,7 @@ expect_used = "warn"
 codegen-units = 1
 lto = true
 strip = true
+
+[patch.crates-io]
+mysql_async = { path = "vendor/mysql_async" }
+tokio-postgres = { path = "vendor/tokio-postgres" }
