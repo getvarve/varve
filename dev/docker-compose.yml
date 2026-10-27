@@ -165,6 +165,13 @@ services:
     image: valkey/valkey:9-alpine
     ports: ["63190:6379"]
     profiles: [redis, all]
+  # Valkey 9 with valkey-search, valkey-bloom and valkey-json, for the Redis
+  # module tests (VARVE_VALKEY_BUNDLE). Redis 8.10 above bundles its modules.
+  valkey-bundle-9:
+    <<: *valkey
+    image: valkey/valkey-bundle:9-alpine
+    ports: ["63195:6379"]
+    profiles: [redis, all]
 
   # Servers with renamed admin commands, for the Redis read-only and risk
   # tests (VARVE_REDIS_RENAMED_SERVERS, ports 63064, 63084 and 63194).

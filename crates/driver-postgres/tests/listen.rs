@@ -5,7 +5,10 @@
 //! Endpoints: `VARVE_LISTEN_PG13_PORT` and `VARVE_LISTEN_PG18_PORT` (defaults
 //! 56713 and 56718), `VARVE_PG_HOST`, user `varve`, password `varve_dev`,
 //! database `varve`. Run with `--include-ignored` against a compose project
-//! that publishes those ports.
+//! that publishes those ports. `VARVE_PG_SERVERS` (as in
+//! `tests/common/mod.rs`) replaces both ports when it is set.
+
+mod common;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,7 +44,14 @@ fn port(name: &str, default: u16) -> u16 {
 }
 
 /// `(major, port)` of the servers under test, oldest first.
+///
+/// `VARVE_PG_SERVERS` (for example `18:54318`, as CI sets it for every
+/// integration test of this crate) replaces the listen ports; without it
+/// the listen test servers run.
 fn servers() -> Vec<(u32, u16)> {
+    if std::env::var_os("VARVE_PG_SERVERS").is_some() {
+        return common::servers();
+    }
     vec![
         (13, port("VARVE_LISTEN_PG13_PORT", 56713)),
         (18, port("VARVE_LISTEN_PG18_PORT", 56718)),

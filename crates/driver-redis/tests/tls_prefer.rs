@@ -9,7 +9,8 @@
 //!   newest Redis and the newest Valkey, with the endpoint overrides
 //!   `VARVE_REDIS_62` (`127.0.0.1:63062`), `VARVE_REDIS_810`
 //!   (`127.0.0.1:63081`) and `VARVE_VALKEY_9` (`127.0.0.1:63190`), password
-//!   `VARVE_REDIS_PASSWORD` (`varve_dev`).
+//!   `VARVE_REDIS_PASSWORD` (`varve_dev`). `VARVE_REDIS_SERVERS` (as in
+//!   `tests/matrix.rs`: `label@host:port,...`) replaces that list when set.
 //! - One `#[ignore]` test that generates a CA and a server certificate with
 //!   rcgen and starts TLS-only Redis 6.2 and 8.10 and Valkey 9 from
 //!   `tests/tls-servers/compose.yml` under its own compose project
@@ -289,12 +290,39 @@ async fn prefer_against_a_silent_server_stays_within_the_connect_timeout() -> Te
 // The plain dev servers.
 
 struct Server {
-    label: &'static str,
+    label: String,
     host: String,
     port: u16,
 }
 
+/// Parses `host:port`; `var` names where it came from in the error.
+fn endpoint(label: &str, var: &str, endpoint: &str) -> Result<Server, Box<dyn Error>> {
+    let (host, port) = endpoint
+        .rsplit_once(':')
+        .ok_or_else(|| format!("{var}: `{endpoint}` must be host:port"))?;
+    Ok(Server {
+        label: label.to_string(),
+        host: host.to_string(),
+        port: port
+            .parse()
+            .map_err(|e| format!("{var}: bad port in `{endpoint}`: {e}"))?,
+    })
+}
+
+/// `VARVE_REDIS_SERVERS` (`redis-8.10@127.0.0.1:63081,...`) when it is set,
+/// otherwise Redis 6.2, Redis 8.10 and Valkey 9 from their own variables.
 fn plain_servers() -> Result<Vec<Server>, Box<dyn Error>> {
+    if let Ok(list) = std::env::var("VARVE_REDIS_SERVERS") {
+        return list
+            .split(',')
+            .map(|item| {
+                let (label, address) = item.trim().split_once('@').ok_or_else(|| {
+                    format!("VARVE_REDIS_SERVERS: `{item}` must be label@host:port")
+                })?;
+                endpoint(label, "VARVE_REDIS_SERVERS", address)
+            })
+            .collect();
+    }
     [
         ("redis-6.2", "VARVE_REDIS_62", "127.0.0.1:63062"),
         ("redis-8.10", "VARVE_REDIS_810", "127.0.0.1:63081"),
@@ -302,15 +330,8 @@ fn plain_servers() -> Result<Vec<Server>, Box<dyn Error>> {
     ]
     .into_iter()
     .map(|(label, var, default)| {
-        let endpoint = std::env::var(var).unwrap_or_else(|_| default.to_string());
-        let (host, port) = endpoint
-            .rsplit_once(':')
-            .ok_or_else(|| format!("{var}: `{endpoint}` must be host:port"))?;
-        Ok(Server {
-            label,
-            host: host.to_string(),
-            port: port.parse()?,
-        })
+        let address = std::env::var(var).unwrap_or_else(|_| default.to_string());
+        endpoint(label, var, &address)
     })
     .collect()
 }
@@ -327,13 +348,15 @@ async fn reachable(server: &Server) -> TestResult {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(error)) => Err(format!(
             "{}: nothing accepts connections on {}:{} ({error}); start the dev Redis servers or \
-             point VARVE_REDIS_62, VARVE_REDIS_810 and VARVE_VALKEY_9 at running ones",
+             point VARVE_REDIS_SERVERS (or VARVE_REDIS_62, VARVE_REDIS_810 and VARVE_VALKEY_9) \
+             at running ones",
             server.label, server.host, server.port
         )
         .into()),
         Err(_) => Err(format!(
             "{}: {}:{} did not accept a TCP connection within 3 s; start the dev Redis servers \
-             or point VARVE_REDIS_62, VARVE_REDIS_810 and VARVE_VALKEY_9 at running ones",
+             or point VARVE_REDIS_SERVERS (or VARVE_REDIS_62, VARVE_REDIS_810 and \
+             VARVE_VALKEY_9) at running ones",
             server.label, server.host, server.port
         )
         .into()),
@@ -356,7 +379,7 @@ fn plain_params(server: &Server, mode: TlsMode) -> ConnectParams {
 #[ignore = "needs the dev database matrix"]
 async fn prefer_connects_to_plain_servers_without_a_tls_wait() -> TestResult {
     for server in plain_servers()? {
-        let label = server.label;
+        let label = server.label.as_str();
         // The default connect timeout (10 s), as the app uses it.
         let p = plain_params(&server, TlsMode::Prefer);
         reachable(&server).await?;
@@ -381,7 +404,7 @@ async fn prefer_connects_to_plain_servers_without_a_tls_wait() -> TestResult {
 #[ignore = "needs the dev database matrix"]
 async fn require_fails_against_plain_servers() -> TestResult {
     for server in plain_servers()? {
-        let label = server.label;
+        let label = server.label.as_str();
         reachable(&server).await?;
         for mode in [TlsMode::Require, TlsMode::VerifyFull] {
             let mut p = plain_params(&server, mode);

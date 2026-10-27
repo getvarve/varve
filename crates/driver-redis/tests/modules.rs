@@ -7,8 +7,10 @@
 //!   default the dev ports of Redis 6.2, Redis 8.10 and Valkey 9) runs
 //!   module detection, help and bulk TTL changes.
 //! - The module tests need a server with the modules: `VARVE_REDIS_MODULES`
-//!   (`host:port`, default `127.0.0.1:64381`), for example Redis 8 (which
-//!   bundles JSON, Search, TimeSeries and Bloom) or Redis Stack.
+//!   (`host:port`, default `127.0.0.1:63081`, the dev Redis 8.10, whose image
+//!   bundles JSON, Search, TimeSeries and Bloom), or Redis Stack.
+//! - The Valkey module test needs valkey-bundle: `VARVE_VALKEY_BUNDLE`
+//!   (`host:port`, default `127.0.0.1:63195`, the dev `valkey-bundle-9`).
 //!
 //! Tests use logical database 12 and keys under `mod:`, which they remove
 //! (Search indexes are dropped too).
@@ -76,7 +78,7 @@ fn servers() -> Vec<Server> {
 
 fn module_server() -> Server {
     let mut server = parse_server(
-        &std::env::var("VARVE_REDIS_MODULES").unwrap_or_else(|_| "127.0.0.1:64381".into()),
+        &std::env::var("VARVE_REDIS_MODULES").unwrap_or_else(|_| "127.0.0.1:63081".into()),
     );
     server.label = "modules".into();
     server.major = 8;
@@ -855,10 +857,10 @@ fn settings(index: &varve_driver_redis::SearchIndex) -> varve_driver_redis::Sear
 }
 
 /// valkey-bundle (valkey-search, valkey-bloom, valkey-json): `VARVE_VALKEY_BUNDLE`
-/// (`host:port`, default `127.0.0.1:64395`).
+/// (`host:port`, default `127.0.0.1:63195`, the dev `valkey-bundle-9`).
 fn valkey_bundle() -> Server {
     let mut server = parse_server(
-        &std::env::var("VARVE_VALKEY_BUNDLE").unwrap_or_else(|_| "127.0.0.1:64395".into()),
+        &std::env::var("VARVE_VALKEY_BUNDLE").unwrap_or_else(|_| "127.0.0.1:63195".into()),
     );
     server.label = "valkey-bundle".into();
     server.valkey = true;

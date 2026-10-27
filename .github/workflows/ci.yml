@@ -103,7 +103,7 @@ jobs:
           - suite: driver-mysql
             extra: ''
           - suite: driver-redis
-            extra: valkey-9 redis-8.10-renamed valkey-9-renamed
+            extra: valkey-9 valkey-bundle-9 redis-8.10-renamed valkey-9-renamed
           - suite: catalog
             extra: ''
           - suite: live-stats
@@ -119,6 +119,10 @@ jobs:
       # varve-driver-redis (tests/matrix.rs, tests/partial.rs).
       VARVE_REDIS_SERVERS: redis-8.10@127.0.0.1:63081,valkey-9@127.0.0.1:63190
       VARVE_REDIS_RENAMED_SERVERS: redis-8.10@127.0.0.1:63084,valkey-9@127.0.0.1:63194
+      # varve-driver-redis (tests/modules.rs): the redis:8.10 image bundles
+      # JSON, Search, TimeSeries and Bloom; valkey-bundle-9 has the Valkey ones.
+      VARVE_REDIS_MODULES: 127.0.0.1:63081
+      VARVE_VALKEY_BUNDLE: 127.0.0.1:63195
       # Tests written for the shared M2 matrix (ports 355xx, 555xx, 640xx by
       # default) point at the dev compose ports instead.
       VARVE_PG18_PORT: '54318'
@@ -208,7 +212,11 @@ jobs:
                 --skip index_redefinition_round_trips_on_mysql_8_0 \
                 --skip index_redefinition_round_trips_on_mysql_9_7 \
                 --skip index_redefinition_round_trips_on_mariadb_10_6 \
-                --skip index_redefinition_round_trips_on_mariadb_12_3
+                --skip index_redefinition_round_trips_on_mariadb_12_3 \
+                --skip table_designer_round_trips_on_postgres_13 \
+                --skip table_designer_round_trips_on_mysql_8_0 \
+                --skip table_designer_round_trips_on_mysql_8_4 \
+                --skip table_designer_round_trips_on_mariadb_10_6
               # The table designer's index redefinition through the UI's
               # samples (api/__contract__), on the newest servers.
               cargo test -p varve-catalog --no-fail-fast --test ui_index_round_trip -- \

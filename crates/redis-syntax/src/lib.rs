@@ -193,7 +193,7 @@ fn split(line: &str, strict: bool) -> Result<Vec<Arg>, SplitError> {
         let end = byte_at(i);
         let (content_start, content_end) = match sections.as_slice() {
             [(open, close)] if *open == start && close.is_none_or(|c| c + 1 == i) => {
-                (byte_at(open + 1), close.map_or(line.len(), &byte_at))
+                (byte_at(open + 1), close.map_or(line.len(), byte_at))
             }
             _ => (byte_at(start), end),
         };
