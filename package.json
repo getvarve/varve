@@ -7,12 +7,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tauri dev",
+    "dev": "node scripts/dev.mjs",
     "build": "tauri build",
     "tauri": "tauri",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint --max-warnings 0 .",
     "test": "pnpm -r --if-present test",
+    "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "check:no-pro": "node scripts/check-no-pro.mjs"
   },
   "devDependencies": {

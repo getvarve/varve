@@ -165,3 +165,28 @@ services:
     image: valkey/valkey:9-alpine
     ports: ["63190:6379"]
     profiles: [redis, all]
+
+  # Servers with renamed admin commands, for the Redis read-only and risk
+  # tests (VARVE_REDIS_RENAMED_SERVERS, ports 63064, 63084 and 63194).
+  redis-6.2-renamed:
+    <<: *redis
+    image: redis:6.2-alpine
+    command: &renamed-args ["redis-server", "--requirepass", "varve_dev", "--save", "",
+      "--rename-command", "CONFIG", "MYCONF", "--rename-command", "SHUTDOWN", "MYSHUT",
+      "--rename-command", "SCRIPT", "MYSCRIPT", "--rename-command", "FLUSHALL", ""]
+    ports: ["63064:6379"]
+    profiles: [redis, all]
+  redis-8.10-renamed:
+    <<: *redis
+    image: redis:8.10-alpine
+    command: *renamed-args
+    ports: ["63084:6379"]
+    profiles: [redis, all]
+  valkey-9-renamed:
+    <<: *valkey
+    image: valkey/valkey:9-alpine
+    command: ["valkey-server", "--requirepass", "varve_dev", "--save", "",
+      "--rename-command", "CONFIG", "MYCONF", "--rename-command", "SHUTDOWN", "MYSHUT",
+      "--rename-command", "SCRIPT", "MYSCRIPT", "--rename-command", "FLUSHALL", ""]
+    ports: ["63194:6379"]
+    profiles: [redis, all]
