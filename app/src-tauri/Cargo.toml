@@ -27,15 +27,29 @@ varve-extension.workspace = true
 varve-records.workspace = true
 varve-secrets.workspace = true
 varve-store.workspace = true
+varve-activity = { path = "../../crates/activity" }
+varve-catalog = { path = "../../crates/catalog" }
+varve-driver-mysql = { path = "../../crates/driver-mysql" }
+varve-driver-postgres = { path = "../../crates/driver-postgres" }
+varve-driver-redis = { path = "../../crates/driver-redis" }
+varve-live-stats = { path = "../../crates/live-stats" }
+varve-redis-syntax.workspace = true
+varve-tunnel = { path = "../../crates/tunnel" }
 async-trait.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["time"] }
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-fs = "2.7.1"
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+# A plain MySQL client: the baseline the privilege tests compare Varve with.
+mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "tls12", "ring"] }
 
 [lints]
 workspace = true

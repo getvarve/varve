@@ -15,5 +15,7 @@ export default defineConfig({
     outDir: 'dist',
     target: 'es2022',
     sourcemap: true,
+    // A desktop app loads its chunks from disk; the result grid chunk (AG Grid) alone is about 1.2 MB and loads on first use.
+    chunkSizeWarningLimit: 1300,
   },
 });
