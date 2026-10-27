@@ -1,0 +1,50 @@
+# TLS servers for `tests/tls.rs`. The test generates a CA and a server
+# certificate with rcgen, writes them to a temporary directory and starts
+# this file with VARVE_MYSQL_TLS_DIR pointing at it; it also tears it down.
+#
+# The server certificate is issued for db.varve.invalid only, so it does not
+# match 127.0.0.1: VerifyCa must accept it, VerifyFull must not.
+#
+# Credentials are local test values only.
+
+x-certs: &certs
+  volumes: ["${VARVE_MYSQL_TLS_DIR:?set by tests/tls.rs}:/certs:ro"]
+  tmpfs: ["/var/lib/mysql"]
+
+services:
+  mysql:
+    <<: *certs
+    image: mysql:8.0
+    command:
+      - --ssl-ca=/certs/ca.pem
+      - --ssl-cert=/certs/server-cert.pem
+      - --ssl-key=/certs/server-key.pem
+    environment:
+      MYSQL_ROOT_PASSWORD: varve_dev
+      MYSQL_DATABASE: varve
+      MYSQL_USER: varve
+      MYSQL_PASSWORD: varve_dev
+    ports: ["${VARVE_MYSQL_TLS_MYSQL_PORT:-33190}:3306"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pvarve_dev --silent"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  mariadb:
+    <<: *certs
+    image: mariadb:12.3
+    command:
+      - --ssl-ca=/certs/ca.pem
+      - --ssl-cert=/certs/server-cert.pem
+      - --ssl-key=/certs/server-key.pem
+    environment:
+      MARIADB_ROOT_PASSWORD: varve_dev
+      MARIADB_DATABASE: varve
+      MARIADB_USER: varve
+      MARIADB_PASSWORD: varve_dev
+    ports: ["${VARVE_MYSQL_TLS_MARIADB_PORT:-33191}:3306"]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 3s
+      retries: 60

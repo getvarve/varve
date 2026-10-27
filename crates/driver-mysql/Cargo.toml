@@ -10,6 +10,30 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+varve-core.workspace = true
+varve-driver.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["time", "macros"] }
+tracing.workspace = true
+# rustls with the ring provider, no OpenSSL and no native-tls.
+# Pinned exactly: the VerifyCa workaround (`VERIFY_CA_SERVER_NAME` in
+# src/connect.rs) relies on mysql_async 0.37.1 skipping a rustls error whose
+# text contains "NotValidForName". Re-check that code path (and run the TLS
+# integration test in tests/tls.rs) before changing this version. The root
+# Cargo.toml patches this crate with vendor/mysql_async (session state
+# tracking, see vendor/mysql_async/VARVE-PATCH.md); a new version needs that
+# patch re-applied or dropped.
+mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "tls12", "ring"] }
+rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
+rustls-native-certs = "0.8.5"
+
+[dev-dependencies]
+serde_json.workspace = true
+varve-secrets.workspace = true
+tokio = { workspace = true, features = ["time", "macros", "rt-multi-thread"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+# Encrypting the client keys of tests/client_key.rs.
+pkcs8 = { version = "0.11.0", default-features = false, features = ["std", "encryption", "pem"] }
 
 [lints]
 workspace = true

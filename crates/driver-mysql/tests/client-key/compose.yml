@@ -1,0 +1,43 @@
+# MySQL 8.4 and MariaDB 12.3 for `tests/client_key.rs`: init.sql creates the
+# account varve_x509 (password varve_dev, REQUIRE X509), which needs a client
+# certificate signed by ca.pem. The test writes the certificates and init.sql
+# to a fresh directory, starts this file with VARVE_TLSKEY_DIR pointing at it
+# under its own compose project, and tears it down again. Host ports are
+# picked by Docker.
+#
+# Credentials are local test values only.
+
+x-tls: &tls
+  volumes:
+    - ${VARVE_TLSKEY_DIR:?set by tests/client_key.rs}:/certs:ro
+    - ${VARVE_TLSKEY_DIR:?set by tests/client_key.rs}/init.sql:/docker-entrypoint-initdb.d/varve-x509.sql:ro
+  command:
+    - --ssl-ca=/certs/ca.pem
+    - --ssl-cert=/certs/server-cert.pem
+    - --ssl-key=/certs/server-key.pem
+  tmpfs: ["/var/lib/mysql"]
+  ports: ["127.0.0.1::3306"]
+
+services:
+  mysql-8.4:
+    <<: *tls
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: varve_dev
+      MYSQL_DATABASE: varve
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pvarve_dev --silent"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  mariadb-12.3:
+    <<: *tls
+    image: mariadb:12.3
+    environment:
+      MARIADB_ROOT_PASSWORD: varve_dev
+      MARIADB_DATABASE: varve
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
