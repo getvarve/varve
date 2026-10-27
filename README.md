@@ -175,7 +175,24 @@ pnpm tauri build    # build an installer
 
 ### Releases
 
-Push a signed `vMAJOR.MINOR.PATCH` tag whose version matches `Cargo.toml` and both `package.json` files. CI runs every check on the tagged commit, and only when all of them pass does it build the installers for macOS, Windows and Linux and publish them with `SHA256SUMS` as a GitHub release. The README images come from `scripts/readme-images.py`.
+Push a signed `vMAJOR.MINOR.PATCH` tag whose version matches `Cargo.toml` and both `package.json` files. CI runs every check on the tagged commit, and only when all of them pass does it build the installers for macOS, Windows and Linux and publish them with `SHA256SUMS` as a GitHub release. Generated art, each from a script you run after editing it:
+
+| What | Script | Then |
+| --- | --- | --- |
+| App icon (`assets/logo/varve-app-icon*.svg`) | `scripts/app-icon.py` | The commands below, then `scripts/readme-images.py` (the banner draws the same tile) |
+| macOS installer window (`app/src-tauri/dmg/background.png`) | `scripts/dmg-background.py` | Rerun after changing `bundle.macOS.dmg` in `tauri.conf.json`; it reads the window size and icon positions from there |
+| README banner and diagram (`assets/readme`) | `scripts/readme-images.py` | Nothing |
+
+The app icon files come from two renders: the macOS one (on Apple's icon grid, with a shadow) for `icon.icns`, the full-bleed one for everything else. `pnpm tauri icon` also writes Android and iOS files, so it writes to a temporary folder and only the files `app/src-tauri/icons` already has are copied back:
+
+```bash
+rsvg-convert -w 1024 assets/logo/varve-app-icon.svg -o /tmp/varve-icon.png
+rsvg-convert -w 1024 assets/logo/varve-app-icon-macos.svg -o /tmp/varve-icon-macos.png
+pnpm tauri icon /tmp/varve-icon.png -o /tmp/varve-icons
+pnpm tauri icon /tmp/varve-icon-macos.png -o /tmp/varve-icons-macos
+for f in app/src-tauri/icons/*; do cp "/tmp/varve-icons/$(basename "$f")" "$f"; done
+cp /tmp/varve-icons-macos/icon.icns app/src-tauri/icons/icon.icns
+```
 
 ## 🤝 Contributing
 

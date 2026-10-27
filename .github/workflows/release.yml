@@ -72,6 +72,9 @@ jobs:
           # Ad-hoc signature: no Apple certificate yet, but a valid signature
           # lets macOS offer "Open Anyway" instead of calling the app damaged.
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+          # With CI set, Tauri skips the Finder script that lays out the installer window
+          # (background, window size, icon positions); this keeps it.
+          TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
         run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
       - name: Collect assets under fixed names
         shell: bash

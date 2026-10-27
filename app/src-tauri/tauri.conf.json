@@ -34,6 +34,14 @@
     "longDescription": "A calm desktop manager for PostgreSQL, MySQL, MariaDB and Redis.",
     "copyright": "Copyright 2026 The Varve Authors",
     "license": "Apache-2.0",
+    "macOS": {
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 170, "y": 205 },
+        "applicationFolderPosition": { "x": 490, "y": 205 }
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
