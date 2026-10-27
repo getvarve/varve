@@ -5,7 +5,13 @@ Edit the content in banner() / how_it_works() or the THEMES palette, then run:
     python3 scripts/readme-images.py
 """
 
+import importlib.util
 from pathlib import Path
+
+# One source for the icon: the README banner draws the same tile as the app.
+_spec = importlib.util.spec_from_file_location('app_icon', Path(__file__).resolve().parent / 'app-icon.py')
+APP_ICON = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(APP_ICON)
 
 OUT = Path(__file__).resolve().parent.parent / 'assets' / 'readme'
 
@@ -33,17 +39,8 @@ THEMES = {
 
 
 def mark(x: float, y: float, size: float) -> str:
-    """The app icon (assets/logo/varve-icon.svg): year rings on a dark tile, the same in both themes."""
-    scale = size / 512
-    return (
-        f'<g transform="translate({x} {y}) scale({scale:.5f})">'
-        '<rect width="512" height="512" rx="114" fill="#14171C"/>'
-        '<g fill="none" stroke-linecap="round" transform="rotate(-62 256 256)">'
-        '<circle cx="256" cy="256" r="172" stroke="#8B7CFF" stroke-width="44" stroke-dasharray="900 1081"/>'
-        '<circle cx="256" cy="256" r="118" stroke="#E6E8EC" stroke-width="30" stroke-dasharray="618 741"/>'
-        '<circle cx="256" cy="256" r="76" stroke="#A3A9B5" stroke-width="20" stroke-dasharray="398 478"/>'
-        '</g><circle cx="256" cy="256" r="28" fill="#6A7180"/></g>'
-    )
+    """The app icon (scripts/app-icon.py, full bleed), the same in both themes."""
+    return f'<g transform="translate({x} {y}) scale({size / 512:.5f})">{APP_ICON.tile("readme-")}</g>'
 
 
 def text(x, y, content, t, size=14, weight=400, fill='text', family=SANS, anchor='start', extra=''):
