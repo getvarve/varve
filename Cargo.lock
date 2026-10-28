@@ -6396,7 +6396,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "varve-activity"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aho-corasick",
  "mysql_async",
@@ -6417,7 +6417,7 @@ dependencies = [
 
 [[package]]
 name = "varve-app"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "mysql_async",
@@ -6454,7 +6454,7 @@ dependencies = [
 
 [[package]]
 name = "varve-catalog"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "serde",
@@ -6471,7 +6471,7 @@ dependencies = [
 
 [[package]]
 name = "varve-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -6480,7 +6480,7 @@ dependencies = [
 
 [[package]]
 name = "varve-driver"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "aes",
  "async-trait",
@@ -6502,7 +6502,7 @@ dependencies = [
 
 [[package]]
 name = "varve-driver-mysql"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "mysql_async",
@@ -6520,7 +6520,7 @@ dependencies = [
 
 [[package]]
 name = "varve-driver-postgres"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "futures",
@@ -6541,7 +6541,7 @@ dependencies = [
 
 [[package]]
 name = "varve-driver-redis"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "pkcs8",
@@ -6562,7 +6562,7 @@ dependencies = [
 
 [[package]]
 name = "varve-extension"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -6575,11 +6575,11 @@ dependencies = [
 
 [[package]]
 name = "varve-jobs"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "varve-live-stats"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "serde",
@@ -6600,7 +6600,7 @@ dependencies = [
 
 [[package]]
 name = "varve-records"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "rusqlite",
  "serde",
@@ -6616,11 +6616,11 @@ dependencies = [
 
 [[package]]
 name = "varve-redis-syntax"
-version = "0.1.6"
+version = "0.1.7"
 
 [[package]]
 name = "varve-secrets"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "keyring",
  "thiserror 2.0.21",
@@ -6629,7 +6629,7 @@ dependencies = [
 
 [[package]]
 name = "varve-sparkle"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "block2",
  "objc2",
@@ -6638,7 +6638,7 @@ dependencies = [
 
 [[package]]
 name = "varve-store"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "refinery",
  "rusqlite",
@@ -6649,7 +6649,7 @@ dependencies = [
 
 [[package]]
 name = "varve-tunnel"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "data-encoding",
  "getrandom 0.4.3",
