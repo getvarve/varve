@@ -18,6 +18,23 @@
 
 Var VarveLegacyDir
 
+; Points an existing shortcut at a new exe and starts it in that exe's folder. The template's
+; SetShortcutTarget sets only the target, which leaves "Start in" at the old, removed folder.
+!macro VARVE_RETARGET_SHORTCUT shortcut target dir
+  !insertmacro ComHlpr_CreateInProcInstance ${CLSID_ShellLink} ${IID_IShellLink} r0 ""
+  ${If} $0 P<> 0
+    ${IUnknown::QueryInterface} $0 '("${IID_IPersistFile}",.r1)'
+    ${If} $1 P<> 0
+      ${IPersistFile::Load} $1 '("${shortcut}", ${STGM_READWRITE})'
+      ${IShellLink::SetPath} $0 '(w "${target}")'
+      ${IShellLink::SetWorkingDirectory} $0 '(w "${dir}")'
+      ${IPersistFile::Save} $1 '("${shortcut}",1)'
+      ${IUnknown::Release} $1 ""
+    ${EndIf}
+    ${IUnknown::Release} $0 ""
+  ${EndIf}
+!macroend
+
 ; Sets $VarveLegacyDir to the folder of an old Varve Community install, or "" when there is none.
 ; The installers were per user (HKCU), and they write InstallLocation in quotes.
 !macro VARVE_FIND_LEGACY
@@ -89,7 +106,7 @@ Var VarveLegacyDir
     ${EndIf}
 
     ${If} $R5 = 1
-      ; The uninstaller keeps the key with the old install folder; drop it with the rest.
+      ; The uninstaller keeps the key that holds the old install folder and language; drop it.
       DeleteRegKey HKCU "${VARVE_LEGACY_UNINSTKEY}"
       DeleteRegKey HKCU "${MANUKEY}\${VARVE_LEGACY_NAME}"
       DeleteRegKey /ifempty HKCU "${MANUKEY}"
@@ -114,7 +131,7 @@ Var VarveLegacyDir
       !insertmacro IsShortcutTarget "${VARVE_LEGACY_TASKBAR_PIN}" "$VarveLegacyDir\${MAINBINARYNAME}.exe"
       Pop $0
       ${If} $0 = 1
-        !insertmacro SetShortcutTarget "${VARVE_LEGACY_TASKBAR_PIN}" "$INSTDIR\${MAINBINARYNAME}.exe"
+        !insertmacro VARVE_RETARGET_SHORTCUT "${VARVE_LEGACY_TASKBAR_PIN}" "$INSTDIR\${MAINBINARYNAME}.exe" "$INSTDIR"
       ${EndIf}
     ${EndIf}
   ${EndIf}

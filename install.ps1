@@ -413,11 +413,11 @@ try {
         $legacyRelease = $requested -le [version]'0.1.7'
     }
     $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName -LegacyFirst:$legacyRelease
-    if ($null -eq $found.Dir) {
-        throw "the installer finished, but varve.exe is missing from $(Join-Path $env:LOCALAPPDATA $appName)"
-    }
     if ($legacyRelease) {
         $appName = $legacyName
+    }
+    if ($null -eq $found.Dir) {
+        throw "the installer finished, but varve.exe is missing from $(Join-Path $env:LOCALAPPDATA $appName)"
     }
     $installDir = $found.Dir
     $exe = Join-Path $installDir 'varve.exe'

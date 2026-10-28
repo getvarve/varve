@@ -128,6 +128,14 @@ function Get-ShortcutTarget {
     return (New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath
 }
 
+function Get-ShortcutWorkingDirectory {
+    param([string]$Path)
+    if (-not (Test-Path -Path $Path)) {
+        return $null
+    }
+    return (New-Object -ComObject WScript.Shell).CreateShortcut($Path).WorkingDirectory.TrimEnd('\')
+}
+
 # Writes a marker in the Varve data folder and in both bundle id folders.
 function Write-DataMarker {
     Write-Section 'App data markers'
@@ -212,7 +220,8 @@ function Test-Nsis {
 
     if ($Update) {
         # The in-app updater starts the setup with these arguments and then quits the app. Start
-        # the old app and stop it a few seconds after the setup started, which the setup waits for.
+        # the old app and stop it a few seconds after the setup started. When the setup reaches
+        # the hook's check first, it waits; either way the upgrade must succeed.
         Write-Section 'Install Varve from this commit (NSIS, /P /UPDATE, old app quitting)'
         $app = Start-Process -FilePath (Join-Path $legacyDir 'varve.exe') -PassThru
         Start-Sleep -Seconds 5
@@ -253,6 +262,14 @@ function Test-Nsis {
         Assert-That ((Get-ShortcutTarget (Join-Path $desktop "$appName.lnk")) -eq $newExe) "the desktop has '$appName.lnk', pointing at $newExe"
     }
     Assert-That ((Get-ShortcutTarget $pin) -eq $newExe) "the taskbar pin points at $newExe"
+    Assert-That ((Get-ShortcutWorkingDirectory $pin) -eq $newDir) "the taskbar pin starts in $newDir"
+    # Start the app the way a click on the pin does, then look where it runs from.
+    Get-Process -Name 'varve' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Process -FilePath $pin
+    Start-Sleep -Seconds 5
+    $running = @(Get-Process -Name 'varve' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $newExe })
+    Assert-That ($running.Count -ge 1) "the taskbar pin starts $newExe"
+    Get-Process -Name 'varve' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     . (Get-FindVarveInstall)
     $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName
     Write-Host "Find-VarveInstall: Dir=$($found.Dir) LegacyLeft=$($found.LegacyLeft)"

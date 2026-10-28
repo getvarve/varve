@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Upgrades a varve-community 0.1.7 deb install to the varve deb built from this commit, once the
 # way the 0.1.7 in-app updater does (dpkg -i) and once the way a user does (apt), and checks what
-# is left (bundle.linux.deb conflicts and replaces in tauri.conf.json). CI runs it on a fresh runner (.github/workflows/ci.yml, Migration (linux)); it
-# changes the machine.
+# is left (bundle.linux.deb conflicts and replaces in tauri.conf.json). CI runs it on a fresh
+# runner (.github/workflows/ci.yml, Migration (linux)); it changes the machine.
 #
 # Usage: scripts/ci/migration-linux.sh OLD_DEB NEW_DEB
 set -euo pipefail

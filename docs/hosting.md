@@ -23,7 +23,7 @@ What a backend stores, and how, is decided when it is built; this page will say 
 
 ## Updates
 
-The macOS app (through Sparkle), the Windows setup (`.exe`) and the Linux AppImage update themselves. A `.deb` or `.msi` install does not: update it by installing the new package from the [latest release](https://github.com/getvarve/varve/releases/latest).
+The macOS app (through Sparkle), the Windows setup (`.exe`) and the Linux AppImage update themselves. From 0.2.0 on, a `.deb` or `.msi` install does not: update it by installing the new package from the [latest release](https://github.com/getvarve/varve/releases/latest). Version 0.1.7 and older still update such an install in the app, once, to the current release.
 
 ## Upgrading from Varve Community
 
