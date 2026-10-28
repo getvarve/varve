@@ -6,7 +6,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -60,6 +60,8 @@ async function fetchSparkle(root) {
   writeFileSync(join(unpacked, 'VERSION'), `${SPARKLE_VERSION}\n`);
   if (existsSync(dir)) renameSync(dir, join(work, 'previous'));
   renameSync(unpacked, dir);
+  // The download and any previous version are in the work folder; the new one is in place.
+  rmSync(work, { recursive: true, force: true });
   console.log(`Sparkle ${SPARKLE_VERSION} is in ${dir}`);
 }
 

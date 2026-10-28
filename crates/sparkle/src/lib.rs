@@ -111,6 +111,17 @@ define_class!(
         fn will_relaunch(&self, _updater: &AnyObject) {
             (self.ivars().will_relaunch)();
         }
+
+        /// SPUUpdaterDelegate: the update cycle stopped (an installer error,
+        /// a cancelled authorization, a later check that failed). A relaunch
+        /// held from that cycle can no longer continue: forget it, so nothing
+        /// offers it or opens the quit gate for it.
+        // SAFETY: the selector takes the updater and an NSError, and returns
+        // void.
+        #[unsafe(method(updater:didAbortWithError:))]
+        fn did_abort(&self, _updater: &AnyObject, _error: &AnyObject) {
+            RELAUNCH.with(|slot| slot.borrow_mut().take());
+        }
     }
 );
 

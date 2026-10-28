@@ -288,6 +288,12 @@ export function answerRelaunchRequest(): Promise<void> {
       if (state.info) state.info.relaunchPending = !proceed;
     } catch (error: unknown) {
       useToasts().pushError(error, 'Could not answer the update');
+      // Sparkle may have given the relaunch up (it aborted): show what is left.
+      try {
+        state.info = await fetchUpdateInfo();
+      } catch {
+        if (state.info) state.info.relaunchPending = false;
+      }
     }
   })().finally(() => {
     relaunch = null;

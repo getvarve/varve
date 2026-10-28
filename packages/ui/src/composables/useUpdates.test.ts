@@ -405,6 +405,18 @@ describe('Sparkle', () => {
     remove();
   });
 
+  it('drops the restart button when Sparkle gave the relaunch up', async () => {
+    const { mod, updates, remove } = await load(info({ mechanism: 'sparkle', relaunchPending: true }));
+    answers.update_relaunch = () => {
+      throw { kind: 'internal', message: 'No update is waiting to relaunch' };
+    };
+    answers.update_info = () => info({ mechanism: 'sparkle', relaunchPending: false });
+    expect(updates.notice.value).toBe('Restart to update');
+    await mod.answerRelaunchRequest();
+    expect(updates.notice.value).toBeNull();
+    remove();
+  });
+
   it('shows a relaunch held from before a reload', async () => {
     const { updates, remove } = await load(info({ mechanism: 'sparkle', relaunchPending: true }));
     expect(updates.notice.value).toBe('Restart to update');

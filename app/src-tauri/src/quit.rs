@@ -196,7 +196,7 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
         RunEvent::MenuEvent(event) if event.id() == QUIT_MENU_ID => request_quit(app),
         #[cfg(target_os = "macos")]
         RunEvent::MenuEvent(event) if event.id() == crate::updates::CHECK_FOR_UPDATES_MENU_ID => {
-            crate::updates::handle_menu_event(event.id().as_ref());
+            crate::updates::handle_menu_event(app, event.id().as_ref());
         }
         RunEvent::MenuEvent(event) if event.id() == FORGET_SECRETS_MENU_ID => {
             if let Some(services) = app.try_state::<Arc<Services>>() {

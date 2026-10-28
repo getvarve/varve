@@ -182,10 +182,28 @@ mod mac {
     }
 
     /// Handles "Check for Updates…" from the app menu (main thread).
-    pub fn handle_menu_event(id: &str) {
+    pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         if id == super::CHECK_FOR_UPDATES_MENU_ID {
-            varve_sparkle::check_for_updates();
+            check_or_restart(app);
         }
+    }
+
+    /// Opens Sparkle's window, or, while a downloaded update's relaunch is
+    /// held, asks the page to continue it: Sparkle's own window would resume
+    /// the install and relaunch without the unsaved-work check. Main thread.
+    fn check_or_restart<R: Runtime>(app: &AppHandle<R>) -> bool {
+        if varve_sparkle::relaunch_pending() {
+            let listening = app
+                .try_state::<super::UpdateListener>()
+                .is_some_and(|listener| listener.is_listening());
+            if listening
+                && let Some(window) = app.get_webview_window("main")
+                && window.emit(UPDATE_RELAUNCH_REQUESTED, ()).is_ok()
+            {
+                return true;
+            }
+        }
+        varve_sparkle::check_for_updates()
     }
 
     /// Runs `f` on the main thread, where Sparkle lives, for a command.
@@ -227,7 +245,8 @@ mod mac {
     }
 
     pub(super) async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<UpdateCheck, CmdError> {
-        if on_main(app, varve_sparkle::check_for_updates).await? {
+        let handle = app.clone();
+        if on_main(app, move || check_or_restart(&handle)).await? {
             Ok(UpdateCheck::Sparkle)
         } else {
             Err(not_available("Checking for updates"))
