@@ -137,6 +137,8 @@ pnpm dev            # run the app with hot reload
 pnpm tauri build    # build an installer
 ```
 
+On macOS, `pnpm tauri build --config app/src-tauri/tauri.sparkle.conf.json` also bundles Sparkle, the in-app updater the release builds carry; the build fetches the pinned version first.
+
 | Check | Command |
 | --- | --- |
 | Rust format, lint, tests | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |

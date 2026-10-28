@@ -36,9 +36,6 @@
     "copyright": "Copyright 2026 The Varve Authors",
     "license": "Apache-2.0",
     "macOS": {
-      "frameworks": [
-        "macos/sparkle/Sparkle.framework"
-      ],
       "entitlements": "Entitlements.plist",
       "files": {
         "Resources/Assets.car": "macos/Assets.car"

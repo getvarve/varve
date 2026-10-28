@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "macOS": {
+      "frameworks": [
+        "macos/sparkle/Sparkle.framework"
+      ]
+    }
+  }
+}

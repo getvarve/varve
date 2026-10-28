@@ -87,9 +87,13 @@ jobs:
           # With CI set, Tauri skips the Finder script that lays out the installer window
           # (background, window size, icon positions); this keeps it.
           TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+          # macOS bundles Sparkle (fetched by beforeBuildCommand). It is a separate config: Tauri's
+          # build script checks bundle.macOS.frameworks on every macOS build, so in tauri.conf.json
+          # it would break cargo check in a fresh checkout and in apps that build on varve-app.
+          EXTRA_CONFIG: ${{ runner.os == 'macOS' && 'app/src-tauri/tauri.sparkle.conf.json' || '' }}
         # No signing keys here: every build script and download in this step could read them.
         # The update signatures are made in their own steps below.
-        run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+        run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" ${EXTRA_CONFIG:+--config "$EXTRA_CONFIG"}
       - name: Collect assets under fixed names
         shell: bash
         env:
