@@ -2,12 +2,15 @@
 # a user does, and checks what is left (app/src-tauri/windows/hooks.nsh, install.ps1). CI runs it
 # on a fresh runner (.github/workflows/ci.yml, Migration (windows)); it changes the machine.
 #
-# Usage: pwsh -File scripts/ci/migration-windows.ps1 -Kind nsis|msi -Old <0.1.7 installer> -New <new installer>
-#   nsis: the per-user setups, plus install.ps1. msi: the per-machine MSI packages.
+# Usage: pwsh -File scripts/ci/migration-windows.ps1 -Kind nsis|nsis-update|msi -Old <0.1.7 installer> -New <new installer>
+#   nsis: the per-user setups, the new one run as a fresh install, plus install.ps1.
+#   nsis-update: the per-user setups, the new one run the way the 0.1.7 in-app updater runs it
+#     (/P /UPDATE), while the old app is still quitting.
+#   msi: the per-machine MSI packages.
 #Requires -Version 7
 
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('nsis', 'msi')][string]$Kind,
+    [Parameter(Mandatory = $true)][ValidateSet('nsis', 'nsis-update', 'msi')][string]$Kind,
     [Parameter(Mandatory = $true)][string]$Old,
     [Parameter(Mandatory = $true)][string]$New
 )
@@ -18,7 +21,10 @@ $appName = 'Varve'
 $legacyName = 'Varve Community'
 $uninstallRoot = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
 $dataDir = Join-Path $env:APPDATA 'Varve'
-$marker = Join-Path $dataDir 'migration-marker.txt'
+# The old uninstaller deletes these two (named after the bundle id) when its app data box is
+# ticked. The WebView2 profile, with the app's local storage, lives in the second.
+$bundleDirs = @((Join-Path $env:APPDATA 'com.getvarve.desktop'), (Join-Path $env:LOCALAPPDATA 'com.getvarve.desktop'))
+$taskbarPins = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
 $startMenu = [Environment]::GetFolderPath('Programs')
 $desktop = [Environment]::GetFolderPath('Desktop')
 $failures = [System.Collections.Generic.List[string]]::new()
@@ -99,7 +105,9 @@ function Show-State {
             (Join-Path $env:LOCALAPPDATA $legacyName),
             (Join-Path $env:ProgramFiles $appName),
             (Join-Path $env:ProgramFiles $legacyName),
-            $dataDir)) {
+            $dataDir,
+            $bundleDirs[0],
+            $bundleDirs[1])) {
         if (Test-Path -Path $dir) {
             Write-Host "-- $dir"
             Get-ChildItem -Path $dir -Force | Format-Table -AutoSize Mode, Length, Name | Out-String -Width 200 | Write-Host
@@ -109,7 +117,33 @@ function Show-State {
         }
     }
     Write-Host '-- Shortcuts'
-    Get-ChildItem -Path $startMenu, $desktop -Filter 'Varve*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "   $($_.FullName)" }
+    Get-ChildItem -Path $startMenu, $desktop, $taskbarPins -Filter 'Varve*.lnk' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "   $($_.FullName) -> $(Get-ShortcutTarget $_.FullName)" }
+}
+
+function Get-ShortcutTarget {
+    param([string]$Path)
+    if (-not (Test-Path -Path $Path)) {
+        return $null
+    }
+    return (New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath
+}
+
+# Writes a marker in the Varve data folder and in both bundle id folders.
+function Write-DataMarker {
+    Write-Section 'App data markers'
+    foreach ($dir in @($dataDir) + $bundleDirs) {
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $file = Join-Path $dir 'migration-marker.txt'
+        Set-Content -Path $file -Value 'written before the upgrade'
+        Write-Host "wrote $file"
+    }
+}
+
+function Assert-DataMarker {
+    foreach ($dir in @($dataDir) + $bundleDirs) {
+        $file = Join-Path $dir 'migration-marker.txt'
+        Assert-That (Test-Path -Path $file) "the app data marker $file is still there"
+    }
 }
 
 # install.ps1 defines Find-VarveInstall next to its install code. This returns that function's
@@ -134,6 +168,7 @@ function Get-FindVarveInstall {
 }
 
 function Test-Nsis {
+    param([bool]$Update)
     Show-State 'Before'
 
     Write-Section 'Install Varve Community 0.1.7 (NSIS, silent)'
@@ -143,31 +178,61 @@ function Test-Nsis {
     Assert-That (Test-Path -Path "$uninstallRoot\$legacyName") "the uninstall key '$legacyName' exists"
     Assert-That ($null -ne $legacyDir -and (Test-Path -Path (Join-Path $legacyDir 'varve.exe'))) "varve.exe is in the $legacyName folder"
     Assert-That (Test-Path -Path (Join-Path $startMenu "$legacyName.lnk")) "the Start menu has '$legacyName.lnk'"
+    $hadDesktop = Test-Path -Path (Join-Path $desktop "$legacyName.lnk")
+    Write-Host "desktop shortcut '$legacyName.lnk': $hadDesktop"
 
-    Write-Section 'install.ps1 over the old install (VARVE_VERSION=v0.1.7)'
-    # The whole script, as a user runs it: download, checksum, silent install, and finding the
-    # install under the old name.
-    $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    $env:VARVE_VERSION = 'v0.1.7'
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'install.ps1')
-    $installExit = $LASTEXITCODE
-    Remove-Item -Path 'env:VARVE_VERSION'
-    Assert-That ($installExit -eq 0) "install.ps1 v0.1.7 exits with 0 (got $installExit)"
-    . (Get-FindVarveInstall)
-    $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName
-    Write-Host "Find-VarveInstall: Dir=$($found.Dir) LegacyLeft=$($found.LegacyLeft)"
-    Assert-That ($found.Dir -eq $legacyDir) 'Find-VarveInstall finds the old install under its old name'
-    Assert-That (-not $found.LegacyLeft) 'Find-VarveInstall reports no leftover while only the old install exists'
+    # Pinning to the taskbar puts a copy of the shortcut here. Only the file is made: Windows
+    # offers no supported way to pin from a script, and the hook only looks at the file.
+    Write-Section 'Taskbar pin'
+    New-Item -ItemType Directory -Force -Path $taskbarPins | Out-Null
+    $pin = Join-Path $taskbarPins "$legacyName.lnk"
+    Copy-Item -Path (Join-Path $startMenu "$legacyName.lnk") -Destination $pin
+    Write-Host "$pin -> $(Get-ShortcutTarget $pin)"
 
-    Write-Section 'App data marker'
-    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-    Set-Content -Path $marker -Value 'written before the upgrade'
-    Write-Host "wrote $marker"
+    if (-not $Update) {
+        Write-Section 'install.ps1 over the old install (VARVE_VERSION=v0.1.7)'
+        # The whole script, as a user runs it: download, checksum, silent install, and finding the
+        # install under the old name.
+        $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+        $env:VARVE_VERSION = 'v0.1.7'
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'install.ps1')
+        $installExit = $LASTEXITCODE
+        Remove-Item -Path 'env:VARVE_VERSION'
+        Assert-That ($installExit -eq 0) "install.ps1 v0.1.7 exits with 0 (got $installExit)"
+        . (Get-FindVarveInstall)
+        $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName
+        Write-Host "Find-VarveInstall: Dir=$($found.Dir) LegacyLeft=$($found.LegacyLeft)"
+        Assert-That ($found.Dir -eq $legacyDir) 'Find-VarveInstall finds the old install under its old name'
+        Assert-That (-not $found.LegacyLeft) 'Find-VarveInstall reports no leftover while only the old install exists'
+    }
+
+    Write-DataMarker
 
     Show-State 'With Varve Community 0.1.7'
 
-    Write-Section 'Install Varve from this commit (NSIS, silent)'
-    Invoke-Installer -File $New -Arguments @('/S')
+    if ($Update) {
+        # The in-app updater starts the setup with these arguments and then quits the app. Start
+        # the old app and stop it a few seconds after the setup started, which the setup waits for.
+        Write-Section 'Install Varve from this commit (NSIS, /P /UPDATE, old app quitting)'
+        $app = Start-Process -FilePath (Join-Path $legacyDir 'varve.exe') -PassThru
+        Start-Sleep -Seconds 5
+        Assert-That (-not $app.HasExited) 'the old app is running'
+        Write-Host "> $New /P /UPDATE"
+        $setup = Start-Process -FilePath $New -ArgumentList @('/P', '/UPDATE') -PassThru
+        $null = $setup.Handle
+        Start-Sleep -Seconds 3
+        Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+        Get-Process -Name 'varve' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        $setup.WaitForExit()
+        Write-Host "  exit code $($setup.ExitCode)"
+        if ($setup.ExitCode -ne 0) {
+            throw "$New exited with code $($setup.ExitCode)"
+        }
+    }
+    else {
+        Write-Section 'Install Varve from this commit (NSIS, silent)'
+        Invoke-Installer -File $New -Arguments @('/S')
+    }
 
     Show-State 'After the upgrade'
 
@@ -179,10 +244,16 @@ function Test-Nsis {
     Assert-That (-not (Test-Path -Path "$uninstallRoot\$legacyName")) "the uninstall key '$legacyName' is gone"
     Assert-That (-not (Test-Path -Path $legacyDir)) "the folder $legacyDir is gone"
     Assert-That (-not (Test-Path -Path "HKCU:\Software\getvarve\$legacyName")) "HKCU\Software\getvarve\$legacyName is gone"
-    Assert-That (Test-Path -Path $marker) 'the app data marker is still there'
-    Assert-That (Test-Path -Path (Join-Path $startMenu "$appName.lnk")) "the Start menu has '$appName.lnk'"
+    Assert-DataMarker
+    $newExe = if ($null -ne $newDir) { Join-Path $newDir 'varve.exe' } else { '(none)' }
+    Assert-That ((Get-ShortcutTarget (Join-Path $startMenu "$appName.lnk")) -eq $newExe) "the Start menu has '$appName.lnk', pointing at $newExe"
     Assert-That (-not (Test-Path -Path (Join-Path $startMenu "$legacyName.lnk"))) "the Start menu has no '$legacyName.lnk'"
     Assert-That (-not (Test-Path -Path (Join-Path $desktop "$legacyName.lnk"))) "the desktop has no '$legacyName.lnk'"
+    if ($hadDesktop) {
+        Assert-That ((Get-ShortcutTarget (Join-Path $desktop "$appName.lnk")) -eq $newExe) "the desktop has '$appName.lnk', pointing at $newExe"
+    }
+    Assert-That ((Get-ShortcutTarget $pin) -eq $newExe) "the taskbar pin points at $newExe"
+    . (Get-FindVarveInstall)
     $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName
     Write-Host "Find-VarveInstall: Dir=$($found.Dir) LegacyLeft=$($found.LegacyLeft)"
     Assert-That ($found.Dir -eq $newDir) 'Find-VarveInstall finds the new install'
@@ -201,10 +272,7 @@ function Test-Msi {
     $products = @(Get-VarveProduct)
     Assert-That ($products.Count -eq 1 -and $products[0].DisplayName -eq $legacyName) "exactly one product is installed, named '$legacyName'"
 
-    Write-Section 'App data marker'
-    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-    Set-Content -Path $marker -Value 'written before the upgrade'
-    Write-Host "wrote $marker"
+    Write-DataMarker
 
     Show-State 'With Varve Community 0.1.7'
 
@@ -220,7 +288,7 @@ function Test-Msi {
     $exes = @(Get-ChildItem -Path (Join-Path $env:ProgramFiles $appName), (Join-Path $env:ProgramFiles $legacyName) -Filter 'varve.exe' -ErrorAction SilentlyContinue)
     $exes | ForEach-Object { Write-Host "   $($_.FullName)" }
     Assert-That ($exes.Count -eq 1 -and $exes[0].Directory.Name -eq $appName) "one varve.exe, in Program Files\$appName"
-    Assert-That (Test-Path -Path $marker) 'the app data marker is still there'
+    Assert-DataMarker
 }
 
 try {
@@ -230,7 +298,10 @@ try {
         }
     }
     if ($Kind -eq 'nsis') {
-        Test-Nsis
+        Test-Nsis -Update $false
+    }
+    elseif ($Kind -eq 'nsis-update') {
+        Test-Nsis -Update $true
     }
     else {
         Test-Msi

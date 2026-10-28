@@ -429,7 +429,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kind: [nsis, msi]
+        kind: [nsis, nsis-update, msi]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -453,7 +453,7 @@ jobs:
         env:
           KIND: ${{ matrix.kind }}
         run: |
-          if ($env:KIND -eq 'nsis') {
+          if ($env:KIND -like 'nsis*') {
             $old = 'old/varve-windows-x64-setup.exe'
             $new = 'migration/varve-new-setup.exe'
           } else {

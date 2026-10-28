@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Upgrades a varve-community 0.1.7 deb install to the varve deb built from this commit, the way a
-# user does with apt, and checks what is left (bundle.linux.deb conflicts and replaces in
-# tauri.conf.json). CI runs it on a fresh runner (.github/workflows/ci.yml, Migration (linux)); it
+# Upgrades a varve-community 0.1.7 deb install to the varve deb built from this commit, once the
+# way the 0.1.7 in-app updater does (dpkg -i) and once the way a user does (apt), and checks what
+# is left (bundle.linux.deb conflicts and replaces in tauri.conf.json). CI runs it on a fresh runner (.github/workflows/ci.yml, Migration (linux)); it
 # changes the machine.
 #
 # Usage: scripts/ci/migration-linux.sh OLD_DEB NEW_DEB
@@ -57,34 +57,53 @@ local_path() {
   esac
 }
 
-show_state "Before"
+# One upgrade from scratch. $1 installs the new deb: "apt" the way a user does, "dpkg" the way the
+# 0.1.7 in-app updater does (dpkg -i through pkexec, tauri-plugin-updater).
+upgrade() {
+  local tool="$1"
 
-section "Install varve-community 0.1.7"
-sudo apt-get install -y "$(local_path "$old")"
-check "varve-community is installed" installed varve-community
-check "/usr/bin/varve exists" test -x /usr/bin/varve
+  show_state "Before (${tool})"
 
-section "App data marker"
-mkdir -p "$data_dir"
-echo "written before the upgrade" >"$marker"
-echo "wrote ${marker}"
+  section "Install varve-community 0.1.7"
+  sudo apt-get install -y "$(local_path "$old")"
+  check "varve-community is installed" installed varve-community
+  check "/usr/bin/varve exists" test -x /usr/bin/varve
 
-show_state "With varve-community 0.1.7"
+  section "App data marker"
+  mkdir -p "$data_dir"
+  echo "written before the upgrade" >"$marker"
+  echo "wrote ${marker}"
 
-section "Install varve from this commit"
-sudo apt-get install -y "$(local_path "$new")"
+  show_state "With varve-community 0.1.7 (${tool})"
 
-show_state "After the upgrade"
+  section "Install varve from this commit (${tool})"
+  case "$tool" in
+    apt) sudo apt-get install -y "$(local_path "$new")" ;;
+    dpkg) sudo dpkg -i "$new" ;;
+  esac
 
-section "Checks"
-check "varve is installed" installed varve
+  show_state "After the upgrade (${tool})"
+
+  section "Checks (${tool})"
+  check "${tool}: varve is installed" installed varve
+  check "${tool}: varve-community is gone" not_installed varve-community
+  check "${tool}: /usr/bin/varve exists" test -x /usr/bin/varve
+  check "${tool}: /usr/bin/varve belongs to varve" sh -c 'dpkg -S /usr/bin/varve | grep -q "^varve:"'
+  mapfile -t desktop_files < <(dpkg -L varve | grep '\.desktop$' || true)
+  printf 'desktop entries: %s\n' "${desktop_files[*]:-(none)}"
+  check "${tool}: the desktop entry is named Varve" name_is_varve "${desktop_files[@]:-/dev/null}"
+  check "${tool}: the app data marker is still there" test -f "$marker"
+}
+
+upgrade dpkg
+
+section "Start over"
+sudo apt-get purge -y varve varve-community
+rm -f "$marker"
+check "varve is gone" not_installed varve
 check "varve-community is gone" not_installed varve-community
-check "/usr/bin/varve exists" test -x /usr/bin/varve
-check "/usr/bin/varve belongs to varve" sh -c 'dpkg -S /usr/bin/varve | grep -q "^varve:"'
-mapfile -t desktop_files < <(dpkg -L varve | grep '\.desktop$' || true)
-printf 'desktop entries: %s\n' "${desktop_files[*]:-(none)}"
-check "the desktop entry is named Varve" name_is_varve "${desktop_files[@]:-/dev/null}"
-check "the app data marker is still there" test -f "$marker"
+
+upgrade apt
 
 section "Result"
 if [ "$failures" -gt 0 ]; then
