@@ -5,7 +5,7 @@ use varve_core::Engine;
 use varve_driver::TlsMode;
 use varve_secrets::SecretKind;
 
-/// The workspace every record belongs to in M1 (team workspaces arrive with Pro).
+/// The workspace every record belongs to in M1 (team workspaces arrive with the cloud backend).
 pub const PERSONAL_WORKSPACE: &str = "personal";
 
 /// Environment tag of a connection (design doc 3.2). Production is red

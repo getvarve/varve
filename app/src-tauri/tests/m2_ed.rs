@@ -16,7 +16,7 @@ use varve_app::m2::editors::EngineChange;
 use varve_app::m2::impact::{DependentEffect, DropImpact};
 use varve_app::sessions::{SessionError, SessionInfo};
 use varve_catalog::{CatalogError, ObjectKind, ObjectRef};
-use varve_core::{Edition, Engine};
+use varve_core::Engine;
 use varve_records::{ConnectionInput, ConnectionOptions, Environment};
 use varve_secrets::MemoryStore;
 
@@ -40,13 +40,7 @@ fn fixture(name: &str) -> Res<Fixture> {
     let _ = std::fs::remove_dir_all(&dir);
     let host = varve_app::build_host(&[])?;
     let store = Arc::new(varve_app::open_store(&dir, &host)?);
-    let services = varve_app::build_services(
-        store,
-        &dir,
-        &host,
-        Edition::Community,
-        Arc::new(MemoryStore::default()),
-    )?;
+    let services = varve_app::build_services(store, &dir, &host, Arc::new(MemoryStore::default()))?;
     Ok(Fixture { services, dir })
 }
 

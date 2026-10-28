@@ -31,7 +31,7 @@ const ENGINE_VERSIONS: Record<string, string> = {
     <div class="hero">
       <VarveMark :size="56" />
       <div>
-        <h1>{{ workspace.isEmpty.value ? 'Welcome to Varve' : (info?.productName ?? 'Varve') }}</h1>
+        <h1>{{ workspace.isEmpty.value ? 'Welcome to Varve' : 'Varve' }}</h1>
         <p class="lede">
           One app for PostgreSQL, MySQL, MariaDB and Redis.
         </p>

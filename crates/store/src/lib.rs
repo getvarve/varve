@@ -3,11 +3,11 @@
 //! Migrations are grouped in **namespaces**. The app owns the `core`
 //! namespace; every extension owns exactly one namespace equal to its id
 //! (design doc section 2.3). Each namespace keeps its own migration history
-//! table, so Community and Pro can share one `app.db`: Pro tables stay on disk,
-//! unused, when the user goes back to Community.
+//! table, so one `app.db` holds them all: an extension's tables stay on disk,
+//! unused, when that extension is no longer installed.
 //!
 //! Tables created by an extension must be prefixed with the extension id in
-//! SQL form (`pro.stats` creates `pro_stats_*` tables). [`MigrationSet::validate`]
+//! SQL form (`acme.stats` creates `acme_stats_*` tables). [`MigrationSet::validate`]
 //! enforces this before anything touches the database.
 
 use std::path::Path;
@@ -443,11 +443,11 @@ mod tests {
     fn extension_set_gets_its_own_history_table() -> Result<(), StoreError> {
         let store = Store::open_in_memory()?;
         let ext = MigrationSet::new(
-            id("pro.test"),
+            id("acme.test"),
             vec![SchemaMigration::new(
                 1,
                 "create_pings",
-                "CREATE TABLE pro_test_pings (id INTEGER PRIMARY KEY)",
+                "CREATE TABLE acme_test_pings (id INTEGER PRIMARY KEY)",
             )],
         );
         store.migrate(&[ext, core_migrations()])?;
@@ -461,9 +461,9 @@ mod tests {
         })?;
         for expected in [
             "_migrations_core",
-            "_migrations_pro_test",
+            "_migrations_acme_test",
             "core_meta",
-            "pro_test_pings",
+            "acme_test_pings",
         ] {
             assert!(
                 tables.iter().any(|t| t == expected),
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn extension_tables_must_be_prefixed() {
         let set = MigrationSet::new(
-            id("pro.test"),
+            id("acme.test"),
             vec![SchemaMigration::new(
                 1,
                 "bad",
@@ -488,17 +488,17 @@ mod tests {
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default();
-        assert!(err.contains("must start with `pro_test_`"), "{err}");
+        assert!(err.contains("must start with `acme_test_`"), "{err}");
     }
 
     #[test]
     fn prefix_rule_covers_indexes_views_and_triggers() {
         for sql in [
-            "CREATE UNIQUE INDEX other_idx ON pro_test_pings (id)",
+            "CREATE UNIQUE INDEX other_idx ON acme_test_pings (id)",
             "CREATE VIEW v AS SELECT 1",
-            "CREATE TEMP TRIGGER t AFTER INSERT ON pro_test_pings BEGIN SELECT 1; END",
+            "CREATE TEMP TRIGGER t AFTER INSERT ON acme_test_pings BEGIN SELECT 1; END",
         ] {
-            let set = MigrationSet::new(id("pro.test"), vec![SchemaMigration::new(1, "x", sql)]);
+            let set = MigrationSet::new(id("acme.test"), vec![SchemaMigration::new(1, "x", sql)]);
             assert!(set.validate().is_err(), "{sql} should be rejected");
         }
     }
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn versions_must_be_unique_and_positive() {
         let dup = MigrationSet::new(
-            id("pro.test"),
+            id("acme.test"),
             vec![
                 SchemaMigration::new(1, "a", "SELECT 1"),
                 SchemaMigration::new(1, "b", "SELECT 1"),
@@ -514,7 +514,7 @@ mod tests {
         );
         assert!(dup.validate().is_err());
         let zero = MigrationSet::new(
-            id("pro.test"),
+            id("acme.test"),
             vec![SchemaMigration::new(0, "a", "SELECT 1")],
         );
         assert!(zero.validate().is_err());
@@ -538,10 +538,11 @@ mod tests {
 
     #[test]
     fn created_objects_parses_common_forms() {
-        let sql = "create table if not exists main.\"pro_a\" (x int); CREATE INDEX pro_b ON t(x);";
+        let sql =
+            "create table if not exists main.\"acme_a\" (x int); CREATE INDEX acme_b ON t(x);";
         assert_eq!(
             created_objects(sql),
-            vec!["pro_a".to_string(), "pro_b".to_string()]
+            vec!["acme_a".to_string(), "acme_b".to_string()]
         );
     }
 }

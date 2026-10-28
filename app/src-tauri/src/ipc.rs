@@ -59,8 +59,6 @@ fn app_info(
     window_glass: tauri::State<'_, crate::glass::WindowGlass>,
 ) -> AppInfo {
     AppInfo {
-        edition: state.ctx.edition,
-        product_name: state.ctx.edition.product_name(),
         version: env!("CARGO_PKG_VERSION"),
         data_dir: data_dir.0.display().to_string(),
         extensions: state.host.extensions().to_vec(),

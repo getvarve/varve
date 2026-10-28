@@ -1,10 +1,10 @@
 //! The Tauri permissions the main window needs.
 //!
-//! Every app built on `varve-app` (the Community app here, Varve Pro in its
-//! own repository) has its own `capabilities/default.json`. Both must grant at
-//! least these permissions, or parts of the shared UI stop working: dragging
-//! the window by its title bar, the open and save dialogs, and writing exports.
-//! Each app checks its capability file against this list in a test.
+//! Every app built on `varve-app` has its own `capabilities/default.json`. It
+//! must grant at least these permissions, or parts of the UI stop working:
+//! dragging the window by its title bar, the open and save dialogs, and
+//! writing exports. Each app checks its capability file against this list in
+//! a test.
 
 /// Permissions the main window's capability file must grant.
 pub const REQUIRED_PERMISSIONS: &[&str] = &[
@@ -44,7 +44,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_community_capability_file_grants_every_required_permission() -> Result<(), String> {
+    fn the_capability_file_grants_every_required_permission() -> Result<(), String> {
         let json = include_str!("../capabilities/default.json");
         assert_eq!(missing_permissions(json)?, Vec::<&str>::new());
         Ok(())

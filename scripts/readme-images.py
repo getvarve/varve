@@ -95,7 +95,7 @@ def banner(t: dict) -> str:
     parts.append(f'<path d="M{wx} {wy + 30} H{wx + ww}" stroke="{t["inner"]}"/>')
     for i in range(3):
         parts.append(f'<circle cx="{wx + 18 + i * 16}" cy="{wy + 15}" r="5" fill="{t["faint"]}" fill-opacity="0.55"/>')
-    parts.append(text(wx + ww / 2, wy + 20, 'Varve Community', t, 11.5, 500, 'subtle', anchor='middle'))
+    parts.append(text(wx + ww / 2, wy + 20, 'Varve', t, 11.5, 500, 'subtle', anchor='middle'))
 
     side_w = 150
     parts.append(f'<rect x="{wx + 0.6}" y="{wy + 30.6}" width="{side_w}" height="{wh - 31.2}" fill="{t["raised"]}" fill-opacity="0.6"/>')

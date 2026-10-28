@@ -14,19 +14,18 @@ import { watchGlass } from './lib/glass';
 import { installWebviewGuards } from './lib/webviewGuards';
 import './styles/base.css';
 import './styles/glass.css';
-import AboutProView from './views/AboutProView.vue';
 import ActivityView from './views/ActivityView.vue';
 import SettingsView from './views/SettingsView.vue';
 import WorkspaceView from './views/WorkspaceView.vue';
 
 export interface VarveAppOptions {
-  /** UI extensions to install. Varve Community passes none. */
+  /** UI extensions to install. The Varve app passes none. */
   extensions?: readonly UiExtension[];
 }
 
 /**
- * Creates the Varve app. Each edition's frontend entry calls this with its
- * extensions and mounts the result.
+ * Creates the Varve app. A frontend entry calls this with its extensions and
+ * mounts the result.
  */
 export function createVarveApp(options: VarveAppOptions = {}): App {
   const registry = new ExtensionRegistry(extInvoke);
@@ -38,7 +37,6 @@ export function createVarveApp(options: VarveAppOptions = {}): App {
       { path: '/', name: 'home', component: WorkspaceView },
       { path: '/activity', name: 'activity', component: ActivityView },
       { path: '/settings', name: 'settings', component: SettingsView },
-      { path: '/about-pro', name: 'about-pro', component: AboutProView },
       ...registry.extensionRoutes(),
     ],
   });

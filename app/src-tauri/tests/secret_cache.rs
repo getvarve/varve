@@ -18,7 +18,7 @@ use std::sync::Arc;
 use varve_activity::ActivityFilter;
 use varve_app::commands::{CmdError, SecretInput, Services, TestTarget};
 use varve_app::sessions::SessionError;
-use varve_core::{Edition, Engine};
+use varve_core::Engine;
 use varve_driver::ErrorKind;
 use varve_driver::tls_key::{PASSPHRASE_REQUIRED, PASSPHRASE_WRONG};
 use varve_records::{
@@ -67,7 +67,6 @@ fn services_on(dir: &std::path::Path, keychain: &Keychain) -> Res<Arc<Services>>
         store,
         dir,
         &host,
-        Edition::Community,
         Arc::clone(keychain) as Arc<dyn SecretStore>,
     )?)
 }

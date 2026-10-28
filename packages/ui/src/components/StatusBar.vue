@@ -72,7 +72,7 @@ const lastRun = computed(() => {
     </template>
     <template v-else>
       <span class="seg">No active connection</span>
-      <span class="seg">{{ info?.productName ?? 'Varve' }}<template v-if="info"> v{{ info.version }}</template></span>
+      <span class="seg">Varve<template v-if="info"> v{{ info.version }}</template></span>
     </template>
     <span class="spacer" />
     <span

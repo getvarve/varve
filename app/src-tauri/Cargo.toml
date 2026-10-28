@@ -1,6 +1,6 @@
 [package]
 name = "varve-app"
-description = "The Varve desktop app: Tauri shell shared by Varve Community and Varve Pro."
+description = "The Varve desktop app: the Tauri shell and the Varve binary."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

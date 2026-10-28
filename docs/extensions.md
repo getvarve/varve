@@ -1,32 +1,8 @@
-# Open core
+# Extensions
 
-Varve comes in two editions built from the same app:
+Varve has a plugin mechanism: a binary calls `varve_app::run` with its Tauri context and a list of extensions, and the frontend entry passes UI extensions to `createVarveApp`. The Varve app in this repository passes an empty list. Everything an extension adds is placed under its id, so it can add but never replace.
 
-- **Varve Community** is built from this repository alone. It is free, licensed under Apache-2.0 and fully usable.
-- **Varve Pro** is the official build. It is Varve Community plus closed extensions.
-
-## What is in each edition
-
-| Area | Community | Pro |
-|---|---|---|
-| Connections, SSH, TLS, keychain, folders | ✓ | ✓ |
-| PostgreSQL, MySQL, MariaDB and Redis drivers and object editors | ✓ | ✓ |
-| Query editor, result grid, data editing, EXPLAIN, DDL view | ✓ | ✓ |
-| User and permission management | ✓ | ✓ |
-| Dump database as SQL, run SQL file, import and export wizards | ✓ | ✓ |
-| Live server status | ✓ | ✓ |
-| Local activity log | ✓ | ✓ |
-| Statistics history and trend dashboards | | ✓ |
-| Wrapped, the yearly recap | | ✓ |
-| Structure Sync, Data Sync and Data Transfer | | ✓ |
-| Cloud sync across devices | | ✓ |
-| Team workspaces | | ✓ |
-
-## How extensions plug in
-
-An edition is a small binary that calls `varve_app::run` with its Tauri context and a list of extensions. Varve Community passes an empty list. Everything an extension adds is placed under its id, so it can add but never replace.
-
-### Backend (`crates/extension`)
+## Backend (`crates/extension`)
 
 ```rust
 use varve_extension::{ActivityCategory, AppContext, Extension, ExtensionError, Registry};
@@ -58,7 +34,7 @@ Registration happens before any window opens. An extension that breaks a rule (b
 
 The UI calls extension commands through one Tauri command, `ext_invoke`, by full name. Extensions never add Tauri commands of their own.
 
-### Frontend (`@varve/ui`)
+## Frontend (`@varve/ui`)
 
 ```ts
 import { createVarveApp } from '@varve/ui/createVarveApp';
@@ -79,8 +55,6 @@ createVarveApp({ extensions: [hello] }).mount('#app');
 
 Slots: `title-bar`, `main-menu`, `tools`, `sidebar-sections`, `connection-tabs`, `settings-sections`. With no extensions, every slot renders nothing.
 
-### Rules
+## Data
 
-- Dependencies go one way: Pro depends on this repository, and this repository never references Pro. CI enforces this with `scripts/check-no-pro.mjs`.
-- Community and Pro share the same local data folder (`<OS data dir>/Varve`), so moving between editions keeps your connections, queries and activity. Pro tables stay on disk, unused, when you go back to Community.
-- Anyone can write an extension against the same API.
+Extensions share the app's data folder (`<OS data dir>/Varve`) and its `app.db`. Each extension migrates its own namespace, so its tables stay on disk, unused, when the extension is no longer installed.

@@ -9,14 +9,14 @@
 
 <a href="https://github.com/getvarve/varve/actions/workflows/ci.yml"><img src="https://github.com/getvarve/varve/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 <a href="https://github.com/getvarve/varve/releases/latest"><img src="https://img.shields.io/github/v/release/getvarve/varve?style=flat-square&color=5B4BE0" alt="Latest release"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-5B4BE0.svg?style=flat-square" alt="License: Apache-2.0"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-5B4BE0.svg?style=flat-square" alt="License: AGPL-3.0"></a>
 <img src="https://img.shields.io/badge/rust-1.89%2B-dea584.svg?style=flat-square" alt="Rust 1.89+">
 <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-4A5160.svg?style=flat-square" alt="macOS, Windows, Linux">
 
 **Varve** is a calm desktop manager for PostgreSQL, MySQL, MariaDB and Redis: one app, every engine, careful around production.<br>
 Repo: [github.com/getvarve/varve](https://github.com/getvarve/varve)
 
-[Install](#-install) · [How it works](#-how-it-works) · [Features](#-features) · [Editions](#-editions) · [Develop](#-develop) · [Contributing](#-contributing)
+[Install](#-install) · [How it works](#-how-it-works) · [Features](#-features) · [Free and open](#-free-and-open) · [Develop](#-develop) · [Contributing](#-contributing)
 
 </div>
 
@@ -29,7 +29,7 @@ Repo: [github.com/getvarve/varve](https://github.com/getvarve/varve)
 - **Quiet by design.** A dense, calm interface where color only means something: production is red, and nothing else is.
 - **Secrets stay local.** Passwords and SSH passphrases live in your OS keychain, and your queries and data only travel to your own servers.
 - **Fast where it counts.** A Rust core with native drivers, cancellable queries and a grid that stays smooth on large result sets.
-- **Open core.** Varve Community is complete on its own and Apache-2.0. Pro adds closed extensions through the same public API.
+- **Free and open.** One app with every feature, AGPL-3.0. Cloud sync and teams will come through a backend you can host yourself.
 
 ## 📦 Install
 
@@ -45,7 +45,7 @@ Pin a release with `bash -s`:
 curl -fsSL https://sherin.dev/varve/install.sh | bash -s v0.1.2
 ```
 
-- **macOS** (Apple silicon and Intel): installs `Varve Community.app` in `/Applications`, or in `~/Applications` when `/Applications` is not writable.
+- **macOS** (Apple silicon and Intel): installs `Varve.app` in `/Applications`, or in `~/Applications` when `/Applications` is not writable. Up to 0.1.7 the app was called Varve Community: the script replaces a `Varve Community.app` in the same folder and moves it to the Trash, so you can still put it back.
 - **Linux** (x64 and arm64, glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36 and later): installs the AppImage in `~/.local/share/varve`, adds Varve to your app menu, and links a `varve` command into `~/.local/bin` when that folder is on your `PATH`. AppImages need FUSE 2 (`libfuse2t64` or `libfuse2` on Debian and Ubuntu); the installer tells you when it is missing.
 
 The script checks every download against `SHA256SUMS` before it installs anything. Run it again to upgrade in place. `VARVE_VERSION` pins a tag the same way as the first argument, and `VARVE_INSTALL` picks another install folder.
@@ -73,6 +73,8 @@ Every [release](https://github.com/getvarve/varve/releases/latest) has these fil
 | Linux x64 | `varve-linux-x64.AppImage` | `varve-linux-x64.deb` |
 | Linux arm64 | `varve-linux-arm64.AppImage` | `varve-linux-arm64.deb` |
 
+The macOS app, the Windows setup and the AppImage update themselves. A `.deb` or `.msi` install does not: install the new package to update it.
+
 **First launch on macOS.** The builds are not notarized by Apple yet. The install script is not affected, but a `.dmg` you download in a browser is: macOS refuses to open it the first time. Open **System Settings > Privacy & Security** and click **Open Anyway** once. Until the builds carry a Developer ID, macOS also asks once per update before Varve may read the passwords it saved in your keychain.
 
 </details>
@@ -82,9 +84,9 @@ Every [release](https://github.com/getvarve/varve/releases/latest) has these fil
 
 <br>
 
-- **macOS:** move `Varve Community.app` to the Trash.
+- **macOS:** move `Varve.app` to the Trash. An install that updated itself from 0.1.7 or earlier keeps its old file name, `Varve Community.app`.
 - **Linux:** remove `~/.local/share/varve`, `~/.local/share/applications/varve.desktop`, `~/.local/share/icons/hicolor/128x128/apps/varve.png` and the `~/.local/bin/varve` link.
-- **Windows:** **Settings > Apps > Installed apps > Varve Community > Uninstall**.
+- **Windows:** **Settings > Apps > Installed apps > Varve > Uninstall**.
 
 Your connections live in `app.db` in the Varve data folder (`~/Library/Application Support/Varve` on macOS, `~/.local/share/Varve` on Linux, `%APPDATA%\Varve` on Windows) and your passwords in the OS keychain under the service `varve`. Remove those too for a clean slate.
 
@@ -114,18 +116,16 @@ The interface never talks to a database itself. It sends typed commands to the R
 
 Tested against PostgreSQL 13 and 15 to 18, MySQL 8.0, 8.4 and 9.x, MariaDB 10.6 to 12, Redis 6.2 and newer, and Valkey.
 
-## 💎 Editions
+## 💎 Free and open
 
-| | Community | Pro |
-| --- | :---: | :---: |
-| Everything above | ✓ | ✓ |
-| Statistics history and trends | | ✓ |
-| Structure Sync, Data Sync, Data Transfer | | ✓ |
-| Cloud sync and team workspaces | | ✓ |
-| Wrapped, your year in databases | | ✓ |
-| License | Apache-2.0 | Commercial |
+Varve is one app, and all of it is free: every feature lives in this repository under AGPL-3.0. There is no paid edition and no license key.
 
-Varve Community is this repository: free, open source and complete on its own. Pro adds closed extensions through a public extension API. See [docs/open-core.md](docs/open-core.md).
+Cloud sync across devices and team workspaces are planned. They need a server: the self-hostable backend (planned) lives in this repository, under the same license.
+
+- **Self-hosted:** run the backend on your own servers, for free.
+- **Varve Cloud:** let getvarve run it for you, as a paid service.
+
+The app works fully without a backend; you only need one for the cloud features. See [docs/hosting.md](docs/hosting.md).
 
 ## 🛠 Develop
 
@@ -143,7 +143,6 @@ On macOS, `pnpm tauri build --config app/src-tauri/tauri.sparkle.conf.json` also
 | --- | --- |
 | Rust format, lint, tests | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | Frontend types, lint, tests | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
-| Open core boundary | `pnpm check:no-pro` |
 | Databases for driver work | `docker compose -f dev/docker-compose.yml --profile latest up -d` (see the file for every version) |
 
 `app.db` lives in `<OS data dir>/Varve`; set `VARVE_DATA_DIR` to use another folder and `VARVE_LOG=debug` for more logging. On macOS, [docs/macos-dev-signing.md](docs/macos-dev-signing.md) stops the keychain from asking again after every rebuild.
@@ -165,10 +164,10 @@ On macOS, `pnpm tauri build --config app/src-tauri/tauri.sparkle.conf.json` also
 | `crates/records` | Folders, connection profiles and saved queries |
 | `crates/secrets` | OS keychain access |
 | `crates/store` | `app.db` with migrations per namespace |
-| `crates/extension` | The extension API: commands, migrations, capabilities, job kinds, activity actions, hooks |
+| `crates/extension` | The extension API: commands, migrations, capabilities, job kinds, activity actions, hooks ([docs/extensions.md](docs/extensions.md)) |
 | `crates/jobs`, `redis-syntax` | Job runner (with the Files milestone), Redis console syntax |
-| `app/src-tauri` | Tauri shell shared by every edition, plus the Community binary |
-| `app/` | Community frontend entry |
+| `app/src-tauri` | Tauri shell and the Varve binary |
+| `app/` | Frontend entry |
 | `packages/ui` | The app UI: shell, views, extension slots, design tokens |
 | `vendor/` | Patched `tokio-postgres` and `mysql_async` |
 | `dev/` | Database version matrix for local development |
@@ -205,4 +204,4 @@ Built with [Tauri 2](https://tauri.app) · Rust · [Vue 3](https://vuejs.org) ·
 
 ## 📄 License
 
-[Apache-2.0](LICENSE). The Varve name and logo are trademarks and are not covered by the license; see [TRADEMARKS.md](TRADEMARKS.md).
+Varve is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). The Varve name and logo are trademarks and are not covered by the license; see [TRADEMARKS.md](TRADEMARKS.md).

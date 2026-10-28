@@ -18,7 +18,7 @@ use varve_app::sessions::{SessionError, SessionInfo};
 use varve_catalog::data_edit::{ApplyOutcome, PlanOptions, RowChange, TableTarget};
 use varve_catalog::explain::ExplainOptions;
 use varve_catalog::{Container, EditPlan, ObjectKind, ObjectRef};
-use varve_core::{Edition, Engine};
+use varve_core::Engine;
 use varve_driver::{StatementResult, Value};
 use varve_live_stats::redis::MemoryScanOptions;
 use varve_live_stats::sql::{KillTarget, LiveError, VariableChange};
@@ -44,13 +44,7 @@ fn fixture(name: &str) -> Res<Fixture> {
     let _ = std::fs::remove_dir_all(&dir);
     let host = varve_app::build_host(&[])?;
     let store = Arc::new(varve_app::open_store(&dir, &host)?);
-    let services = varve_app::build_services(
-        store,
-        &dir,
-        &host,
-        Edition::Community,
-        Arc::new(MemoryStore::default()),
-    )?;
+    let services = varve_app::build_services(store, &dir, &host, Arc::new(MemoryStore::default()))?;
     Ok(Fixture { services, dir })
 }
 
@@ -62,7 +56,6 @@ fn services_on(dir: &std::path::Path) -> Res<Arc<Services>> {
         store,
         dir,
         &host,
-        Edition::Community,
         Arc::new(MemoryStore::default()),
     )?)
 }
@@ -2584,7 +2577,6 @@ async fn failed_keychain_removals_are_retried() -> TestResult {
         store,
         &dir,
         &host,
-        Edition::Community,
         Arc::clone(&keychain) as Arc<dyn varve_secrets::SecretStore>,
     )?;
     let original = input(&pg_targets()[1], Environment::Development, false);
@@ -3151,7 +3143,6 @@ async fn keychain_cleanup_never_deletes_a_secret_being_saved() -> TestResult {
         store,
         &dir,
         &host,
-        Edition::Community,
         Arc::clone(&keychain) as Arc<dyn varve_secrets::SecretStore>,
     )?;
     let original = input(&pg_targets()[1], Environment::Development, false);
@@ -3590,7 +3581,6 @@ async fn secret_saves_and_edits_never_relist_the_old_servers_secret() -> TestRes
         store,
         &dir,
         &host,
-        Edition::Community,
         Arc::clone(&keychain) as Arc<dyn varve_secrets::SecretStore>,
     )?;
     let mut original = input(&pg_targets()[1], Environment::Development, false);
@@ -3765,7 +3755,6 @@ fn flaky_services(name: &str) -> Res<(Arc<Services>, Arc<FlakyKeychain>, std::pa
         store,
         &dir,
         &host,
-        Edition::Community,
         Arc::clone(&keychain) as Arc<dyn varve_secrets::SecretStore>,
     )?;
     Ok((s, keychain, dir))
