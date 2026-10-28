@@ -167,19 +167,37 @@ jobs:
         timeout-minutes: 10
         env:
           EXTRA: ${{ matrix.extra }}
+        # retry.sh: Docker Hub answers "toomanyrequests" now and then.
         run: |
-          docker compose -f dev/docker-compose.yml --profile latest up -d --wait
+          scripts/ci/retry.sh 4 docker compose -f dev/docker-compose.yml --profile latest up -d --wait
           if [ -n "$EXTRA" ]; then
             # Word splitting is wanted: EXTRA is a list of service names.
             # shellcheck disable=SC2086
-            docker compose -f dev/docker-compose.yml up -d --wait $EXTRA
+            scripts/ci/retry.sh 4 docker compose -f dev/docker-compose.yml up -d --wait $EXTRA
           fi
+      - name: Pull the images the tests start themselves
+        timeout-minutes: 15
+        env:
+          SUITE: ${{ matrix.suite }}
+          # The compose files require the certificate folders the tests create; pulling only
+          # reads the image names, so any folder will do here.
+          VARVE_TLSKEY_DIR: ${{ runner.temp }}
+          VARVE_MYSQL_TLS_DIR: ${{ runner.temp }}
+          VARVE_REDIS_TLS_DIR: ${{ runner.temp }}
+          VARVE_PG_TLS_DIR: ${{ runner.temp }}
+        # Some tests start their own servers (TLS, client keys) from the compose files next to
+        # them. With the images already here, they never meet a Docker Hub rate limit.
+        run: |
+          shopt -s nullglob
+          for file in "crates/$SUITE"/tests/*/compose.yml; do
+            scripts/ci/retry.sh 4 docker compose -f "$file" pull --quiet
+          done
       - name: Start the SSH tunnel servers
         if: matrix.suite == 'app'
         timeout-minutes: 10
         # services: ssh_tunnel_asks_to_trust_the_host_key_then_connects goes
         # through the OpenSSH server of crates/tunnel/tests to its Redis.
-        run: docker compose -f crates/tunnel/tests/docker-compose.yml up -d --wait
+        run: scripts/ci/retry.sh 4 docker compose -f crates/tunnel/tests/docker-compose.yml up -d --wait
       - name: Start the PostgreSQL TLS server
         if: matrix.suite == 'driver-postgres'
         timeout-minutes: 15
@@ -187,7 +205,7 @@ jobs:
           echo "VARVE_PG_TLS_DIR=$RUNNER_TEMP/pg-tls" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/pg-tls"
           cargo run -p varve-driver-postgres --example tls-test-certs -- "$RUNNER_TEMP/pg-tls"
-          VARVE_PG_TLS_DIR="$RUNNER_TEMP/pg-tls" docker compose -p varve-pg-tls \
+          VARVE_PG_TLS_DIR="$RUNNER_TEMP/pg-tls" scripts/ci/retry.sh 4 docker compose -p varve-pg-tls \
             -f crates/driver-postgres/tests/tls/compose.yml up -d --wait
       - name: Integration tests
         timeout-minutes: 40
@@ -315,7 +333,8 @@ jobs:
           key: integration-tunnel
       - name: Start the SSH tunnel servers
         timeout-minutes: 10
-        run: docker compose -p "$VARVE_TUNNEL_COMPOSE_PROJECT" -f "$VARVE_TUNNEL_COMPOSE_FILE" up -d --wait
+        # retry.sh: Docker Hub answers "toomanyrequests" now and then.
+        run: scripts/ci/retry.sh 4 docker compose -p "$VARVE_TUNNEL_COMPOSE_PROJECT" -f "$VARVE_TUNNEL_COMPOSE_FILE" up -d --wait
       - name: Integration tests
         timeout-minutes: 20
         # agent.rs starts its own ssh-agent and uses ssh-keygen and ssh-add
