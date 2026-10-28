@@ -119,8 +119,12 @@ define_class!(
         // SAFETY: the selector takes the updater and an NSError, and returns
         // void.
         #[unsafe(method(updater:didAbortWithError:))]
-        fn did_abort(&self, _updater: &AnyObject, _error: &AnyObject) {
-            RELAUNCH.with(|slot| slot.borrow_mut().take());
+        fn did_abort(&self, _updater: &AnyObject, error: &AnyObject) {
+            // "No new update was found" also ends a cycle this way; it says
+            // nothing about an update that is already downloaded and held.
+            if !is_no_update_error(error) {
+                RELAUNCH.with(|slot| slot.borrow_mut().take());
+            }
         }
     }
 );
@@ -140,6 +144,26 @@ impl Delegate {
         // SAFETY: NSObject's designated initializer on a freshly allocated
         // instance whose ivars are set.
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Sparkle's error domain and its "no new update was found" code
+/// (`SUSparkleErrorDomain`, `SUNoUpdateError` in SUErrors.h).
+const SPARKLE_ERROR_DOMAIN: &str = "SUSparkleErrorDomain";
+const NO_UPDATE_ERROR: isize = 1001;
+
+/// True for Sparkle's "no new update was found" error.
+fn is_no_update_error(error: &AnyObject) -> bool {
+    let Some(domain) = ns_string(SPARKLE_ERROR_DOMAIN) else {
+        return false;
+    };
+    // SAFETY: `code` is NSError's NSInteger getter and `domain` its NSString
+    // getter; isEqualToString: compares two NSStrings and returns BOOL.
+    unsafe {
+        let code: isize = msg_send![error, code];
+        let error_domain: Retained<AnyObject> = msg_send![error, domain];
+        let same: Bool = msg_send![&*error_domain, isEqualToString: &*domain];
+        code == NO_UPDATE_ERROR && same.as_bool()
     }
 }
 
