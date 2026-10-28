@@ -87,19 +87,14 @@ jobs:
           # With CI set, Tauri skips the Finder script that lays out the installer window
           # (background, window size, icon positions); this keeps it.
           TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
-          # Signs the updater artifacts (<bundle>.sig) for latest.json.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        # Updater artifacts only here: a local build has no signing key and must not need one.
-        run: >-
-          pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
-          --config '{"bundle":{"createUpdaterArtifacts":true}}'
+        # No signing keys here: every build script and download in this step could read them.
+        # The update signatures are made in their own steps below.
+        run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
       - name: Collect assets under fixed names
         shell: bash
         env:
           ASSET: ${{ matrix.asset }}
           BUNDLE: target/${{ matrix.target }}/release/bundle
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -114,44 +109,53 @@ jobs:
             fi
             printf '%s\n' "${matches[0]}"
           }
-          # The Tauri updater signature of a bundle, when the bundler wrote one.
-          sig() {
-            if [ -f "$1.sig" ]; then cp "$1.sig" "$2.sig"; elif [ "${3:-}" = required ]; then
-              echo "no updater signature for $1" >&2
-              exit 1
-            fi
-          }
           case "$ASSET" in
             macos-*)
               app="$(one "$BUNDLE/macos" '*.app')"
               # COPYFILE_DISABLE keeps macOS metadata files out of the archive.
               COPYFILE_DISABLE=1 tar -czf "dist/varve-${ASSET}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
               cp "$(one "$BUNDLE/dmg" '*.dmg')" "dist/varve-${ASSET}.dmg"
-              # Sparkle's EdDSA signature of the archive the appcast offers, checked right away.
-              # The key goes in on stdin, never to disk.
-              archive="dist/varve-${ASSET}.app.tar.gz"
-              tools=app/src-tauri/macos/sparkle/bin
-              printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --ed-key-file - "$archive" > "$archive.sparkle"
-              signature="$(sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p' "$archive.sparkle")"
-              printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --verify --ed-key-file - "$archive" "$signature"
               ;;
             windows-*)
-              setup="$(one "$BUNDLE/nsis" '*-setup.exe')"
-              msi="$(one "$BUNDLE/msi" '*.msi')"
-              cp "$setup" "dist/varve-${ASSET}-setup.exe"
-              cp "$msi" "dist/varve-${ASSET}.msi"
-              sig "$setup" "dist/varve-${ASSET}-setup.exe" required
-              sig "$msi" "dist/varve-${ASSET}.msi"
+              cp "$(one "$BUNDLE/nsis" '*-setup.exe')" "dist/varve-${ASSET}-setup.exe"
+              cp "$(one "$BUNDLE/msi" '*.msi')" "dist/varve-${ASSET}.msi"
               ;;
             linux-*)
-              appimage="$(one "$BUNDLE/appimage" '*.AppImage')"
-              deb="$(one "$BUNDLE/deb" '*.deb')"
-              cp "$appimage" "dist/varve-${ASSET}.AppImage"
-              cp "$deb" "dist/varve-${ASSET}.deb"
-              sig "$appimage" "dist/varve-${ASSET}.AppImage" required
-              sig "$deb" "dist/varve-${ASSET}.deb"
+              cp "$(one "$BUNDLE/appimage" '*.AppImage')" "dist/varve-${ASSET}.AppImage"
+              cp "$(one "$BUNDLE/deb" '*.deb')" "dist/varve-${ASSET}.deb"
               ;;
           esac
+          ls -la dist
+      - name: Sign the Sparkle update (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          ARCHIVE: dist/varve-${{ matrix.asset }}.app.tar.gz
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # The EdDSA signature of the archive the appcast offers, checked right away. The key goes
+          # in on stdin, never to disk.
+          tools=app/src-tauri/macos/sparkle/bin
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --ed-key-file - "$ARCHIVE" > "$ARCHIVE.sparkle"
+          signature="$(sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p' "$ARCHIVE.sparkle")"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --verify --ed-key-file - "$ARCHIVE" "$signature"
+      - name: Sign the Tauri updates (Windows, Linux)
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Every installer gets its <file>.sig for latest.json: the updater falls back from a
+          # missing installer-specific entry to the plain one, which would hand an MSI or deb
+          # install the wrong installer. The CLI reads the key from the environment.
+          for file in dist/*.exe dist/*.msi dist/*.AppImage dist/*.deb; do
+            [ -e "$file" ] || continue
+            ./node_modules/.bin/tauri signer sign "$file" > /dev/null
+            test -s "$file.sig"
+          done
           ls -la dist
       - uses: actions/upload-artifact@v6
         with:
@@ -236,11 +240,14 @@ jobs:
           for file in dist/*; do
             case "$file" in *.sparkle) ;; *) assets+=("$file") ;; esac
           done
-          # A rerun after a partial upload replaces the assets instead of failing.
+          # A draft first: it becomes the latest release, which the apps' update feeds point at,
+          # only once the feeds are uploaded too. A rerun after a partial upload replaces the
+          # assets instead of failing.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber
           else
             gh release create "$TAG" "${assets[@]}" \
+              --draft \
               --verify-tag \
               --title "Varve ${TAG}" \
               --notes-file notes.md \
@@ -259,3 +266,5 @@ jobs:
           gh api markdown -f text="$(cat update-notes.md)" -f mode=gfm -f context="$GITHUB_REPOSITORY" > update-notes.html
           node scripts/update-feeds.mjs dist "$TAG" update-notes.md update-notes.html
           gh release upload "$TAG" dist/latest.json dist/appcast-arm64.xml dist/appcast-x64.xml --clobber
+          # Now the release and its feeds go live together.
+          gh release edit "$TAG" --draft=false --latest

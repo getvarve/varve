@@ -40,3 +40,4 @@ __pycache__/
 
 # Sparkle release fetched by scripts/fetch-sparkle.mjs
 app/src-tauri/macos/sparkle/
+app/src-tauri/macos/.sparkle-*/

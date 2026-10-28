@@ -7,7 +7,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -48,9 +47,10 @@ async function fetchSparkle(root) {
   const bytes = Buffer.from(await response.arrayBuffer());
   verifySha256(bytes, SPARKLE_SHA256);
 
-  // Unpack next to the target and swap it in, so a failed run never leaves half a framework.
+  // Unpack next to the target and swap it in, so a failed run never leaves half a framework
+  // (and the renames stay on one volume).
   mkdirSync(dirname(dir), { recursive: true });
-  const work = mkdtempSync(join(tmpdir(), 'varve-sparkle-'));
+  const work = mkdtempSync(join(dirname(dir), '.sparkle-'));
   const archive = join(work, 'Sparkle.tar.xz');
   writeFileSync(archive, bytes);
   const unpacked = join(work, 'sparkle');

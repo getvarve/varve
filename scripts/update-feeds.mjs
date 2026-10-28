@@ -50,8 +50,9 @@ function assetUrl(tag, asset) {
 }
 
 /**
- * The Tauri updater feed. A platform is listed only when its asset has a signature: the MSI and
- * deb bundles may come without one, and an entry without a valid signature would only fail later.
+ * The Tauri updater feed. Every platform must have a signature: the updater falls back from a
+ * missing installer-specific entry (an MSI or deb install) to the plain one, which would install
+ * the wrong kind of package.
  */
 export function latestJson({ tag, notes, pubDate, signatureOf }) {
   const platforms = {};
@@ -59,8 +60,8 @@ export function latestJson({ tag, notes, pubDate, signatureOf }) {
     const signature = signatureOf(asset);
     if (signature) platforms[platform] = { signature, url: assetUrl(tag, asset) };
   }
-  for (const required of ['windows-x86_64', 'linux-x86_64', 'linux-aarch64']) {
-    if (!platforms[required]) throw new Error(`No updater signature for ${required}`);
+  for (const [platform] of TAURI_PLATFORMS) {
+    if (!platforms[platform]) throw new Error(`No updater signature for ${platform}`);
   }
   return { version: versionOf(tag), notes, pub_date: pubDate, platforms };
 }
@@ -97,7 +98,7 @@ export function appcast({ tag, asset, notesHtml, pubDate, signature, length }) {
       <sparkle:version>${xmlEscape(version)}</sparkle:version>
       <sparkle:shortVersionString>${xmlEscape(version)}</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>${MINIMUM_MACOS}</sparkle:minimumSystemVersion>
-      <sparkle:releaseNotesLink>https://github.com/${REPO}/releases/tag/${xmlEscape(tag)}</sparkle:releaseNotesLink>
+      <sparkle:fullReleaseNotesLink>https://github.com/${REPO}/releases/tag/${xmlEscape(tag)}</sparkle:fullReleaseNotesLink>
       <description>${cdata(notesHtml)}</description>
       <enclosure url="${xmlEscape(assetUrl(tag, asset))}" sparkle:edSignature="${xmlEscape(signature)}" length="${xmlEscape(length)}" type="application/octet-stream"/>
     </item>

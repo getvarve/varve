@@ -11,8 +11,7 @@ import {
   xmlEscape,
 } from './update-feeds.mjs';
 
-const signed = new Set(['varve-windows-x64-setup.exe', 'varve-linux-x64.AppImage', 'varve-linux-arm64.AppImage']);
-const signatureOf = (asset) => (signed.has(asset) ? `sig-of-${asset}` : null);
+const signatureOf = (asset) => `sig-of-${asset}`;
 
 test('a release tag gives its version', () => {
   assert.equal(versionOf('v0.1.6'), '0.1.6');
@@ -20,28 +19,34 @@ test('a release tag gives its version', () => {
   assert.throws(() => versionOf('v0.1.6-rc.1'), /vMAJOR/);
 });
 
-test('latest.json lists exactly the platforms with a signature', () => {
+test('latest.json lists every installer with its signature', () => {
   const feed = latestJson({ tag: 'v0.1.6', notes: 'Notes', pubDate: '2026-10-28T14:00:00Z', signatureOf });
   assert.equal(feed.version, '0.1.6');
   assert.equal(feed.pub_date, '2026-10-28T14:00:00Z');
   assert.deepEqual(Object.keys(feed.platforms).sort(), [
     'linux-aarch64',
     'linux-aarch64-appimage',
+    'linux-aarch64-deb',
     'linux-x86_64',
     'linux-x86_64-appimage',
+    'linux-x86_64-deb',
     'windows-x86_64',
+    'windows-x86_64-msi',
     'windows-x86_64-nsis',
   ]);
+  assert.equal(feed.platforms['linux-x86_64-deb'].url.endsWith('/varve-linux-x64.deb'), true);
   assert.deepEqual(feed.platforms['windows-x86_64'], {
     signature: 'sig-of-varve-windows-x64-setup.exe',
     url: 'https://github.com/getvarve/varve/releases/download/v0.1.6/varve-windows-x64-setup.exe',
   });
 });
 
-test('latest.json refuses a release without the main installers signed', () => {
+test('latest.json refuses a release with any installer unsigned', () => {
+  // An unsigned deb would make deb installs fall back to the AppImage entry.
+  const withoutDeb = (asset) => (asset.endsWith('.deb') ? null : `sig-of-${asset}`);
   assert.throws(
-    () => latestJson({ tag: 'v0.1.6', notes: '', pubDate: '2026-10-28T14:00:00Z', signatureOf: () => null }),
-    /No updater signature for windows-x86_64/,
+    () => latestJson({ tag: 'v0.1.6', notes: '', pubDate: '2026-10-28T14:00:00Z', signatureOf: withoutDeb }),
+    /No updater signature for linux-x86_64-deb/,
   );
 });
 
@@ -72,6 +77,7 @@ test('release notes cannot break out of the appcast', () => {
     length: '10',
   });
   assert.match(xml, /<sparkle:version>0\.1\.6<\/sparkle:version>/);
+  assert.match(xml, /<sparkle:fullReleaseNotesLink>https:\/\/github\.com\/getvarve\/varve\/releases\/tag\/v0\.1\.6<\/sparkle:fullReleaseNotesLink>/);
   assert.match(xml, /<pubDate>Wed, 28 Oct 2026 14:00:00 GMT<\/pubDate>/);
   assert.match(
     xml,
