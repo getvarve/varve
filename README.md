@@ -180,6 +180,7 @@ Push a signed `vMAJOR.MINOR.PATCH` tag whose version matches `Cargo.toml` and bo
 | What | Script | Then |
 | --- | --- | --- |
 | App icon (`assets/logo/varve-app-icon*.svg`) | `scripts/app-icon.py` | The commands below, then `scripts/readme-images.py` (the banner draws the same tile) |
+| Liquid Glass icon for macOS 26 (`assets/logo/Varve.icon`, compiled to `app/src-tauri/macos/Assets.car`) | `scripts/liquid-glass-icon.sh` (needs Xcode 26 or newer) | Nothing: `app/src-tauri/Info.plist` points macOS at it; older macOS keeps `icon.icns` |
 | macOS installer window (`app/src-tauri/dmg/background.png`) | `scripts/dmg-background.py` | Rerun after changing `bundle.macOS.dmg` in `tauri.conf.json`; it reads the window size and icon positions from there |
 | README banner and diagram (`assets/readme`) | `scripts/readme-images.py` | Nothing |
 

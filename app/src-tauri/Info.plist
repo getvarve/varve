@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- macOS 26 and later: the Liquid Glass icon in Contents/Resources/Assets.car (scripts/liquid-glass-icon.sh).
+	     Older macOS uses CFBundleIconFile, which Tauri sets to icon.icns. -->
+	<key>CFBundleIconName</key>
+	<string>Varve</string>
+</dict>
+</plist>

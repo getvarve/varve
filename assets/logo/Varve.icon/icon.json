@@ -1,0 +1,79 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "extended-srgb:0.14902,0.16471,0.20000,1.00000",
+      "extended-srgb:0.04706,0.05490,0.07059,1.00000"
+    ],
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 1
+      }
+    }
+  },
+  "groups" : [
+    {
+      "name" : "Mark",
+      "layers" : [
+        {
+          "image-name" : "dot.svg",
+          "name" : "Dot",
+          "glass" : true
+        },
+        {
+          "image-name" : "ring-inner.svg",
+          "name" : "Inner ring",
+          "glass" : true
+        },
+        {
+          "image-name" : "ring-middle.svg",
+          "name" : "Middle ring",
+          "glass" : true
+        },
+        {
+          "image-name" : "ring-outer.svg",
+          "name" : "Outer ring",
+          "glass" : true
+        }
+      ],
+      "lighting" : "individual",
+      "specular" : true,
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "name" : "Glow",
+      "layers" : [
+        {
+          "image-name" : "glow.svg",
+          "name" : "Glow",
+          "glass" : false
+        }
+      ],
+      "shadow" : {
+        "kind" : "none",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : false,
+        "value" : 0.5
+      },
+      "specular" : false
+    }
+  ],
+  "supported-platforms" : {
+    "squares" : [
+      "macOS"
+    ]
+  }
+}

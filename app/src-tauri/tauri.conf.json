@@ -35,6 +35,9 @@
     "copyright": "Copyright 2026 The Varve Authors",
     "license": "Apache-2.0",
     "macOS": {
+      "files": {
+        "Resources/Assets.car": "macos/Assets.car"
+      },
       "dmg": {
         "background": "dmg/background.png",
         "windowSize": { "width": 660, "height": 400 },
