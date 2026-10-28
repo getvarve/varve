@@ -4455,21 +4455,24 @@ export const s174 = {
 export const s175 = {
   "autoCheck": true,
   "currentVersion": "0.1.6",
-  "mechanism": "sparkle"
+  "mechanism": "sparkle",
+  "relaunchPending": true
 } satisfies updates.UpdateInfo;
 
 // update_info() tauri
 export const s176 = {
   "autoCheck": false,
   "currentVersion": "0.1.6",
-  "mechanism": "tauri"
+  "mechanism": "tauri",
+  "relaunchPending": false
 } satisfies updates.UpdateInfo;
 
 // update_info() none
 export const s177 = {
   "autoCheck": false,
   "currentVersion": "0.1.6",
-  "mechanism": "none"
+  "mechanism": "none",
+  "relaunchPending": false
 } satisfies updates.UpdateInfo;
 
 // update_check() available

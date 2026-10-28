@@ -1169,6 +1169,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         crate::updates::update_install,
         crate::updates::set_update_auto_check,
         crate::updates::update_relaunch,
+        crate::updates::update_listening,
         crate::quit::confirm_quit,
         crate::quit::cancel_quit,
         crate::quit::quit_ready,

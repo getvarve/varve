@@ -1,9 +1,11 @@
 //! In-app updates.
 //!
-//! - macOS uses Sparkle (`sparkle.rs`): its own windows, its "Check for
+//! - macOS uses Sparkle (`crates/sparkle`): its own windows, its "Check for
 //!   Updates…" menu item and its scheduled checks. Sparkle asks before it
-//!   relaunches; the UI runs the unsaved-work check and answers with
-//!   `update_relaunch`.
+//!   relaunches; the UI runs the unsaved-work check and continues with
+//!   `update_relaunch`. Declined, the relaunch stays held
+//!   (`relaunchPending`), and the UI offers it again; it also installs when
+//!   the app quits.
 //! - Windows and Linux use the Tauri updater with the release's
 //!   `latest.json`. The UI runs the flow: `update_check`, `update_download`
 //!   (with `varve://update-progress` events), then, after the unsaved-work
@@ -51,6 +53,8 @@ pub struct UpdateInfo {
     pub current_version: String,
     /// Whether updates are checked for automatically.
     pub auto_check: bool,
+    /// Sparkle holds a downloaded update's relaunch back for the UI.
+    pub relaunch_pending: bool,
 }
 
 /// The answer of `update_check`.
@@ -97,6 +101,24 @@ fn prepare_restart<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Whether the page's UI listens for `varve://update-relaunch-requested`; a
+/// page load resets it, like the quit gate's ready flag.
+#[derive(Debug, Default)]
+pub struct UpdateListener(std::sync::atomic::AtomicBool);
+
+impl UpdateListener {
+    /// True once the current page listens.
+    #[must_use]
+    pub fn is_listening(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// The page listens (true), or a new page starts loading (false).
+    pub fn set(&self, listening: bool) {
+        self.0.store(listening, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 fn not_available(what: &str) -> CmdError {
     CmdError::Internal {
         message: format!("{what} is not available in this build"),
@@ -135,19 +157,22 @@ mod mac {
     /// before the menu is built (the menu shows "Check for Updates…" only
     /// when Sparkle runs).
     pub fn init<R: Runtime>(app: &AppHandle<R>) {
-        let handle = app.clone();
+        let asker = app.clone();
+        let cleaner = app.clone();
         varve_sparkle::start(
             FEED_URL,
             Box::new(move || {
-                // Only a UI that installed its quit handler can answer.
-                let listening = handle
-                    .try_state::<crate::quit::QuitGate>()
-                    .is_some_and(|gate| gate.is_ready());
+                // Only a page that listens for the question can answer it.
+                let listening = asker
+                    .try_state::<super::UpdateListener>()
+                    .is_some_and(|listener| listener.is_listening());
                 listening
-                    && handle
+                    && asker
                         .get_webview_window("main")
                         .is_some_and(|window| window.emit(UPDATE_RELAUNCH_REQUESTED, ()).is_ok())
             }),
+            // Sparkle quits past the quit gate: wipe the secrets either way.
+            Box::new(move || super::prepare_restart(&cleaner)),
         );
     }
 
@@ -178,20 +203,27 @@ mod mac {
 
     pub(super) async fn info<R: Runtime>(app: &AppHandle<R>) -> Result<UpdateInfo, CmdError> {
         let current_version = app.package_info().version.to_string();
-        Ok(
-            match on_main(app, varve_sparkle::automatically_checks).await? {
-                Some(auto_check) => UpdateInfo {
-                    mechanism: Mechanism::Sparkle,
-                    current_version,
-                    auto_check,
-                },
-                None => UpdateInfo {
-                    mechanism: Mechanism::None,
-                    current_version,
-                    auto_check: false,
-                },
+        let (auto_check, relaunch_pending) = on_main(app, || {
+            (
+                varve_sparkle::automatically_checks(),
+                varve_sparkle::relaunch_pending(),
+            )
+        })
+        .await?;
+        Ok(match auto_check {
+            Some(auto_check) => UpdateInfo {
+                mechanism: Mechanism::Sparkle,
+                current_version,
+                auto_check,
+                relaunch_pending,
             },
-        )
+            None => UpdateInfo {
+                mechanism: Mechanism::None,
+                current_version,
+                auto_check: false,
+                relaunch_pending: false,
+            },
+        })
     }
 
     pub(super) async fn check<R: Runtime>(app: &AppHandle<R>) -> Result<UpdateCheck, CmdError> {
@@ -221,15 +253,21 @@ mod mac {
         app: &AppHandle<R>,
         proceed: bool,
     ) -> Result<(), CmdError> {
+        // Declined: leave the relaunch held (see crates/sparkle).
+        if !proceed {
+            return Ok(());
+        }
         let handle = app.clone();
-        on_main(app, move || {
-            if proceed {
-                // Sparkle terminates the app next: let the quit gate through.
-                super::prepare_restart(&handle);
-            }
-            varve_sparkle::answer_relaunch(proceed);
+        let continued = on_main(app, move || {
+            // Sparkle terminates the app next: let the quit gate through.
+            varve_sparkle::continue_relaunch(|| super::prepare_restart(&handle))
         })
-        .await
+        .await?;
+        if continued {
+            Ok(())
+        } else {
+            Err(internal("No update is waiting to relaunch"))
+        }
     }
 }
 
@@ -242,7 +280,8 @@ mod tauri_updater {
     use time::format_description::well_known::Rfc3339;
 
     use super::{
-        Mechanism, UPDATE_PROGRESS, UpdateCheck, UpdateInfo, UpdateProgress, not_available,
+        Mechanism, UPDATE_PROGRESS, UpdateCheck, UpdateInfo, UpdateProgress, internal,
+        not_available,
     };
     use crate::commands::CmdError;
 
@@ -310,12 +349,14 @@ mod tauri_updater {
                 mechanism: Mechanism::Tauri,
                 current_version: version,
                 auto_check: auto_check(app),
+                relaunch_pending: false,
             }
         } else {
             UpdateInfo {
                 mechanism: Mechanism::None,
                 current_version: version,
                 auto_check: false,
+                relaunch_pending: false,
             }
         })
     }
@@ -349,12 +390,20 @@ mod tauri_updater {
             .clone()
             .ok_or_else(|| internal("Check for updates first"))?;
         let mut downloaded: u64 = 0;
+        let mut last_sent: Option<std::time::Instant> = None;
         let emitter = app.clone();
         let bytes = update
             .download(
                 move |chunk, total| {
                     downloaded += chunk as u64;
-                    let _ = emitter.emit(UPDATE_PROGRESS, UpdateProgress { downloaded, total });
+                    // A few events a second are enough for a progress bar; one
+                    // per chunk would flood the IPC channel.
+                    let done = total.is_some_and(|total| downloaded >= total);
+                    let due = last_sent.is_none_or(|at| at.elapsed().as_millis() >= 250);
+                    if done || due {
+                        last_sent = Some(std::time::Instant::now());
+                        let _ = emitter.emit(UPDATE_PROGRESS, UpdateProgress { downloaded, total });
+                    }
                 },
                 || {},
             )
@@ -378,9 +427,21 @@ mod tauri_updater {
                 _ => return Err(internal("Download the update first")),
             }
         };
+        // On Windows the installer takes over and the app exits inside
+        // `install`, so the secrets go and the gate opens before it. Elsewhere
+        // only an install that worked restarts the app.
+        #[cfg(windows)]
         super::prepare_restart(app);
-        // On Windows the installer takes over and the app exits here.
-        update.install(bytes).map_err(internal)?;
+        if let Err(error) = update.install(bytes) {
+            #[cfg(windows)]
+            if let Some(gate) = app.try_state::<crate::quit::QuitGate>() {
+                // Still running: quitting asks about unsaved work again.
+                gate.unconfirm();
+            }
+            return Err(internal(error));
+        }
+        #[cfg(not(windows))]
+        super::prepare_restart(app);
         app.restart();
     }
 
@@ -459,8 +520,14 @@ pub async fn set_update_auto_check<R: Runtime>(
     platform::set_auto_check(&app, auto_check).await
 }
 
-/// Sparkle: continues (after the unsaved-work check) or drops a held-back
-/// relaunch.
+/// The page listens for `varve://update-relaunch-requested` from now on.
+#[tauri::command]
+pub fn update_listening(listener: tauri::State<'_, UpdateListener>) {
+    listener.set(true);
+}
+
+/// Sparkle: continues (after the unsaved-work check) or declines a held-back
+/// relaunch; declined, it stays held.
 #[tauri::command]
 pub async fn update_relaunch<R: Runtime>(app: AppHandle<R>, proceed: bool) -> Result<(), CmdError> {
     platform::relaunch(&app, proceed).await
@@ -478,8 +545,9 @@ mod tests {
                 mechanism: Mechanism::Tauri,
                 current_version: "0.1.6".into(),
                 auto_check: true,
+                relaunch_pending: false,
             })?,
-            serde_json::json!({"mechanism": "tauri", "currentVersion": "0.1.6", "autoCheck": true})
+            serde_json::json!({"mechanism": "tauri", "currentVersion": "0.1.6", "autoCheck": true, "relaunchPending": false})
         );
         assert_eq!(
             serde_json::to_value(UpdateCheck::Available {

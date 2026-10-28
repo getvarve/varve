@@ -77,6 +77,12 @@ impl QuitGate {
         self.confirmed.store(true, Ordering::SeqCst);
     }
 
+    /// Takes a confirmation back: a restart for an update did not happen
+    /// after all, so quitting must ask again.
+    pub fn unconfirm(&self) {
+        self.confirmed.store(false, Ordering::SeqCst);
+    }
+
     /// The UI installed its quit handler.
     pub fn set_ready(&self) {
         self.ready.store(true, Ordering::SeqCst);

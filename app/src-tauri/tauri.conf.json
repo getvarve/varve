@@ -39,7 +39,7 @@
       "frameworks": [
         "macos/sparkle/Sparkle.framework"
       ],
-      "hardenedRuntime": false,
+      "entitlements": "Entitlements.plist",
       "files": {
         "Resources/Assets.car": "macos/Assets.car"
       },

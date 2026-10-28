@@ -353,6 +353,7 @@ pub fn run(
             // The quit gate first: nothing later in setup may leave the app
             // without it.
             app.manage(quit::QuitGate::default());
+            app.manage(updates::UpdateListener::default());
             // Before the menu: on macOS it offers "Check for Updates…" only
             // when Sparkle runs.
             updates::init(app.handle());
@@ -402,9 +403,13 @@ pub fn run(
             {
                 return;
             }
-            // A (re)loading page has no quit handler yet.
+            // A (re)loading page has no quit handler yet, and does not
+            // listen for Sparkle's relaunch question yet.
             if let Some(gate) = webview.try_state::<quit::QuitGate>() {
                 gate.reset_ui();
+            }
+            if let Some(listener) = webview.try_state::<updates::UpdateListener>() {
+                listener.set(false);
             }
             // Its tabs are gone: a new page begins (sessions opened from now
             // on are its own) and the old page's sessions are closed. The new

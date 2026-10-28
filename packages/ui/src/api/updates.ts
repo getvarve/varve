@@ -12,6 +12,8 @@ export interface UpdateInfo {
   mechanism: UpdateMechanism;
   currentVersion: string;
   autoCheck: boolean;
+  /** Sparkle holds a downloaded update's relaunch back until the UI continues it. */
+  relaunchPending: boolean;
 }
 
 /** The answer of `update_check`. */
@@ -59,7 +61,15 @@ export async function setUpdateAutoCheck(autoCheck: boolean): Promise<void> {
   await call<unknown>('set_update_auto_check', { autoCheck });
 }
 
-/** Sparkle only: `true` lets Sparkle install and relaunch, `false` keeps the app open. */
+/** Sparkle only: the page listens for `UPDATE_RELAUNCH_REQUESTED` from now on. */
+export async function markUpdateListening(): Promise<void> {
+  await call<unknown>('update_listening');
+}
+
+/**
+ * Sparkle only: `true` lets Sparkle install and relaunch; `false` keeps the
+ * app open, and Sparkle keeps the relaunch held (`relaunchPending`).
+ */
 export async function answerUpdateRelaunch(proceed: boolean): Promise<void> {
   await call<unknown>('update_relaunch', { proceed });
 }

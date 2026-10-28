@@ -10,8 +10,10 @@
 //! `SUScheduledCheckInterval` from the app's Info.plist. The feed comes from
 //! the delegate, so each architecture gets its own appcast. Before
 //! relaunching for an update Sparkle asks the delegate: the `ask` callback of
-//! [`start`] decides whether to hold the relaunch back, and [`answer_relaunch`]
-//! continues or drops it. A dropped relaunch installs when the app quits.
+//! [`start`] decides whether to hold the relaunch back, and
+//! [`continue_relaunch`] continues it. Declined, the relaunch stays held: the app
+//! can continue it later, and otherwise the update installs when the app
+//! quits. Right before Sparkle quits the app to relaunch, `will_relaunch` runs.
 //!
 //! Every function must run on the main thread, where Sparkle's objects live;
 //! they do nothing (and say so in their result) elsewhere or before [`start`].
@@ -31,8 +33,11 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 
 /// Decides, when Sparkle wants to relaunch, whether to hold it back while
 /// someone (the UI) is asked; returns true when an answer will come through
-/// [`answer_relaunch`].
+/// [`continue_relaunch`].
 pub type Ask = Box<dyn Fn() -> bool>;
+
+/// Runs right before Sparkle quits the app to install and relaunch.
+pub type WillRelaunch = Box<dyn Fn()>;
 
 /// The running updater.
 struct Sparkle {
@@ -53,6 +58,7 @@ thread_local! {
 pub struct DelegateIvars {
     feed_url: Retained<AnyObject>,
     ask: Ask,
+    will_relaunch: WillRelaunch,
 }
 
 define_class!(
@@ -60,6 +66,8 @@ define_class!(
     // implement Drop.
     #[unsafe(super(NSObject))]
     #[thread_kind = MainThreadOnly]
+    // Objective-C class names are global: a plain "Delegate" could clash.
+    #[name = "VarveSparkleUpdaterDelegate"]
     #[ivars = DelegateIvars]
     struct Delegate;
 
@@ -94,12 +102,30 @@ define_class!(
                 Bool::NO
             }
         }
+
+        /// SPUUpdaterDelegate: Sparkle is about to quit the app to install
+        /// and relaunch. It quits through `-[NSApp terminate:]`, past the
+        /// app's own quit handling, so this is the last moment to clean up.
+        // SAFETY: the selector takes the updater and returns void.
+        #[unsafe(method(updaterWillRelaunchApplication:))]
+        fn will_relaunch(&self, _updater: &AnyObject) {
+            (self.ivars().will_relaunch)();
+        }
     }
 );
 
 impl Delegate {
-    fn new(mtm: MainThreadMarker, feed_url: Retained<AnyObject>, ask: Ask) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(DelegateIvars { feed_url, ask });
+    fn new(
+        mtm: MainThreadMarker,
+        feed_url: Retained<AnyObject>,
+        ask: Ask,
+        will_relaunch: WillRelaunch,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(DelegateIvars {
+            feed_url,
+            ask,
+            will_relaunch,
+        });
         // SAFETY: NSObject's designated initializer on a freshly allocated
         // instance whose ivars are set.
         unsafe { msg_send![super(this), init] }
@@ -153,7 +179,7 @@ fn load_framework() -> bool {
 
 /// Starts Sparkle with `feed_url` when the app bundle carries the framework,
 /// and returns whether it runs. Call once, on the main thread.
-pub fn start(feed_url: &str, ask: Ask) -> bool {
+pub fn start(feed_url: &str, ask: Ask, will_relaunch: WillRelaunch) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("Sparkle must start on the main thread");
         return false;
@@ -173,7 +199,7 @@ pub fn start(feed_url: &str, ask: Ask) -> bool {
     let Some(feed) = ns_string(feed_url) else {
         return false;
     };
-    let delegate = Delegate::new(mtm, feed, ask);
+    let delegate = Delegate::new(mtm, feed, ask, will_relaunch);
     let nil: Option<&AnyObject> = None;
     // SAFETY: alloc returns a fresh instance of the controller class;
     // initWithStartingUpdater:updaterDelegate:userDriverDelegate: is its
@@ -257,14 +283,27 @@ pub fn set_automatically_checks(on: bool) -> bool {
     .is_some()
 }
 
-/// Continues (true) or drops (false) a relaunch Sparkle held back. Dropped,
-/// the update installs when the app quits. Without a held-back relaunch it
-/// does nothing.
-pub fn answer_relaunch(proceed: bool) {
+/// Continues a relaunch Sparkle held back: runs `before`, then lets Sparkle
+/// install and relaunch. Returns false, and runs nothing, when no relaunch is
+/// held back.
+///
+/// A declined relaunch is not answered at all: it stays held, so the app can
+/// continue it later. Sparkle relaunches without asking again when a previous
+/// relaunch was dropped, so dropping it would skip the app's checks.
+pub fn continue_relaunch(before: impl FnOnce()) -> bool {
     let install = RELAUNCH.with(|slot| slot.borrow_mut().take());
-    if let Some(install) = install
-        && proceed
-    {
-        install.call(());
+    match install {
+        Some(install) => {
+            before();
+            install.call(());
+            true
+        }
+        None => false,
     }
+}
+
+/// True while Sparkle holds a relaunch back for the app's answer.
+#[must_use]
+pub fn relaunch_pending() -> bool {
+    RELAUNCH.with(|slot| slot.borrow().is_some())
 }
