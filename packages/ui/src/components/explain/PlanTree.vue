@@ -244,7 +244,8 @@ defineExpose({ fit });
   padding: 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--surface);
+  /* Edges run under the cards: solid even over glass. */
+  background: var(--surface-solid);
   cursor: pointer;
 }
 
@@ -349,7 +350,10 @@ defineExpose({ fit });
   gap: 16px;
   padding: 2px 6px;
   border-radius: var(--radius-control);
-  background: var(--ground);
+  /* Floats over the plan: frosted over glass, the opaque ground without it. */
+  background: var(--frost-ground);
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -393,7 +397,9 @@ defineExpose({ fit });
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--surface);
+  background: var(--frost);
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
   color: var(--text);
   cursor: pointer;
 }

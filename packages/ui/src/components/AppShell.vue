@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   padding: 0 12px 0 84px;
-  background: var(--surface);
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
@@ -176,7 +176,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   min-height: 0;
   padding: 8px 0;
-  background: var(--surface);
+  background: var(--chrome);
   border-right: 1px solid var(--border);
   /* The whole sidebar scrolls, so extension sections below the tree are never clipped. */
   overflow-y: auto;
@@ -220,7 +220,10 @@ onBeforeUnmount(() => {
   position: sticky;
   bottom: 0;
   padding: 8px 12px;
-  background: var(--surface);
+  background: var(--frost);
+  /* Over glass the tree scrolls under this bar: frost it instead of letting rows show through. */
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
   border-top: 1px solid var(--border-inner);
 }
 

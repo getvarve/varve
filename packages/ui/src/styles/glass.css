@@ -1,0 +1,119 @@
+/* Glass: the UI over the window's native glass (app/src-tauri/src/glass.rs).
+   createVarveApp sets data-glass on <html> only when the backend applied a native material
+   (Liquid Glass, vibrancy or Mica) and the user does not ask for less transparency. Without it
+   every token keeps its opaque value from tokens.css, so Linux, Windows 10 and a failed effect
+   look exactly as before.
+
+   The layers, from back to front:
+   - ground is clear: the native glass itself; chrome (title bar, sidebar, status bar) adds a
+     tint dense enough that its text and muted text keep 4.5:1 or more even over a wallpaper of
+     the opposite brightness, since Liquid Glass Regular lets much of the desktop through;
+   - surfaces (panels, grids, inputs) are dense tints, made for reading data on;
+   - sticky table headers and editor gutters are near-opaque tints: rows scroll under them, and
+     a blur per header cell would cost a backdrop pass per cell on every scroll frame;
+   - frosted elements (overlays, floating bars and buttons) blur what lies under them;
+   - glass edges: a hairline highlight on raised glass, the light catching its rim.
+
+   Each theme block sets every glass token. tokens.css gives its own theme blocks the same
+   specificity as these, so a token left out here could lose to a theme block depending on the
+   order the stylesheets load in. */
+
+:root[data-glass] {
+  --ground: transparent;
+  --chrome: rgba(255, 255, 255, 0.8);
+  --surface: rgba(255, 255, 255, 0.8);
+  --surface-raised: rgba(20, 23, 28, 0.055);
+  --surface-solid: #FFFFFF;
+  --border: rgba(20, 23, 28, 0.13);
+  --border-inner: rgba(20, 23, 28, 0.07);
+  --zebra: rgba(20, 23, 28, 0.025);
+  --inset: rgba(20, 23, 28, 0.045);
+  --text-subtle: #5F6574;
+  --sticky: rgba(246, 247, 249, 0.94);
+  --sticky-surface: rgba(255, 255, 255, 0.94);
+  --frost: rgba(255, 255, 255, 0.78);
+  --frost-ground: rgba(255, 255, 255, 0.78);
+  --overlay: rgba(255, 255, 255, 0.8);
+  --overlay-blur: blur(28px) saturate(1.8);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  --backdrop: rgba(20, 23, 28, 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-glass]:not([data-theme='light']) {
+    --ground: transparent;
+    --chrome: rgba(15, 17, 21, 0.82);
+    --surface: rgba(22, 25, 32, 0.8);
+    --surface-raised: rgba(255, 255, 255, 0.06);
+    --surface-solid: #161920;
+    --border: rgba(255, 255, 255, 0.11);
+    --border-inner: rgba(255, 255, 255, 0.06);
+    --zebra: rgba(255, 255, 255, 0.025);
+    --inset: rgba(0, 0, 0, 0.22);
+    --text-subtle: #8A91A0;
+    --sticky: rgba(26, 29, 37, 0.94);
+    --sticky-surface: rgba(22, 25, 32, 0.94);
+    --frost: rgba(29, 33, 42, 0.74);
+    --frost-ground: rgba(29, 33, 42, 0.74);
+    --overlay: rgba(29, 33, 42, 0.76);
+    --overlay-blur: blur(28px) saturate(1.8);
+    --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --backdrop: rgba(0, 0, 0, 0.32);
+  }
+}
+
+:root[data-glass][data-theme='dark'] {
+  --ground: transparent;
+  --chrome: rgba(15, 17, 21, 0.82);
+  --surface: rgba(22, 25, 32, 0.8);
+  --surface-raised: rgba(255, 255, 255, 0.06);
+  --surface-solid: #161920;
+  --border: rgba(255, 255, 255, 0.11);
+  --border-inner: rgba(255, 255, 255, 0.06);
+  --zebra: rgba(255, 255, 255, 0.025);
+  --inset: rgba(0, 0, 0, 0.22);
+  --text-subtle: #8A91A0;
+  --sticky: rgba(26, 29, 37, 0.94);
+  --sticky-surface: rgba(22, 25, 32, 0.94);
+  --frost: rgba(29, 33, 42, 0.74);
+  --frost-ground: rgba(29, 33, 42, 0.74);
+  --overlay: rgba(29, 33, 42, 0.76);
+  --overlay-blur: blur(28px) saturate(1.8);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --backdrop: rgba(0, 0, 0, 0.32);
+}
+
+/* Glass arrives a moment after the first paint, once app_info answers: fade into it. */
+:root[data-glass] body {
+  transition: background-color 240ms var(--ease-out);
+}
+
+/* Scoped to glass: --glass-edge is transparent without it, but these selectors would still
+   replace other box-shadows on the same elements. Primary and danger buttons stay solid color. */
+:root[data-glass] .btn:not(.primary):not(.danger):not(.ghost),
+:root[data-glass] .input,
+:root[data-glass] .select,
+:root[data-glass] .textarea {
+  box-shadow: var(--glass-edge);
+}
+
+:root[data-glass] .input:focus,
+:root[data-glass] .select:focus,
+:root[data-glass] .textarea:focus {
+  box-shadow: var(--glass-edge), 0 0 0 3px var(--focus-ring);
+}
+
+/* AG Grid draws its menus and tooltips itself: frost them like the app's own overlays.
+   Their colors come from the grid themes (ResultGrid, TableData). */
+:root[data-glass] .ag-popup .ag-menu,
+:root[data-glass] .ag-tooltip {
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
+  box-shadow: var(--shadow-dialog), var(--glass-edge);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-glass] body {
+    transition: none;
+  }
+}

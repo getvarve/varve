@@ -10,8 +10,10 @@ import { useWorkspace } from './composables/useWorkspace';
 import { ExtensionRegistry } from './extensions';
 import type { UiExtension } from './extensions';
 import { APP_INFO_KEY, REGISTRY_KEY } from './keys';
+import { watchGlass } from './lib/glass';
 import { installWebviewGuards } from './lib/webviewGuards';
 import './styles/base.css';
+import './styles/glass.css';
 import AboutProView from './views/AboutProView.vue';
 import ActivityView from './views/ActivityView.vue';
 import SettingsView from './views/SettingsView.vue';
@@ -45,6 +47,7 @@ export function createVarveApp(options: VarveAppOptions = {}): App {
   fetchAppInfo()
     .then((value) => {
       info.value = value;
+      watchGlass(value.glass);
     })
     .catch((error: unknown) => {
       console.error('Could not read app info from the backend', error);

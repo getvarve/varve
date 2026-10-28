@@ -140,8 +140,11 @@ onBeforeUnmount(() => {
   max-width: 100%;
   max-height: 100%;
   border-radius: var(--radius-dialog);
-  background: var(--surface);
-  box-shadow: var(--shadow-dialog);
+  background: var(--overlay);
+  box-shadow: var(--shadow-dialog), var(--glass-edge);
+  /* Frosted over glass (glass.css); --overlay-blur is none without it. */
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
   outline: none;
   animation: panel-in 200ms var(--ease-out);
 }

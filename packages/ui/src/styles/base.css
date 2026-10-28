@@ -321,7 +321,8 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--surface);
+  /* A knob, not a pane: solid even over glass. */
+  background: var(--surface-solid);
   transition: transform 120ms ease;
 }
 

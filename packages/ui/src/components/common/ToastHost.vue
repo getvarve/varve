@@ -71,8 +71,11 @@ function pinLeaving(el: Element): void {
   padding: 10px 8px 10px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-dialog);
+  background: var(--overlay);
+  box-shadow: var(--shadow-dialog), var(--glass-edge);
+  /* Frosted over glass (glass.css); --overlay-blur is none without it. */
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
   pointer-events: auto;
 }
 

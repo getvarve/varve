@@ -348,6 +348,9 @@ function displayText(row: ViewRow, i: number): string {
 const theme = themeQuartz.withParams({
   backgroundColor: 'var(--surface)',
   foregroundColor: 'var(--text)',
+  // Menus and tooltips float over cells: the overlay tint, frosted in glass.css.
+  menuBackgroundColor: 'var(--overlay)',
+  tooltipBackgroundColor: 'var(--overlay)',
   headerBackgroundColor: 'var(--surface-raised)',
   headerTextColor: 'var(--text-muted)',
   borderColor: 'var(--border-inner)',
@@ -1497,8 +1500,11 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-dialog);
+  background: var(--overlay);
+  box-shadow: var(--shadow-dialog), var(--glass-edge);
+  /* Frosted over glass (glass.css); --overlay-blur is none without it. */
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
 }
 
 .menu-item {

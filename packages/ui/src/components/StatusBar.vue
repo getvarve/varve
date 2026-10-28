@@ -93,7 +93,7 @@ const lastRun = computed(() => {
   height: 24px;
   font-size: 12px;
   color: var(--text-muted);
-  background: var(--surface);
+  background: var(--chrome);
   border-top: 1px solid var(--border);
   white-space: nowrap;
   overflow: hidden;

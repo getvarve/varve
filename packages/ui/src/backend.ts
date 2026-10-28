@@ -11,6 +11,8 @@ export interface AppInfo {
   commands: string[];
   /** A debug build (`tauri dev`): the webview's own context menu and reload stay available. */
   debugBuild: boolean;
+  /** The native glass behind the window (app/src-tauri/src/glass.rs); `none` keeps the UI opaque. */
+  glass: 'liquidGlass' | 'vibrancy' | 'mica' | 'none';
 }
 
 /** Error shape returned by extension commands. */

@@ -759,7 +759,7 @@ const preview = computed(() => {
   margin: 0;
   padding: 10px 12px;
   border-radius: var(--radius-control);
-  background: var(--ground);
+  background: var(--inset);
   font-size: 12px;
   white-space: pre-wrap;
 }

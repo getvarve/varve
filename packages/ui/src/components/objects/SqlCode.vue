@@ -47,8 +47,9 @@ const theme = EditorView.theme({
   '.cm-scroller': { fontFamily: 'var(--font-mono)', lineHeight: '17px' },
   '.cm-content': { caretColor: 'var(--accent)', padding: '8px 0' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)' },
+  // Sticky: long lines scroll under the gutter, so it stays near-opaque over glass.
   '.cm-gutters': {
-    backgroundColor: 'var(--surface-raised)',
+    backgroundColor: 'var(--sticky)',
     color: 'var(--code-gutter)',
     border: 'none',
     borderRight: '1px solid var(--border-inner)',
@@ -58,7 +59,14 @@ const theme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'var(--code-selection)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-matchingBracket': { backgroundColor: 'var(--accent-tint)', color: 'inherit' },
-  '.cm-tooltip': { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' },
+  '.cm-tooltip': {
+    backgroundColor: 'var(--overlay)',
+    border: '1px solid var(--border)',
+    color: 'var(--text)',
+    boxShadow: 'var(--glass-edge)',
+    backdropFilter: 'var(--overlay-blur)',
+    WebkitBackdropFilter: 'var(--overlay-blur)',
+  },
   '.cm-panels': { backgroundColor: 'var(--surface-raised)', color: 'var(--text)' },
   '.cm-searchMatch': { backgroundColor: 'var(--warning-tint)' },
 });

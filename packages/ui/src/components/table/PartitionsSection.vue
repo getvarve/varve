@@ -1152,7 +1152,7 @@ function myPartitionBy(): void {
   height: 28px;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-raised);
+  background: var(--sticky);
   color: var(--text-muted);
   font-weight: 500;
   text-align: left;

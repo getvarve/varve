@@ -57,7 +57,7 @@
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
-  background: var(--ground);
+  background: var(--inset);
   color: var(--text-subtle);
 }
 
@@ -122,7 +122,7 @@
   height: 28px;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-raised);
+  background: var(--sticky);
   color: var(--text-muted);
   font-weight: 500;
   text-align: left;
@@ -231,7 +231,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border-inner);
   border-radius: var(--radius-control);
-  background: var(--ground);
+  background: var(--inset);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 17px;

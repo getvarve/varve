@@ -724,7 +724,7 @@ h1 {
   margin: 0;
   padding: 6px 20px;
   border-bottom: 1px solid var(--border-inner);
-  background: var(--surface-raised);
+  background: var(--sticky);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;

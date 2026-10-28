@@ -22,6 +22,9 @@ const emit = defineEmits<{ select: [cell: { column: Column; value: Value } | nul
 const theme = themeQuartz.withParams({
   backgroundColor: 'var(--surface)',
   foregroundColor: 'var(--text)',
+  // Menus and tooltips float over cells: the overlay tint, frosted in glass.css.
+  menuBackgroundColor: 'var(--overlay)',
+  tooltipBackgroundColor: 'var(--overlay)',
   headerBackgroundColor: 'var(--surface-raised)',
   headerTextColor: 'var(--text-muted)',
   borderColor: 'var(--border-inner)',
