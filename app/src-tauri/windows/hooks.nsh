@@ -14,6 +14,7 @@
 
 !define VARVE_LEGACY_NAME "Varve Community"
 !define VARVE_LEGACY_UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${VARVE_LEGACY_NAME}"
+!define VARVE_LEGACY_TASKBAR_PIN "$APPDATA\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\${VARVE_LEGACY_NAME}.lnk"
 
 Var VarveLegacyDir
 
@@ -56,33 +57,24 @@ Var VarveLegacyDir
 !macroend
 
 ; After Varve is installed: remove the old install.
+;
+; The old uninstaller runs in update mode (/UPDATE). Outside update mode it would unpin its
+; shortcuts and clear the jump list of the app id com.getvarve.desktop, which Varve shares, so
+; Varve would lose them. In update mode it leaves the shortcuts alone; they are replaced here.
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro VARVE_FIND_LEGACY
   ${If} $VarveLegacyDir != ""
-    ; The old uninstaller deletes these shortcuts. Remember them, to create them under the new
-    ; name below: an update (/UPDATE) creates no shortcuts of its own.
-    StrCpy $R3 0
-    ${If} ${FileExists} "$SMPROGRAMS\${VARVE_LEGACY_NAME}.lnk"
-      StrCpy $R3 1
-    ${EndIf}
-    StrCpy $R4 0
-    ${If} ${FileExists} "$DESKTOP\${VARVE_LEGACY_NAME}.lnk"
-      StrCpy $R4 1
-    ${EndIf}
-
     StrCpy $R5 0
     ${If} $VarveLegacyDir == $INSTDIR
       ; Installed into the old folder: its files are Varve's now, so its uninstaller must not
       ; run. Only the old entries go.
-      Delete "$SMPROGRAMS\${VARVE_LEGACY_NAME}.lnk"
-      Delete "$DESKTOP\${VARVE_LEGACY_NAME}.lnk"
       StrCpy $R5 1
     ${ElseIf} ${FileExists} "$VarveLegacyDir\uninstall.exe"
       DetailPrint "Removing ${VARVE_LEGACY_NAME} from $VarveLegacyDir"
       ; /S: silent, so the app data box stays unticked. _?= runs the uninstaller in place, so
       ; ExecWait waits for it; it then cannot delete itself and its folder, so that is done here.
       ClearErrors
-      ExecWait '"$VarveLegacyDir\uninstall.exe" /S _?=$VarveLegacyDir' $R6
+      ExecWait '"$VarveLegacyDir\uninstall.exe" /S /UPDATE _?=$VarveLegacyDir' $R6
       ${If} ${Errors}
       ${OrIf} $R6 <> 0
         DetailPrint "Could not remove ${VARVE_LEGACY_NAME} (exit code $R6). Remove it in Settings > Apps > Installed apps."
@@ -97,19 +89,32 @@ Var VarveLegacyDir
     ${EndIf}
 
     ${If} $R5 = 1
-      ; A silent uninstall keeps the key with the old install folder; drop it with the rest.
+      ; The uninstaller keeps the key with the old install folder; drop it with the rest.
       DeleteRegKey HKCU "${VARVE_LEGACY_UNINSTKEY}"
       DeleteRegKey HKCU "${MANUKEY}\${VARVE_LEGACY_NAME}"
       DeleteRegKey /ifempty HKCU "${MANUKEY}"
-      ${If} $R3 = 1
-      ${AndIfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
-        CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-        !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+      ; Replace the old shortcuts with ones under the new name. An update (/UPDATE) creates no
+      ; shortcuts of its own, a fresh install has created them already.
+      ${If} ${FileExists} "$SMPROGRAMS\${VARVE_LEGACY_NAME}.lnk"
+        Delete "$SMPROGRAMS\${VARVE_LEGACY_NAME}.lnk"
+        ${IfNot} ${FileExists} "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+          CreateShortcut "$SMPROGRAMS\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+          !insertmacro SetLnkAppUserModelId "$SMPROGRAMS\${PRODUCTNAME}.lnk"
+        ${EndIf}
       ${EndIf}
-      ${If} $R4 = 1
-      ${AndIfNot} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
-        CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
-        !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+      ${If} ${FileExists} "$DESKTOP\${VARVE_LEGACY_NAME}.lnk"
+        Delete "$DESKTOP\${VARVE_LEGACY_NAME}.lnk"
+        ${IfNot} ${FileExists} "$DESKTOP\${PRODUCTNAME}.lnk"
+          CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe"
+          !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
+        ${EndIf}
+      ${EndIf}
+      ; A taskbar pin is a copy of the shortcut that still starts the old exe. Point it at
+      ; Varve so the pin keeps working.
+      !insertmacro IsShortcutTarget "${VARVE_LEGACY_TASKBAR_PIN}" "$VarveLegacyDir\${MAINBINARYNAME}.exe"
+      Pop $0
+      ${If} $0 = 1
+        !insertmacro SetShortcutTarget "${VARVE_LEGACY_TASKBAR_PIN}" "$INSTDIR\${MAINBINARYNAME}.exe"
       ${EndIf}
     ${EndIf}
   ${EndIf}

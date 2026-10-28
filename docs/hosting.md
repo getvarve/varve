@@ -30,5 +30,5 @@ The macOS app (through Sparkle), the Windows setup (`.exe`) and the Linux AppIma
 Up to 0.1.7 the app was called Varve Community. It is the same app with the same bundle id, so updates keep coming in, and your connections, queries and activity stay where they were: in `<OS data dir>/Varve`, with secrets in the OS keychain under the service `varve`. Neither depends on the app's name.
 
 - **macOS:** `install.sh` installs `Varve.app` and moves `Varve Community.app` to the Trash. An in-app update keeps the old file name, `Varve Community.app`; the app inside is Varve.
-- **Windows:** the installer of Varve removes the Varve Community install with its own uninstaller, without its data, and moves its shortcuts to the new name.
-- **Linux:** the AppImage keeps its path and `varve.desktop`; only the name in the app menu changes. The `varve` deb package replaces `varve-community`.
+- **Windows:** the installer of Varve removes the Varve Community install with its own uninstaller, without its data, and moves its Start menu and desktop shortcuts to the new name. A taskbar pin keeps its old name but opens Varve.
+- **Linux:** the AppImage keeps its path and `varve.desktop`. That entry still shows Varve Community in the app menu after an in-app update; run `install.sh` again to rename it. The `varve` deb package replaces `varve-community`.

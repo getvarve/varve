@@ -32,7 +32,6 @@ const PATHS = {
   terminal: 'M4 17l6-5-6-5M12 19h8',
   database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
-  sparkle: 'M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z',
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -283,17 +283,19 @@ function Get-VarveChecksum {
 
 # Where the installer put the app, and whether an old Varve Community install is left next to it.
 # The installer reuses the folder of an earlier install, which may not be the default. Its
-# uninstall key and default folder are named after the product: Varve first, then the name up to
-# 0.1.7 (an older release installs under it). CI runs this function on its own
-# (.github/workflows/ci.yml, Migration (windows)).
+# uninstall key and default folder are named after the product: Varve, or the name up to 0.1.7,
+# which an older release installs under (-LegacyFirst looks there first). CI runs this function
+# on its own (.github/workflows/ci.yml, Migration (windows)).
 function Find-VarveInstall {
     param(
         [Parameter(Mandatory = $true)][string]$AppName,
-        [Parameter(Mandatory = $true)][string]$LegacyName
+        [Parameter(Mandatory = $true)][string]$LegacyName,
+        [switch]$LegacyFirst
     )
     $installDir = $null
     $legacyDir = $null
-    foreach ($name in @($AppName, $LegacyName)) {
+    $names = if ($LegacyFirst) { @($LegacyName, $AppName) } else { @($AppName, $LegacyName) }
+    foreach ($name in $names) {
         $dir = Join-Path $env:LOCALAPPDATA $name
         $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$name"
         $recorded = (Get-ItemProperty -Path $uninstallKey -Name 'InstallLocation' -ErrorAction SilentlyContinue).InstallLocation
@@ -404,9 +406,18 @@ try {
         }
     }
 
-    $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName
+    # Releases up to 0.1.7 install as Varve Community.
+    $legacyRelease = $false
+    $requested = $null
+    if ([version]::TryParse($version.TrimStart('v'), [ref]$requested)) {
+        $legacyRelease = $requested -le [version]'0.1.7'
+    }
+    $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName -LegacyFirst:$legacyRelease
     if ($null -eq $found.Dir) {
         throw "the installer finished, but varve.exe is missing from $(Join-Path $env:LOCALAPPDATA $appName)"
+    }
+    if ($legacyRelease) {
+        $appName = $legacyName
     }
     $installDir = $found.Dir
     $exe = Join-Path $installDir 'varve.exe'
