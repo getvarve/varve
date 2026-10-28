@@ -39,6 +39,7 @@ use varve_app::m2::plans::Planned;
 use varve_app::m2::pubsub::{PubSubEvent, PubSubMessage, PubSubNames, PubSubSubscriptionInfo};
 use varve_app::m2::redis_edit::RedisEditRequest;
 use varve_app::sessions::{Encryption, SessionError, SessionInfo, SessionPurpose};
+use varve_app::updates::{UpdateCheck, UpdateInfo, UpdateProgress};
 use varve_catalog::data_edit::{
     ApplyOutcome, KeyInfo as GridKeyInfo, PlanOptions, RowChange, RowEditPlan, TableTarget,
 };
@@ -76,7 +77,7 @@ const SUBSET_TYPES: &[&str] = &["grid.TableDetails", "ddl.ObjectDetails"];
 /// The UI modules a `ts` type may name (`grid.TableDetails`).
 const MODULES: &[&str] = &[
     "activity", "catalog", "ddl", "errors", "explain", "grid", "live", "notify", "plans", "redis",
-    "sessions",
+    "sessions", "updates",
 ];
 
 fn contract_dir() -> PathBuf {
@@ -99,6 +100,9 @@ fn roundtrip(name: &str, v: J) -> Result<J, String> {
         "Vec<ObjectSummary>" => rt::<Vec<ObjectSummary>>(v),
         "Vec<KindCount>" => rt::<Vec<KindCount>>(v),
         "Capabilities" => rt::<Capabilities>(v),
+        "UpdateInfo" => rt::<UpdateInfo>(v),
+        "UpdateCheck" => rt::<UpdateCheck>(v),
+        "UpdateProgress" => rt::<UpdateProgress>(v),
         "ObjectDetails" => rt::<ObjectDetails>(v),
         "EditPlan" => rt::<EditPlan>(v),
         "EngineChange" => rt::<EngineChange>(v),

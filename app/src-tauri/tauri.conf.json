@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npx --yes pnpm@12.14.0 --filter @varve/app dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npx --yes pnpm@12.14.0 --filter @varve/app build",
+    "beforeBuildCommand": "node scripts/fetch-sparkle.mjs && npx --yes pnpm@12.14.0 --filter @varve/app build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -36,14 +36,27 @@
     "copyright": "Copyright 2026 The Varve Authors",
     "license": "Apache-2.0",
     "macOS": {
+      "frameworks": [
+        "macos/sparkle/Sparkle.framework"
+      ],
+      "hardenedRuntime": false,
       "files": {
         "Resources/Assets.car": "macos/Assets.car"
       },
       "dmg": {
         "background": "dmg/background.png",
-        "windowSize": { "width": 660, "height": 400 },
-        "appPosition": { "x": 170, "y": 205 },
-        "applicationFolderPosition": { "x": 490, "y": 205 }
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 170,
+          "y": 205
+        },
+        "applicationFolderPosition": {
+          "x": 490,
+          "y": 205
+        }
       }
     },
     "icon": [
@@ -53,5 +66,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQxQ0VGMUIzM0E5ODRFOTcKUldTWFRwZzZzL0hPMGFKdGxkdlRzTVBWN0l0b21TdkZZM3NpcHBiT2hRWER1WU1TSDczaDFyZ0oK",
+      "endpoints": [
+        "https://github.com/getvarve/varve/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

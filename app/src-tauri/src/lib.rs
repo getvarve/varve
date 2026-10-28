@@ -16,6 +16,7 @@ pub mod secret_versions;
 pub mod sessions;
 pub mod settings;
 pub mod tunnels;
+pub mod updates;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -132,7 +133,7 @@ fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
 }
 
 /// Reads a value from `core_meta`.
-fn meta_get(store: &Store, key: &str) -> Result<Option<String>, StoreError> {
+pub(crate) fn meta_get(store: &Store, key: &str) -> Result<Option<String>, StoreError> {
     store.with_conn(|c| {
         let mut stmt = c.prepare("SELECT value FROM core_meta WHERE key = ?1")?;
         let mut rows = stmt.query([key])?;
@@ -140,6 +141,19 @@ fn meta_get(store: &Store, key: &str) -> Result<Option<String>, StoreError> {
             Some(row) => Some(row.get(0)?),
             None => None,
         })
+    })
+}
+
+/// Writes a value to `core_meta`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn meta_set(store: &Store, key: &str, value: &str) -> Result<(), StoreError> {
+    store.with_conn(|c| {
+        c.execute(
+            "INSERT INTO core_meta (key, value) VALUES (?1, ?2) \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
     })
 }
 
@@ -324,13 +338,24 @@ pub fn run(
     let host = build_host(&extensions)?;
     tracing::info!(edition = ?edition, extensions = host.extensions().len(), "starting Varve");
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_fs::init());
+    // Windows and Linux update through the Tauri updater when the config
+    // has a feed; macOS uses Sparkle (updates.rs).
+    #[cfg(not(target_os = "macos"))]
+    let builder = match updates::plugin(context.config()) {
+        Some(plugin) => builder.plugin(plugin),
+        None => builder,
+    };
+    builder
         .setup(move |app| {
             // The quit gate first: nothing later in setup may leave the app
             // without it.
             app.manage(quit::QuitGate::default());
+            // Before the menu: on macOS it offers "Check for Updates…" only
+            // when Sparkle runs.
+            updates::init(app.handle());
             #[cfg(target_os = "macos")]
             app.set_menu(quit::app_menu(app.handle())?)?;
             let dir = data_dir(app.handle())?;

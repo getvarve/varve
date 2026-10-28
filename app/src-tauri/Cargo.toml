@@ -52,6 +52,16 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 window-vibrancy = "0.8.1"
 
+# Updates (src/updates.rs). macOS: Sparkle, loaded at runtime from Contents/Frameworks
+# (crates/sparkle holds the Objective-C calls).
+[target.'cfg(target_os = "macos")'.dependencies]
+varve-sparkle = { path = "../../crates/sparkle" }
+
+# Windows and Linux: the Tauri updater with latest.json from the release.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-updater = "2.14.0"
+time = { version = "0.3", features = ["formatting"] }
+
 [dev-dependencies]
 # A plain MySQL client: the baseline the privilege tests compare Varve with.
 mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "tls12", "ring"] }

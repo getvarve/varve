@@ -37,3 +37,6 @@ app/src-tauri/gen/schemas/
 *.sqlite3
 *.db
 __pycache__/
+
+# Sparkle release fetched by scripts/fetch-sparkle.mjs
+app/src-tauri/macos/sparkle/

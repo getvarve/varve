@@ -1,0 +1,28 @@
+[package]
+name = "varve-sparkle"
+description = "Sparkle updates for Varve on macOS: the standard updater controller, loaded at runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.5"
+tracing.workspace = true
+
+# The workspace forbids unsafe code. Sparkle is an Objective-C framework, so calling it is unsafe
+# by nature: this crate is the one place that may, and only in blocks that state why they are
+# sound. Everything else matches the workspace lints.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"

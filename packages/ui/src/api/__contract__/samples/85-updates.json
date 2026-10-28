@@ -1,0 +1,11 @@
+[
+ {"id": "update_info() sparkle", "rust": "UpdateInfo", "ts": "updates.UpdateInfo", "dir": "result", "value": {"mechanism": "sparkle", "currentVersion": "0.1.6", "autoCheck": true}},
+ {"id": "update_info() tauri", "rust": "UpdateInfo", "ts": "updates.UpdateInfo", "dir": "result", "value": {"mechanism": "tauri", "currentVersion": "0.1.6", "autoCheck": false}},
+ {"id": "update_info() none", "rust": "UpdateInfo", "ts": "updates.UpdateInfo", "dir": "result", "value": {"mechanism": "none", "currentVersion": "0.1.6", "autoCheck": false}},
+ {"id": "update_check() available", "rust": "UpdateCheck", "ts": "updates.UpdateCheck", "dir": "result", "value": {"kind": "available", "version": "0.1.7", "notes": "## What's new\n\n- **New:** Updates", "date": "2026-10-28T14:00:00Z"}},
+ {"id": "update_check() available without notes", "rust": "UpdateCheck", "ts": "updates.UpdateCheck", "dir": "result", "value": {"kind": "available", "version": "0.1.7", "notes": null, "date": null}},
+ {"id": "update_check() upToDate", "rust": "UpdateCheck", "ts": "updates.UpdateCheck", "dir": "result", "value": {"kind": "upToDate"}},
+ {"id": "update_check() sparkle", "rust": "UpdateCheck", "ts": "updates.UpdateCheck", "dir": "result", "value": {"kind": "sparkle"}},
+ {"id": "varve://update-progress", "rust": "UpdateProgress", "ts": "updates.UpdateProgress", "dir": "result", "value": {"downloaded": 1048576, "total": 34603008}},
+ {"id": "varve://update-progress without length", "rust": "UpdateProgress", "ts": "updates.UpdateProgress", "dir": "result", "value": {"downloaded": 1048576, "total": null}}
+]
