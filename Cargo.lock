@@ -6213,6 +6213,7 @@ dependencies = [
  "varve-secrets",
  "varve-store",
  "varve-tunnel",
+ "window-vibrancy",
 ]
 
 [[package]]

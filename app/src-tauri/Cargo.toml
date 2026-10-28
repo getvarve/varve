@@ -47,6 +47,11 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
+# The native glass behind the window (src/glass.rs). Tauri already depends on it;
+# calling it directly reports whether the effect was applied.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+window-vibrancy = "0.8.1"
+
 [dev-dependencies]
 # A plain MySQL client: the baseline the privilege tests compare Varve with.
 mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "tls12", "ring"] }

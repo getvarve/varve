@@ -6,6 +6,7 @@
 
 pub mod activity_bridge;
 pub mod commands;
+pub mod glass;
 mod ipc;
 pub mod keychain_cleanup;
 pub mod m2;
@@ -81,6 +82,8 @@ pub(crate) struct AppInfo {
     commands: Vec<String>,
     /// A debug build (`tauri dev`): the webview's own menus and reload stay.
     debug_build: bool,
+    /// The native glass behind the window; the UI is translucent only over it.
+    glass: glass::Glass,
 }
 
 /// Directory that holds `app.db`.
@@ -354,6 +357,18 @@ pub fn run(
             });
             app.manage(services);
             app.manage(DataDir(dir));
+            let transparent = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .any(|window| window.label == "main" && window.transparent);
+            let window_glass = app
+                .get_webview_window("main")
+                .map_or(glass::Glass::None, |window| {
+                    glass::apply(&window, transparent)
+                });
+            app.manage(glass::WindowGlass(window_glass));
             Ok(())
         })
         .on_page_load(|webview, payload| {

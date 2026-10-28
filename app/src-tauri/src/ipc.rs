@@ -53,7 +53,11 @@ type Svc<'a> = State<'a, Arc<Services>>;
 type R<T> = Result<T, CmdError>;
 
 #[tauri::command]
-fn app_info(state: tauri::State<'_, AppState>, data_dir: tauri::State<'_, DataDir>) -> AppInfo {
+fn app_info(
+    state: tauri::State<'_, AppState>,
+    data_dir: tauri::State<'_, DataDir>,
+    window_glass: tauri::State<'_, crate::glass::WindowGlass>,
+) -> AppInfo {
     AppInfo {
         edition: state.ctx.edition,
         product_name: state.ctx.edition.product_name(),
@@ -63,6 +67,7 @@ fn app_info(state: tauri::State<'_, AppState>, data_dir: tauri::State<'_, DataDi
         capabilities: state.host.capabilities(),
         commands: state.host.command_names(),
         debug_build: cfg!(debug_assertions),
+        glass: window_glass.0,
     }
 }
 
