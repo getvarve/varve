@@ -5,10 +5,12 @@
 // The release workflow runs it after the bundle jobs; the apps read the feeds from
 // https://github.com/getvarve/varve/releases/latest/download/<feed>.
 //
-// Usage: node scripts/update-feeds.mjs <dist> <tag> <notes.md> <notes.html>
+// Usage: node scripts/update-feeds.mjs <dist> <tag> <build> <notes.md> <notes.html>
 //   <dist> holds the release assets, their Tauri updater signatures (<asset>.sig) and the Sparkle
 //   signatures (<asset>.sparkle, the attribute line sign_update prints).
+//   <build> is the macOS build number (CFBundleVersion), the workflow's run number.
 
+import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
@@ -16,7 +18,16 @@ import { pathToFileURL } from 'node:url';
 
 const REPO = 'getvarve/varve';
 
-/** Tauri updater platforms and the release asset each installs from. */
+/**
+ * Tauri updater platforms and the release asset each installs from. The NSIS setup and the
+ * AppImage update in app.
+ *
+ * The `-msi` and `-deb` entries exist only for installs from 0.1.7 and older, which still update
+ * in app: without them the updater falls back to the plain entry and hands an MSI install the NSIS
+ * setup (a second copy next to it) and a deb install the AppImage. Newer builds never read them
+ * (they turn the updater off for deb, rpm and msi, app/src-tauri/src/updates.rs). They can go once
+ * those old installs are gone; release.yml signs the .msi and .deb for them until then.
+ */
 export const TAURI_PLATFORMS = [
   ['windows-x86_64', 'varve-windows-x64-setup.exe'],
   ['windows-x86_64-nsis', 'varve-windows-x64-setup.exe'],
@@ -45,25 +56,48 @@ export function versionOf(tag) {
   return match[1];
 }
 
+/** A macOS build number (CFBundleVersion, `sparkle:version`): a positive integer; throws otherwise. */
+export function buildOf(build) {
+  if (!/^[1-9]\d*$/.test(String(build))) throw new Error(`Build number "${build}" is not a positive integer`);
+  return String(build);
+}
+
+/**
+ * The version a Tauri updater signature was signed for, from its trusted comment
+ * (`timestamp:...\tfile:...\tversion:1.2.3`), or null. `<asset>.sig` holds the minisign
+ * signature file in base64.
+ */
+export function signedVersionOf(signature) {
+  const text = Buffer.from(signature, 'base64').toString('utf8');
+  const comment = /^trusted comment: (.*)$/m.exec(text)?.[1];
+  if (!comment) return null;
+  for (const field of comment.split('\t')) {
+    if (field.startsWith('version:')) return field.slice('version:'.length).trim();
+  }
+  return null;
+}
+
 function assetUrl(tag, asset) {
   return `https://github.com/${REPO}/releases/download/${tag}/${asset}`;
 }
 
 /**
- * The Tauri updater feed. Every platform must have a signature: the updater falls back from a
- * missing installer-specific entry (an MSI or deb install) to the plain one, which would install
- * the wrong kind of package.
+ * The Tauri updater feed. Every platform must have a signature, and every signature must be
+ * bound to this version: the app sets `requireSignedVersion`, so it rejects any other.
  */
 export function latestJson({ tag, notes, pubDate, signatureOf }) {
+  const version = versionOf(tag);
   const platforms = {};
   for (const [platform, asset] of TAURI_PLATFORMS) {
     const signature = signatureOf(asset);
-    if (signature) platforms[platform] = { signature, url: assetUrl(tag, asset) };
+    if (!signature) throw new Error(`No updater signature for ${platform}`);
+    const signed = signedVersionOf(signature);
+    if (signed !== version) {
+      throw new Error(`The signature of ${asset} is for version ${signed ?? '(none)'}, not ${version}`);
+    }
+    platforms[platform] = { signature, url: assetUrl(tag, asset) };
   }
-  for (const [platform] of TAURI_PLATFORMS) {
-    if (!platforms[platform]) throw new Error(`No updater signature for ${platform}`);
-  }
-  return { version: versionOf(tag), notes, pub_date: pubDate, platforms };
+  return { version, notes, pub_date: pubDate, platforms };
 }
 
 /** Escapes text for an XML attribute or element. */
@@ -84,9 +118,13 @@ export function parseSparkleSignature(line) {
   return { signature, length };
 }
 
-/** A Sparkle appcast with the one release. */
-export function appcast({ tag, asset, notesHtml, pubDate, signature, length }) {
+/**
+ * A Sparkle appcast with the one release. Sparkle orders releases by `sparkle:version`, the build
+ * number (CFBundleVersion); `sparkle:shortVersionString` is the version people see.
+ */
+export function appcast({ tag, build, asset, notesHtml, pubDate, signature, length }) {
   const version = versionOf(tag);
+  const bundleVersion = buildOf(build);
   return `<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
@@ -95,7 +133,7 @@ export function appcast({ tag, asset, notesHtml, pubDate, signature, length }) {
     <item>
       <title>Varve ${xmlEscape(version)}</title>
       <pubDate>${xmlEscape(new Date(pubDate).toUTCString())}</pubDate>
-      <sparkle:version>${xmlEscape(version)}</sparkle:version>
+      <sparkle:version>${xmlEscape(bundleVersion)}</sparkle:version>
       <sparkle:shortVersionString>${xmlEscape(version)}</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>${MINIMUM_MACOS}</sparkle:minimumSystemVersion>
       <sparkle:fullReleaseNotesLink>https://github.com/${REPO}/releases/tag/${xmlEscape(tag)}</sparkle:fullReleaseNotesLink>
@@ -107,9 +145,9 @@ export function appcast({ tag, asset, notesHtml, pubDate, signature, length }) {
 `;
 }
 
-function main([dist, tag, notesFile, notesHtmlFile]) {
-  if (!dist || !tag || !notesFile || !notesHtmlFile) {
-    throw new Error('Usage: node scripts/update-feeds.mjs <dist> <tag> <notes.md> <notes.html>');
+function main([dist, tag, build, notesFile, notesHtmlFile]) {
+  if (!dist || !tag || !build || !notesFile || !notesHtmlFile) {
+    throw new Error('Usage: node scripts/update-feeds.mjs <dist> <tag> <build> <notes.md> <notes.html>');
   }
   const notes = readFileSync(notesFile, 'utf8').trim();
   const notesHtml = readFileSync(notesHtmlFile, 'utf8').trim();
@@ -121,7 +159,7 @@ function main([dist, tag, notesFile, notesHtmlFile]) {
   writeFileSync(join(dist, 'latest.json'), `${JSON.stringify(latestJson({ tag, notes, pubDate, signatureOf }), null, 2)}\n`);
   for (const [feed, asset] of SPARKLE_FEEDS) {
     const { signature, length } = parseSparkleSignature(readFileSync(join(dist, `${asset}.sparkle`), 'utf8'));
-    writeFileSync(join(dist, feed), appcast({ tag, asset, notesHtml, pubDate, signature, length }));
+    writeFileSync(join(dist, feed), appcast({ tag, build, asset, notesHtml, pubDate, signature, length }));
   }
   console.log(`Wrote latest.json and ${SPARKLE_FEEDS.map(([feed]) => feed).join(', ')} for ${tag}`);
 }
