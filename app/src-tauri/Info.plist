@@ -6,5 +6,13 @@
 	     Older macOS uses CFBundleIconFile, which Tauri sets to icon.icns. -->
 	<key>CFBundleIconName</key>
 	<string>Varve</string>
+	<!-- Sparkle (crates/sparkle): updates are signed with this EdDSA key; the private key is in
+	     1Password and the SPARKLE_ED_PRIVATE_KEY secret. Checks run daily by default. -->
+	<key>SUPublicEDKey</key>
+	<string>EMmMripa2lO/Y1PRisCPpv9Djb/3VZE8fbGEIj2UJG0=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

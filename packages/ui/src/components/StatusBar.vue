@@ -3,6 +3,7 @@ import { computed, inject, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import type { AppInfo } from '../backend';
 import { useTabs } from '../composables/useTabs';
+import { useUpdates } from '../composables/useUpdates';
 import { useWorkspace } from '../composables/useWorkspace';
 import { APP_INFO_KEY } from '../keys';
 import { ENGINE_INFO, ENVIRONMENT_INFO, encryptionStatus } from '../lib/display';
@@ -12,6 +13,7 @@ const info = inject(APP_INFO_KEY, ref<AppInfo | null>(null));
 const tabs = useTabs();
 const workspace = useWorkspace();
 const route = useRoute();
+const updates = useUpdates();
 
 /** The active tab's connection, only while the workspace (not Activity or Settings) is shown. */
 const tab = computed(() => (route.name === 'home' ? tabs.active.value : null));
@@ -79,6 +81,14 @@ const lastRun = computed(() => {
     >
       <template v-if="lastRun.rows !== null">{{ formatCount(lastRun.rows) }} {{ lastRun.rows === 1 ? 'row' : 'rows' }} · </template>{{ formatDuration(lastRun.elapsed) }}
     </span>
+    <button
+      v-if="updates.notice.value"
+      type="button"
+      class="seg end update"
+      @click="updates.openNotice()"
+    >
+      {{ updates.notice.value }}
+    </button>
     <span
       v-if="info"
       class="seg end"
@@ -119,6 +129,27 @@ const lastRun = computed(() => {
 
 .badge {
   color: var(--warning-text);
+}
+
+/* A segment that opens the update dialog: plain text, only the color says it can be clicked. */
+.update {
+  height: 100%;
+  margin: 0;
+  border-top: 0;
+  border-bottom: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.update:hover {
+  background: var(--surface-raised);
+}
+
+/* The bar clips overflow: draw the focus ring inside. */
+.update:focus-visible {
+  outline-offset: -2px;
 }
 
 .spacer {

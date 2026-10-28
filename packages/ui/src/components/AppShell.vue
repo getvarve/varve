@@ -3,12 +3,14 @@ import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { AppInfo } from '../backend';
 import { RouterLink, RouterView } from 'vue-router';
 import { installQuitGuard } from '../composables/useQuitGuard';
+import { installUpdates, useUpdates } from '../composables/useUpdates';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useWorkspaceActions } from '../composables/useWorkspaceActions';
 import { APP_INFO_KEY } from '../keys';
 import Icon from './common/Icon.vue';
 import ToastHost from './common/ToastHost.vue';
 import DialogHost from './dialogs/DialogHost.vue';
+import UpdateDialog from './dialogs/UpdateDialog.vue';
 import ExtensionSlot from './ExtensionSlot.vue';
 import WorkspaceTree from './sidebar/WorkspaceTree.vue';
 import StatusBar from './StatusBar.vue';
@@ -19,8 +21,10 @@ const productName = computed(() => info.value?.productName ?? 'Varve');
 const isCommunity = computed(() => info.value?.edition !== 'pro');
 const workspace = useWorkspace();
 const actions = useWorkspaceActions();
+const updates = useUpdates();
 
 let removeQuitGuard: (() => void) | null = null;
+let removeUpdates: (() => void) | null = null;
 let unmounted = false;
 
 onMounted(() => {
@@ -34,11 +38,20 @@ onMounted(() => {
     .catch((error: unknown) => {
       console.error('Could not watch for the window closing', error);
     });
+  installUpdates()
+    .then((remove) => {
+      if (unmounted) remove();
+      else removeUpdates = remove;
+    })
+    .catch((error: unknown) => {
+      console.error('Could not set up the update checks', error);
+    });
 });
 
 onBeforeUnmount(() => {
   unmounted = true;
   removeQuitGuard?.();
+  removeUpdates?.();
 });
 </script>
 
@@ -118,6 +131,8 @@ onBeforeUnmount(() => {
     </div>
 
     <StatusBar />
+    <!-- Before DialogHost: the unsaved-work questions of an install open on top of it. -->
+    <UpdateDialog v-if="updates.state.dialogOpen" />
     <DialogHost />
     <ToastHost />
   </div>

@@ -10,6 +10,7 @@ import type * as live from '../live';
 import type * as notify from '../notify';
 import type * as redis from '../redis';
 import type * as sessions from '../sessions';
+import type * as updates from '../updates';
 
 /** A value of a type the UI mirrors only partly: extra keys allowed, typed keys checked. */
 function subsetOf<T>() {
@@ -4450,8 +4451,70 @@ export const s174 = {
   "pattern": "sensor:*"
 } satisfies redis.BulkFilter;
 
+// update_info() sparkle
+export const s175 = {
+  "autoCheck": true,
+  "currentVersion": "0.1.6",
+  "mechanism": "sparkle",
+  "relaunchPending": true
+} satisfies updates.UpdateInfo;
+
+// update_info() tauri
+export const s176 = {
+  "autoCheck": false,
+  "currentVersion": "0.1.6",
+  "mechanism": "tauri",
+  "relaunchPending": false
+} satisfies updates.UpdateInfo;
+
+// update_info() none
+export const s177 = {
+  "autoCheck": false,
+  "currentVersion": "0.1.6",
+  "mechanism": "none",
+  "relaunchPending": false
+} satisfies updates.UpdateInfo;
+
+// update_check() available
+export const s178 = {
+  "date": "2026-10-28T14:00:00Z",
+  "kind": "available",
+  "notes": "## What's new\n\n- **New:** Updates",
+  "version": "0.1.7"
+} satisfies updates.UpdateCheck;
+
+// update_check() available without notes
+export const s179 = {
+  "date": null,
+  "kind": "available",
+  "notes": null,
+  "version": "0.1.7"
+} satisfies updates.UpdateCheck;
+
+// update_check() upToDate
+export const s180 = {
+  "kind": "upToDate"
+} satisfies updates.UpdateCheck;
+
+// update_check() sparkle
+export const s181 = {
+  "kind": "sparkle"
+} satisfies updates.UpdateCheck;
+
+// varve://update-progress
+export const s182 = {
+  "downloaded": 1048576,
+  "total": 34603008
+} satisfies updates.UpdateProgress;
+
+// varve://update-progress without length
+export const s183 = {
+  "downloaded": 1048576,
+  "total": null
+} satisfies updates.UpdateProgress;
+
 // ObjectDetails.composite.pg18
-export const s175 = subsetOf<ddl.ObjectDetails>()({
+export const s184 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "attributes": [
@@ -4481,7 +4544,7 @@ export const s175 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.database.ma123
-export const s176 = subsetOf<ddl.ObjectDetails>()({
+export const s185 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "charset": "utf8mb4",
@@ -4498,7 +4561,7 @@ export const s176 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.database.my97
-export const s177 = subsetOf<ddl.ObjectDetails>()({
+export const s186 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "charset": "utf8mb4",
@@ -4515,7 +4578,7 @@ export const s177 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.domain.pg18
-export const s178 = subsetOf<ddl.ObjectDetails>()({
+export const s187 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "baseType": "integer",
@@ -4544,7 +4607,7 @@ export const s178 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.enum.pg18
-export const s179 = subsetOf<ddl.ObjectDetails>()({
+export const s188 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "kind": "enumType",
@@ -4564,7 +4627,7 @@ export const s179 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.event.ma123
-export const s180 = subsetOf<ddl.ObjectDetails>()({
+export const s189 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4593,7 +4656,7 @@ export const s180 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.event.my97
-export const s181 = subsetOf<ddl.ObjectDetails>()({
+export const s190 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4622,7 +4685,7 @@ export const s181 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.ma123
-export const s182 = subsetOf<ddl.ObjectDetails>()({
+export const s191 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4653,7 +4716,7 @@ export const s182 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.my97
-export const s183 = subsetOf<ddl.ObjectDetails>()({
+export const s192 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4684,7 +4747,7 @@ export const s183 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.pg18
-export const s184 = subsetOf<ddl.ObjectDetails>()({
+export const s193 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "arguments": [
@@ -4732,7 +4795,7 @@ export const s184 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.matview.pg18
-export const s185 = subsetOf<ddl.ObjectDetails>()({
+export const s194 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -4780,7 +4843,7 @@ export const s185 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.policy.pg18
-export const s186 = subsetOf<ddl.ObjectDetails>()({
+export const s195 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "command": "all",
@@ -4799,7 +4862,7 @@ export const s186 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.ma123
-export const s187 = subsetOf<ddl.ObjectDetails>()({
+export const s196 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4830,7 +4893,7 @@ export const s187 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.my97
-export const s188 = subsetOf<ddl.ObjectDetails>()({
+export const s197 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4861,7 +4924,7 @@ export const s188 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.pg18
-export const s189 = subsetOf<ddl.ObjectDetails>()({
+export const s198 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "arguments": [
@@ -4903,7 +4966,7 @@ export const s189 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.range.pg18
-export const s190 = subsetOf<ddl.ObjectDetails>()({
+export const s199 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "canonical": null,
@@ -4925,7 +4988,7 @@ export const s190 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.rule.pg18
-export const s191 = subsetOf<ddl.ObjectDetails>()({
+export const s200 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -4941,7 +5004,7 @@ export const s191 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.schema.pg18
-export const s192 = subsetOf<ddl.ObjectDetails>()({
+export const s201 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -4954,7 +5017,7 @@ export const s192 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.ma123
-export const s193 = subsetOf<ddl.ObjectDetails>()({
+export const s202 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "actionOrder": 1,
@@ -4977,7 +5040,7 @@ export const s193 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.my97
-export const s194 = subsetOf<ddl.ObjectDetails>()({
+export const s203 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "actionOrder": 1,
@@ -5000,7 +5063,7 @@ export const s194 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.pg18
-export const s195 = subsetOf<ddl.ObjectDetails>()({
+export const s204 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -5028,7 +5091,7 @@ export const s195 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.ma123
-export const s196 = subsetOf<ddl.ObjectDetails>()({
+export const s205 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "algorithm": "UNDEFINED",
@@ -5091,7 +5154,7 @@ export const s196 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.my97
-export const s197 = subsetOf<ddl.ObjectDetails>()({
+export const s206 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "algorithm": "UNDEFINED",
@@ -5154,7 +5217,7 @@ export const s197 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.pg18
-export const s198 = subsetOf<ddl.ObjectDetails>()({
+export const s207 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "checkOption": null,
@@ -5220,7 +5283,7 @@ export const s198 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // TableDetails.items.ma106
-export const s199 = subsetOf<grid.TableDetails>()({
+export const s208 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5473,7 +5536,7 @@ export const s199 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.ma123
-export const s200 = subsetOf<grid.TableDetails>()({
+export const s209 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5726,7 +5789,7 @@ export const s200 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.ma106
-export const s201 = subsetOf<grid.TableDetails>()({
+export const s210 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5843,7 +5906,7 @@ export const s201 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.ma123
-export const s202 = subsetOf<grid.TableDetails>()({
+export const s211 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5960,7 +6023,7 @@ export const s202 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.my80
-export const s203 = subsetOf<grid.TableDetails>()({
+export const s212 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -6273,7 +6336,7 @@ export const s203 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.my97
-export const s204 = subsetOf<grid.TableDetails>()({
+export const s213 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -6586,7 +6649,7 @@ export const s204 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.my80
-export const s205 = subsetOf<grid.TableDetails>()({
+export const s214 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": 1,
@@ -6703,7 +6766,7 @@ export const s205 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.my97
-export const s206 = subsetOf<grid.TableDetails>()({
+export const s215 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": 1,
@@ -6820,7 +6883,7 @@ export const s206 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.orders.pg13
-export const s207 = subsetOf<grid.TableDetails>()({
+export const s216 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -7655,7 +7718,7 @@ export const s207 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.orders.pg18
-export const s208 = subsetOf<grid.TableDetails>()({
+export const s217 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -8552,7 +8615,7 @@ export const s208 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted.pg13
-export const s209 = subsetOf<grid.TableDetails>()({
+export const s218 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": null,
@@ -8691,7 +8754,7 @@ export const s209 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted.pg18
-export const s210 = subsetOf<grid.TableDetails>()({
+export const s219 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": null,
@@ -8830,7 +8893,7 @@ export const s210 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted_p1.pg13
-export const s211 = subsetOf<grid.TableDetails>()({
+export const s220 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -8965,7 +9028,7 @@ export const s211 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted_p1.pg18
-export const s212 = subsetOf<grid.TableDetails>()({
+export const s221 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -9100,7 +9163,7 @@ export const s212 = subsetOf<grid.TableDetails>()({
 });
 
 // Planned<RedisEditPlan>
-export const s213 = {
+export const s222 = {
   "plan": {
     "checks": [
       "k is a string"
@@ -9119,7 +9182,7 @@ export const s213 = {
 } satisfies redis.Planned<redis.RedisEditPlan>;
 
 // Planned<RedisPlanView>
-export const s214 = {
+export const s223 = {
   "plan": {
     "destructive": true,
     "display": [
@@ -9134,7 +9197,7 @@ export const s214 = {
 } satisfies live.Planned<live.RedisPlanView>;
 
 // Planned<EditPlan>
-export const s215 = {
+export const s224 = {
   "plan": {
     "destructive": true,
     "statements": [
@@ -9147,7 +9210,7 @@ export const s215 = {
 } satisfies ddl.Planned<ddl.EditPlan>;
 
 // EditApplied
-export const s216 = {
+export const s225 = {
   "durationMs": 4,
   "outputs": [
     {
@@ -9167,7 +9230,7 @@ export const s216 = {
 } satisfies ddl.EditApplied;
 
 // DdlApplied
-export const s217 = {
+export const s226 = {
   "collationDatabase": "shop",
   "durationMs": 9,
   "output": {
@@ -9188,7 +9251,7 @@ export const s217 = {
 } satisfies ddl.DdlApplied;
 
 // SessionInfo
-export const s218 = {
+export const s227 = {
   "confirmDestructive": false,
   "connectionId": "c1",
   "database": null,
@@ -9213,7 +9276,7 @@ export const s218 = {
 } satisfies sessions.SessionInfo;
 
 // NotifyState
-export const s219 = {
+export const s228 = {
   "attempt": 2,
   "backendPid": 77,
   "channels": [
@@ -9238,7 +9301,7 @@ export const s219 = {
 } satisfies notify.NotifyState;
 
 // NotifyBatch
-export const s220 = {
+export const s229 = {
   "dropped": 0,
   "listenerId": 2,
   "messages": [
@@ -9256,7 +9319,7 @@ export const s220 = {
 } satisfies notify.NotifyBatch;
 
 // PubSubSubscriptionInfo[]
-export const s221 = [
+export const s230 = [
   {
     "channels": [
       "orders"
@@ -9273,7 +9336,7 @@ export const s221 = [
 ] satisfies redis.PubSubSubscriptionInfo[];
 
 // EditOutcome.applied
-export const s222 = {
+export const s231 = {
   "replies": [
     {
       "t": "text",
@@ -9288,7 +9351,7 @@ export const s222 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.conflict
-export const s223 = {
+export const s232 = {
   "edit": 0,
   "message": "changed",
   "reason": "valueChanged",
@@ -9296,7 +9359,7 @@ export const s223 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.failed
-export const s224 = {
+export const s233 = {
   "command": 1,
   "error": {
     "code": "OOM",
@@ -9311,7 +9374,7 @@ export const s224 = {
 } satisfies redis.RedisEditOutcome;
 
 // PubSubEvent.batch
-export const s225 = {
+export const s234 = {
   "dropped": 0,
   "kind": "batch",
   "messages": [
@@ -9332,7 +9395,7 @@ export const s225 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.subscribed
-export const s226 = {
+export const s235 = {
   "count": 1,
   "kind": "subscribed",
   "name": "orders",
@@ -9341,7 +9404,7 @@ export const s226 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.error
-export const s227 = {
+export const s236 = {
   "code": "NOPERM",
   "kind": "error",
   "message": "NOPERM",
@@ -9351,7 +9414,7 @@ export const s227 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.reconnecting
-export const s228 = {
+export const s237 = {
   "attempt": 1,
   "kind": "reconnecting",
   "reason": "lost",
@@ -9359,7 +9422,7 @@ export const s228 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.gap
-export const s229 = {
+export const s238 = {
   "kind": "gap",
   "lostAt": 1,
   "reason": "lost",
@@ -9368,26 +9431,26 @@ export const s229 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.closed
-export const s230 = {
+export const s239 = {
   "kind": "closed",
   "reason": "unsubscribed",
   "subscriptionId": "sub1"
 } satisfies redis.PubSubEvent;
 
 // CmdError.invalid.0
-export const s231 = {
+export const s240 = {
   "kind": "invalid",
   "message": "bad"
 } satisfies errors.CmdError;
 
 // CmdError.notFound.1
-export const s232 = {
+export const s241 = {
   "kind": "notFound",
   "message": "This plan is no longer available."
 } satisfies errors.CmdError;
 
 // CmdError.session.2
-export const s233 = {
+export const s242 = {
   "error": {
     "error": {
       "code": "23505",
@@ -9404,7 +9467,7 @@ export const s233 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.3
-export const s234 = {
+export const s243 = {
   "error": {
     "kind": "notFound",
     "sessionId": "s1"
@@ -9413,7 +9476,7 @@ export const s234 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.4
-export const s235 = {
+export const s244 = {
   "error": {
     "environment": "production",
     "kind": "confirmationRequired",
@@ -9425,7 +9488,7 @@ export const s235 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.5
-export const s236 = {
+export const s245 = {
   "error": {
     "kind": "openTransaction",
     "message": "open"
@@ -9434,19 +9497,19 @@ export const s236 = {
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.6
-export const s237 = {
+export const s246 = {
   "kind": "secretRequired",
   "secret": "db_password"
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.7
-export const s238 = {
+export const s247 = {
   "kind": "secretRequired",
   "secret": "tls_key_passphrase"
 } satisfies errors.CmdError;
 
 // CmdError.session.8
-export const s239 = {
+export const s248 = {
   "error": {
     "error": {
       "code": "tls_key_passphrase_wrong",
@@ -9463,19 +9526,19 @@ export const s239 = {
 } satisfies errors.CmdError;
 
 // CmdError.reconnectRequired.9
-export const s240 = {
+export const s249 = {
   "kind": "reconnectRequired",
   "message": "reconnect"
 } satisfies errors.CmdError;
 
 // CmdError.readOnly.10
-export const s241 = {
+export const s250 = {
   "kind": "readOnly",
   "message": "read only"
 } satisfies errors.CmdError;
 
 // CmdError.catalog.11
-export const s242 = {
+export const s251 = {
   "error": {
     "kind": "unsupported",
     "message": "no"
@@ -9484,7 +9547,7 @@ export const s242 = {
 } satisfies errors.CmdError;
 
 // CmdError.live.12
-export const s243 = {
+export const s252 = {
   "error": {
     "kind": "unsupported",
     "message": "This node is not part of a Galera cluster."
@@ -9493,7 +9556,7 @@ export const s243 = {
 } satisfies errors.CmdError;
 
 // CmdError.internal.13
-export const s244 = {
+export const s253 = {
   "kind": "internal",
   "message": "x"
 } satisfies errors.CmdError;
@@ -9675,6 +9738,15 @@ export const CONTRACT_IDS: readonly string[] = [
   "SearchIndex.raw",
   "BulkTtlStatus.list",
   "BulkFilter.moduleType(arg)",
+  "update_info() sparkle",
+  "update_info() tauri",
+  "update_info() none",
+  "update_check() available",
+  "update_check() available without notes",
+  "update_check() upToDate",
+  "update_check() sparkle",
+  "varve://update-progress",
+  "varve://update-progress without length",
   "ObjectDetails.composite.pg18",
   "ObjectDetails.database.ma123",
   "ObjectDetails.database.my97",

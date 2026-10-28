@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
-import { computed, onBeforeUnmount, onMounted, reactive, useId } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, useId } from 'vue';
 import { fetchActivitySettings, saveActivitySettings } from '../api/activity';
 import type { TextLevel } from '../api/activity';
 import { presentError, toCmdError } from '../api/errors';
@@ -12,6 +12,7 @@ import Icon from '../components/common/Icon.vue';
 import { useDialogs } from '../composables/useDialogs';
 import { registerUnsavedCheck } from '../composables/useQuitGuard';
 import { useToasts } from '../composables/useToasts';
+import { useUpdates } from '../composables/useUpdates';
 import { activitySettingsForm, activitySettingsFrom, activitySettingsSchema, retentionShortened } from '../lib/forms';
 import type { ActivitySettingsValues } from '../lib/forms';
 import { requiredFields } from '../lib/schemaRequired';
@@ -146,6 +147,25 @@ async function setRemember(remember: boolean): Promise<void> {
     toasts.pushError(error, 'Could not save the secret settings');
   } finally {
     secrets.busy = false;
+  }
+}
+
+// Updates: hidden when this build has no update feed (dev builds), or before
+// the backend answered. On macOS Sparkle shows its own windows.
+const updates = useUpdates();
+const updateInfo = computed(() => {
+  const info = updates.state.info;
+  return info && info.mechanism !== 'none' ? info : null;
+});
+const autoCheckBusy = ref(false);
+
+async function toggleAutoCheck(): Promise<void> {
+  if (!updateInfo.value || autoCheckBusy.value) return;
+  autoCheckBusy.value = true;
+  try {
+    await updates.setAutoCheck(!updateInfo.value.autoCheck);
+  } finally {
+    autoCheckBusy.value = false;
   }
 }
 
@@ -364,6 +384,43 @@ async function forgetSecrets(): Promise<void> {
       </div>
     </section>
 
+    <section
+      v-if="updateInfo"
+      class="card"
+      :aria-labelledby="`${uid}-updates`"
+    >
+      <h2 :id="`${uid}-updates`">
+        Updates
+      </h2>
+      <p class="muted">
+        You have Varve <span class="mono">{{ updateInfo.currentVersion }}</span>.
+      </p>
+      <div class="switch-row">
+        <button
+          type="button"
+          role="switch"
+          class="switch"
+          :aria-checked="updateInfo.autoCheck"
+          :aria-labelledby="`${uid}-auto-check`"
+          :disabled="autoCheckBusy"
+          @click="toggleAutoCheck"
+        />
+        <span
+          :id="`${uid}-auto-check`"
+          class="choice-title"
+        >Automatically check for updates</span>
+      </div>
+      <div class="actions">
+        <button
+          type="button"
+          class="btn"
+          @click="updates.checkNow()"
+        >
+          Check for Updates…
+        </button>
+      </div>
+    </section>
+
     <ExtensionSlot name="settings-sections" />
   </section>
 </template>
@@ -478,6 +535,12 @@ p {
 
 .notice {
   align-items: flex-start;
+}
+
+.switch-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .actions {

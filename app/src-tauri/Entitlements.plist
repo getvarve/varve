@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The app keeps the hardened runtime. Library validation only accepts code signed by the
+	     app's own Team ID, and the release is ad-hoc signed (no Team ID) like the Sparkle.framework
+	     it loads at runtime (crates/sparkle), so it is turned off. Drop this once the app and the
+	     framework are signed with a Developer ID. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

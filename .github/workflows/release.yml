@@ -4,9 +4,21 @@ name: Release
 # release with SHA256SUMS. CI calls this workflow once every check of the
 # tagged commit has passed, so a release never ships a red commit.
 # install.sh and install.ps1 download these assets by their fixed names.
+#
+# It also publishes the in-app update feeds (scripts/update-feeds.mjs): latest.json for the Tauri
+# updater on Windows and Linux, and appcast-arm64.xml and appcast-x64.xml for Sparkle on macOS.
+# The signing keys live in 1Password ("Tauri updater signing key (Varve)", "Sparkle update
+# signing key (Varve)"); CI gets them as secrets.
 
 on:
   workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
+      SPARKLE_ED_PRIVATE_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -75,6 +87,8 @@ jobs:
           # With CI set, Tauri skips the Finder script that lays out the installer window
           # (background, window size, icon positions); this keeps it.
           TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
+        # No signing keys here: every build script and download in this step could read them.
+        # The update signatures are made in their own steps below.
         run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
       - name: Collect assets under fixed names
         shell: bash
@@ -112,6 +126,37 @@ jobs:
               ;;
           esac
           ls -la dist
+      - name: Sign the Sparkle update (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          ARCHIVE: dist/varve-${{ matrix.asset }}.app.tar.gz
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # The EdDSA signature of the archive the appcast offers, checked right away. The key goes
+          # in on stdin, never to disk.
+          tools=app/src-tauri/macos/sparkle/bin
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --ed-key-file - "$ARCHIVE" > "$ARCHIVE.sparkle"
+          signature="$(sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p' "$ARCHIVE.sparkle")"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$tools/sign_update" --verify --ed-key-file - "$ARCHIVE" "$signature"
+      - name: Sign the Tauri updates (Windows, Linux)
+        if: runner.os != 'macOS'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Every installer gets its <file>.sig for latest.json: the updater falls back from a
+          # missing installer-specific entry to the plain one, which would hand an MSI or deb
+          # install the wrong installer. The CLI reads the key from the environment.
+          for file in dist/*.exe dist/*.msi dist/*.AppImage dist/*.deb; do
+            [ -e "$file" ] || continue
+            ./node_modules/.bin/tauri signer sign "$file" > /dev/null
+            test -s "$file.sig"
+          done
+          ls -la dist
       - uses: actions/upload-artifact@v6
         with:
           name: varve-${{ matrix.asset }}
@@ -127,6 +172,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commits since the previous tag make the release notes.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -160,7 +211,12 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          cat > notes.md <<'EOF'
+          # What's new since the previous release, from the commit subjects.
+          previous="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          range="${previous:+${previous}..}${TAG}"
+          git log --format=%s "$range" | node scripts/release-notes.mjs > notes.md
+          printf '\n' >> notes.md
+          cat >> notes.md <<'EOF'
           ## Install
 
           macOS and Linux:
@@ -179,13 +235,36 @@ jobs:
           The macOS builds are not notarized yet: after opening the `.dmg`, use
           **System Settings > Privacy & Security > Open Anyway** once.
           EOF
-          # A rerun after a partial upload replaces the assets instead of failing.
+          # The Sparkle signature lines only feed the appcasts; they are not release assets.
+          assets=()
+          for file in dist/*; do
+            case "$file" in *.sparkle) ;; *) assets+=("$file") ;; esac
+          done
+          # A draft first: it becomes the latest release, which the apps' update feeds point at,
+          # only once the feeds are uploaded too. A rerun after a partial upload replaces the
+          # assets instead of failing.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" dist/* \
+            gh release create "$TAG" "${assets[@]}" \
+              --draft \
               --verify-tag \
               --title "Varve ${TAG}" \
               --notes-file notes.md \
               --generate-notes
           fi
+      - name: Publish the update feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # The release notes without the install section, as Markdown (Tauri updater) and as
+          # HTML (Sparkle). GitHub renders the Markdown the way the release page shows it.
+          gh release view "$TAG" --json body --jq .body > body.md
+          awk 'BEGIN { skip = 0 } /^## Install/ { skip = 1; next } /^## / { skip = 0 } !skip' body.md > update-notes.md
+          gh api markdown -f text="$(cat update-notes.md)" -f mode=gfm -f context="$GITHUB_REPOSITORY" > update-notes.html
+          node scripts/update-feeds.mjs dist "$TAG" update-notes.md update-notes.html
+          gh release upload "$TAG" dist/latest.json dist/appcast-arm64.xml dist/appcast-x64.xml --clobber
+          # Now the release and its feeds go live together.
+          gh release edit "$TAG" --draft=false --latest

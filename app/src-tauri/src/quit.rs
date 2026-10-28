@@ -77,9 +77,21 @@ impl QuitGate {
         self.confirmed.store(true, Ordering::SeqCst);
     }
 
+    /// Takes a confirmation back: a restart for an update did not happen
+    /// after all, so quitting must ask again.
+    pub fn unconfirm(&self) {
+        self.confirmed.store(false, Ordering::SeqCst);
+    }
+
     /// The UI installed its quit handler.
     pub fn set_ready(&self) {
         self.ready.store(true, Ordering::SeqCst);
+    }
+
+    /// True while a UI with a quit handler can answer questions.
+    #[must_use]
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::SeqCst)
     }
 
     /// A page started loading: its quit handler is not installed yet, and
@@ -182,6 +194,10 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
             request_quit(app);
         }
         RunEvent::MenuEvent(event) if event.id() == QUIT_MENU_ID => request_quit(app),
+        #[cfg(target_os = "macos")]
+        RunEvent::MenuEvent(event) if event.id() == crate::updates::CHECK_FOR_UPDATES_MENU_ID => {
+            crate::updates::handle_menu_event(app, event.id().as_ref());
+        }
         RunEvent::MenuEvent(event) if event.id() == FORGET_SECRETS_MENU_ID => {
             if let Some(services) = app.try_state::<Arc<Services>>() {
                 let count = services.forget_cached_secrets();
@@ -215,24 +231,42 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
         true,
         None::<&str>,
     )?;
-    let app_menu = Submenu::with_items(
+    let about = PredefinedMenuItem::about(app, None, None)?;
+    let check_for_updates = MenuItem::with_id(
         app,
-        &name,
+        crate::updates::CHECK_FOR_UPDATES_MENU_ID,
+        "Check for Updates…",
         true,
-        &[
-            &PredefinedMenuItem::about(app, None, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &forget_secrets,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::services(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
-            &PredefinedMenuItem::show_all(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ],
+        None::<&str>,
     )?;
+    let separators = [
+        PredefinedMenuItem::separator(app)?,
+        PredefinedMenuItem::separator(app)?,
+        PredefinedMenuItem::separator(app)?,
+        PredefinedMenuItem::separator(app)?,
+    ];
+    let services = PredefinedMenuItem::services(app, None)?;
+    let hide = PredefinedMenuItem::hide(app, None)?;
+    let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+    let show_all = PredefinedMenuItem::show_all(app, None)?;
+    let mut items: Vec<&dyn tauri::menu::IsMenuItem<R>> = vec![&about];
+    // Only when Sparkle runs: a dev build has no updater behind the item.
+    if crate::updates::menu_item_enabled() {
+        items.push(&check_for_updates);
+    }
+    items.extend([
+        &separators[0] as &dyn tauri::menu::IsMenuItem<R>,
+        &forget_secrets,
+        &separators[1],
+        &services,
+        &separators[2],
+        &hide,
+        &hide_others,
+        &show_all,
+        &separators[3],
+        &quit,
+    ]);
+    let app_menu = Submenu::with_items(app, &name, true, &items)?;
     let edit = Submenu::with_items(
         app,
         "Edit",
