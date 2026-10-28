@@ -472,6 +472,14 @@ pub struct BackgroundCleanup {
     again: AtomicBool,
 }
 
+impl BackgroundCleanup {
+    /// True while a background pass runs (or is about to run again).
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

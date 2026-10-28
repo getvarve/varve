@@ -3168,10 +3168,21 @@ async fn keychain_cleanup_never_deletes_a_secret_being_saved() -> TestResult {
     let mut moved = original.clone();
     moved.host = "new-server.invalid".into();
     assert!(s.update_connection(&profile.id, &moved).await.is_err());
+    // The failed removal also started a background retry. Let it finish
+    // while the keychain still fails, so it cannot clear the slot before the
+    // race below is set up.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while s.keychain_cleanup.is_running() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background cleanup never ended"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(s.pending_keychain_deletions().len(), 1);
     keychain
         .failing
         .store(false, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(s.pending_keychain_deletions().len(), 1);
 
     // The user saves a password for the new server; a cleanup runs while
     // the keychain write is in progress.
