@@ -49,12 +49,10 @@ show_state() {
   ls -la "$data_dir" 2>/dev/null || echo "${data_dir} (missing)"
 }
 
-# apt only installs a local file when the path has a slash.
+# apt takes an argument as a local file only when it starts with ./ or /; it reads "old/x.deb" as
+# package "old" from release "x.deb".
 local_path() {
-  case "$1" in
-    */*) printf '%s\n' "$1" ;;
-    *) printf './%s\n' "$1" ;;
-  esac
+  realpath "$1"
 }
 
 # One upgrade from scratch. $1 installs the new deb: "apt" the way a user does, "dpkg" the way the
