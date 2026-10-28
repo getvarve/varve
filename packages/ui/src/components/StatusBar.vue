@@ -85,7 +85,7 @@ const lastRun = computed(() => {
       v-if="updates.notice.value"
       type="button"
       class="seg end update"
-      @click="updates.openDialog()"
+      @click="updates.openNotice()"
     >
       {{ updates.notice.value }}
     </button>

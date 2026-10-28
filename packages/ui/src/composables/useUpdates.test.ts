@@ -33,7 +33,7 @@ vi.mock('./useQuitGuard', () => ({ confirmAllUnsaved: () => confirmAllUnsaved() 
 const AVAILABLE: UpdateCheck = { kind: 'available', version: '0.2.0', notes: '## Fixed\n- Things', date: null };
 
 function info(overrides: Partial<UpdateInfo> = {}): UpdateInfo {
-  return { mechanism: 'tauri', currentVersion: '0.1.5', autoCheck: true, ...overrides };
+  return { mechanism: 'tauri', currentVersion: '0.1.5', autoCheck: true, relaunchPending: false, ...overrides };
 }
 
 /** A promise the test settles by hand. */
@@ -64,6 +64,7 @@ async function load(updateInfo: UpdateInfo = info()): Promise<{
 }> {
   vi.resetModules();
   answers.update_info = () => updateInfo;
+  answers.update_listening = () => undefined;
   const mod = await import('./useUpdates');
   const { useToasts } = await import('./useToasts');
   const remove = await mod.installUpdates();
@@ -375,6 +376,39 @@ describe('Sparkle', () => {
     expect(invoke).toHaveBeenLastCalledWith('update_relaunch', { proceed: false });
     remove();
     expect(handlers.has('varve://update-relaunch-requested')).toBe(false);
+  });
+
+  it('tells the backend it listens only after the listener is in place', async () => {
+    const { remove } = await load(info({ mechanism: 'sparkle' }));
+    expect(calls('update_listening')).toBe(1);
+    const listened = listen.mock.invocationCallOrder[0] ?? Infinity;
+    const acknowledged = invoke.mock.invocationCallOrder[invoke.mock.calls.findIndex(([c]) => c === 'update_listening')] ?? -1;
+    expect(listened).toBeLessThan(acknowledged);
+    remove();
+  });
+
+  it('offers a declined relaunch again from the status bar, with a new unsaved check', async () => {
+    const { mod, updates, remove } = await load(info({ mechanism: 'sparkle' }));
+    answers.update_relaunch = () => undefined;
+    expect(updates.notice.value).toBeNull();
+
+    confirmAllUnsaved.mockResolvedValueOnce(false);
+    await mod.answerRelaunchRequest();
+    expect(updates.notice.value).toBe('Restart to update');
+
+    confirmAllUnsaved.mockResolvedValueOnce(true);
+    updates.openNotice();
+    await flush();
+    expect(confirmAllUnsaved).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenLastCalledWith('update_relaunch', { proceed: true });
+    expect(updates.notice.value).toBeNull();
+    remove();
+  });
+
+  it('shows a relaunch held from before a reload', async () => {
+    const { updates, remove } = await load(info({ mechanism: 'sparkle', relaunchPending: true }));
+    expect(updates.notice.value).toBe('Restart to update');
+    remove();
   });
 
   it('answers false when the unsaved check fails, and shows the error', async () => {

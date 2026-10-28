@@ -8,6 +8,7 @@ import {
   downloadUpdate,
   fetchUpdateInfo,
   installUpdate,
+  markUpdateListening,
   setUpdateAutoCheck,
   UPDATE_PROGRESS,
   UPDATE_RELAUNCH_REQUESTED,
@@ -269,9 +270,10 @@ async function setAutoCheck(autoCheck: boolean): Promise<void> {
 }
 
 /**
- * Sparkle's "Install and Relaunch": answers `update_relaunch(true)` only when
- * the unsaved check resolved `true`; a cancelled or failing check answers
- * `false`, so the app stays open.
+ * Sparkle's "Install and Relaunch", and the status bar's "Restart to update":
+ * answers `update_relaunch(true)` only when the unsaved check resolved
+ * `true`. A cancelled or failing check answers `false`: the app stays open,
+ * Sparkle keeps the relaunch held, and the status bar offers it again.
  */
 export function answerRelaunchRequest(): Promise<void> {
   relaunch ??= (async () => {
@@ -283,6 +285,7 @@ export function answerRelaunchRequest(): Promise<void> {
     }
     try {
       await answerUpdateRelaunch(proceed);
+      if (state.info) state.info.relaunchPending = !proceed;
     } catch (error: unknown) {
       useToasts().pushError(error, 'Could not answer the update');
     }
@@ -308,6 +311,8 @@ export async function installUpdates(): Promise<() => void> {
         void answerRelaunchRequest();
       }),
     );
+    // Only now may the backend hold a relaunch back for this page's answer.
+    await markUpdateListening();
   } else if (info.mechanism === 'tauri') {
     reschedule();
     cleanups.push(stopSchedule);
@@ -333,15 +338,22 @@ export function progressPercent(progress: UpdateProgress): number | null {
 export function useUpdates() {
   /** The status bar's label, or null when there is nothing to show. */
   const notice = computed(() => {
+    if (state.info?.mechanism === 'sparkle') return state.info.relaunchPending ? 'Restart to update' : null;
     const status = state.status;
     if (status.kind === 'available') return status.update.version === state.skipped ? null : 'Update available';
     if (status.kind === 'downloading') return 'Downloading update…';
     if (status.kind === 'ready') return 'Update ready';
     return null;
   });
+  /** The status bar button: Sparkle's held relaunch, or the update dialog. */
+  function openNotice(): void {
+    if (state.info?.mechanism === 'sparkle') void answerRelaunchRequest();
+    else openDialog();
+  }
   return {
     state: readonly(state),
     notice,
+    openNotice,
     checkNow,
     openDialog,
     closeDialog,
