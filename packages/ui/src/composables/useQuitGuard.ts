@@ -31,8 +31,12 @@ export function registerUnsavedCheck(check: () => Promise<boolean>): () => void 
   return () => formChecks.delete(check);
 }
 
-/** Asks about dirty forms first, then about unsaved editor tabs. */
-async function confirmAllUnsaved(): Promise<boolean> {
+/**
+ * Asks about dirty forms first, then about unsaved editor tabs. Resolves
+ * `true` when nothing unsaved stands in the way of closing the app: quitting,
+ * and installing an update (which restarts it).
+ */
+export async function confirmAllUnsaved(): Promise<boolean> {
   for (const check of [...formChecks]) if (!(await check())) return false;
   return useQuerySave().confirmUnsavedTabs(useTabs().tabs.map((t) => t.id));
 }
