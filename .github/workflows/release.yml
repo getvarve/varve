@@ -216,6 +216,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          # Only the bundles; the run also holds CI artifacts such as the migration test builds.
+          pattern: varve-*
           merge-multiple: true
       - name: Icon for the Linux desktop entry
         run: cp app/src-tauri/icons/128x128.png dist/varve-icon-128.png
@@ -270,10 +272,25 @@ jobs:
           The macOS builds are not notarized yet: after opening the `.dmg`, use
           **System Settings > Privacy & Security > Open Anyway** once.
           EOF
-          # The Sparkle signature lines only feed the appcasts; they are not release assets.
-          assets=()
+          # Exactly SHA256SUMS, the files it lists and their updater signatures. The Sparkle
+          # signature lines only feed the appcasts; anything else in dist is a mistake.
+          assets=(dist/SHA256SUMS)
+          while read -r _ name; do
+            name="${name#\*}"
+            assets+=("dist/${name}")
+            if [ -f "dist/${name}.sig" ]; then
+              assets+=("dist/${name}.sig")
+            fi
+          done < dist/SHA256SUMS
           for file in dist/*; do
-            case "$file" in *.sparkle) ;; *) assets+=("$file") ;; esac
+            case " ${assets[*]} " in *" ${file} "*) continue ;; esac
+            case "$file" in
+              *.sparkle) ;;
+              *)
+                echo "unexpected file in dist, not a release asset: $file" >&2
+                exit 1
+                ;;
+            esac
           done
           # A draft first: it becomes the latest release, which the apps' update feeds point at,
           # only once the feeds are uploaded too. A rerun after a partial upload replaces the
