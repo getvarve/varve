@@ -12,7 +12,7 @@ Signed-off-by: Your Name <you@example.com>
 
 Add it automatically with `git commit -s`. Pull requests with unsigned commits cannot be merged.
 
-Contributions are licensed under Apache-2.0, the same license as the project. There is no separate contributor license agreement.
+Contributions are licensed under AGPL-3.0-only, the same license as the project. There is no separate contributor license agreement.
 
 ## Commits
 
@@ -24,7 +24,7 @@ fix(postgres): cancel running query when the tab closes
 
 ## Scope of this repository
 
-This repository is Varve Community. Some features live in closed Pro extensions (see [docs/open-core.md](docs/open-core.md)). Changes here must not depend on, reference or feature-flag closed code. New extension points in the `extension` crate are welcome when they are generic and useful to any extension.
+This repository is the whole Varve app: every feature lands here, and nothing in it depends on closed code. The self-hostable backend for cloud sync and teams (planned) lives in this repository too (see [docs/hosting.md](docs/hosting.md)). New extension points in the `extension` crate are welcome when they are generic and useful to any extension (see [docs/extensions.md](docs/extensions.md)).
 
 ## Safety rules for changes
 

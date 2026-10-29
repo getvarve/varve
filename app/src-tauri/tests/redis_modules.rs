@@ -21,7 +21,7 @@ use varve_app::commands::{CmdError, SecretInput, Services};
 use varve_app::m2::redis_bulk::{BulkTtlRequest, BulkTtlState};
 use varve_app::m2::redis_edit::RedisEditRequest;
 use varve_app::sessions::{SessionError, SessionInfo};
-use varve_core::{Edition, Engine};
+use varve_core::Engine;
 use varve_driver::{ErrorKind, Value};
 use varve_driver_redis::{
     BulkFilter, BulkTtlAction, EditOutcome, KeyEdit, KeyExpect, KeyType, ModuleFeature,
@@ -55,13 +55,7 @@ fn fixture(name: &str) -> Res<Fixture> {
     let _ = std::fs::remove_dir_all(&dir);
     let host = varve_app::build_host(&[])?;
     let store = Arc::new(varve_app::open_store(&dir, &host)?);
-    let services = varve_app::build_services(
-        store,
-        &dir,
-        &host,
-        Edition::Community,
-        Arc::new(MemoryStore::default()),
-    )?;
+    let services = varve_app::build_services(store, &dir, &host, Arc::new(MemoryStore::default()))?;
     Ok(Fixture { services, dir })
 }
 

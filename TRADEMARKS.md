@@ -1,6 +1,6 @@
 # Trademarks
 
-"Varve" and the Varve logo (the files in `assets/logo/`) are trademarks of The Varve Authors. The Apache License 2.0 covers the code in this repository. It does not grant rights to the name or the logo.
+"Varve" and the Varve logo (the files in `assets/logo/`) are trademarks of The Varve Authors. The GNU Affero General Public License v3.0 covers the code in this repository. It does not grant rights to the name or the logo.
 
 ## You may
 

@@ -24,17 +24,6 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
-  boundaries:
-    name: Open core boundary
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - name: No references to Pro code
-        run: node scripts/check-no-pro.mjs
-
   version:
     name: Tag matches versions
     if: startsWith(github.ref, 'refs/tags/v')
@@ -388,13 +377,146 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The dev wrapper's Tauri CLI resolution and cmd.exe quoting, on every OS.
       - run: pnpm test:scripts
-      - name: Build Varve Community
+      - name: Build Varve
         run: pnpm tauri build --debug --no-bundle
+
+  # Upgrades from Varve Community 0.1.7 to the installers of this commit, the way users do, on
+  # fresh runners: the NSIS hook (app/src-tauri/windows/hooks.nsh) and install.ps1, the MSI with
+  # its pinned upgrade code, and the deb that replaces varve-community. The new installers carry
+  # the next patch version, so the upgrade goes up as a real release does. Nothing is signed.
+  migration-windows-build:
+    name: Migration (windows, build)
+    needs: [rust, frontend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: migration
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the NSIS setup and the MSI
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Cargo.toml | head -n 1)"
+          IFS=. read -r major minor patch <<<"$current"
+          next="${major}.${minor}.$((patch + 1))"
+          echo "building Varve ${next}"
+          pnpm tauri build --bundles nsis,msi --config "{\"version\":\"${next}\"}"
+          mkdir -p migration
+          cp target/release/bundle/nsis/*-setup.exe migration/varve-new-setup.exe
+          cp target/release/bundle/msi/*.msi migration/varve-new.msi
+          ls -la migration
+      - uses: actions/upload-artifact@v6
+        with:
+          name: migration-windows
+          path: migration/*
+          if-no-files-found: error
+          retention-days: 3
+
+  migration-windows:
+    name: Migration (windows, ${{ matrix.kind }})
+    needs: migration-windows-build
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [nsis, nsis-update, msi]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: migration-windows
+          path: migration
+      - name: Download Varve Community 0.1.7
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.1.7 --repo getvarve/varve --dir old \
+            --pattern varve-windows-x64-setup.exe --pattern varve-windows-x64.msi --pattern SHA256SUMS
+          cd old
+          grep -E '  \*?varve-windows-x64(-setup\.exe|\.msi)$' SHA256SUMS | sha256sum --check --strict
+          ls -la
+      - name: Upgrade and check
+        shell: pwsh
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          if ($env:KIND -like 'nsis*') {
+            $old = 'old/varve-windows-x64-setup.exe'
+            $new = 'migration/varve-new-setup.exe'
+          } else {
+            $old = 'old/varve-windows-x64.msi'
+            $new = 'migration/varve-new.msi'
+          }
+          ./scripts/ci/migration-windows.ps1 -Kind $env:KIND -Old (Resolve-Path $old).Path -New (Resolve-Path $new).Path
+      - name: MSI logs
+        if: always() && matrix.kind == 'msi'
+        shell: pwsh
+        run: Get-ChildItem -Path "$env:RUNNER_TEMP/msi-logs" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "==== $($_.Name)"; Get-Content -Path $_.FullName -Tail 60 }
+
+  migration-linux:
+    name: Migration (linux)
+    needs: [rust, frontend]
+    # The release builds the deb on Ubuntu 22.04 too.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux dependencies for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: migration
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the deb
+        run: |
+          set -euo pipefail
+          current="$(sed -nE 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' Cargo.toml | head -n 1)"
+          IFS=. read -r major minor patch <<<"$current"
+          next="${major}.${minor}.$((patch + 1))"
+          echo "building Varve ${next}"
+          pnpm tauri build --bundles deb --config "{\"version\":\"${next}\"}"
+          mkdir -p migration
+          cp target/release/bundle/deb/*.deb migration/varve-new.deb
+          dpkg-deb --info migration/varve-new.deb
+      - name: Download Varve Community 0.1.7
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download v0.1.7 --repo getvarve/varve --dir old --pattern varve-linux-x64.deb --pattern SHA256SUMS
+          cd old
+          grep -E '  \*?varve-linux-x64\.deb$' SHA256SUMS | sha256sum --check --strict
+          dpkg-deb --info varve-linux-x64.deb
+      - name: Upgrade and check
+        run: scripts/ci/migration-linux.sh old/varve-linux-x64.deb migration/varve-new.deb
 
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [boundaries, version, rust, integration, tunnel, frontend, build]
+    needs: [version, rust, integration, tunnel, frontend, build, migration-windows, migration-linux]
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml

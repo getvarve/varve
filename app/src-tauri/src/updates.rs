@@ -12,6 +12,9 @@
 //!   check, `update_install`, which installs and restarts.
 //! - A build without an update feed (a dev build, an app built on varve-app
 //!   that ships no feed) reports `none`, and the UI hides everything.
+//! - So does a `.deb`, `.rpm` or `.msi` install: it updates by installing the
+//!   new package. The feed's msi and deb entries serve only installs from
+//!   0.1.7 and older (scripts/update-feeds.mjs).
 //!
 //! Every restart for an update goes through the quit gate's cleanup: the
 //! cached secrets are wiped before the process goes away.
@@ -39,8 +42,22 @@ pub enum Mechanism {
     Sparkle,
     /// Windows and Linux: the UI runs the flow over the Tauri updater.
     Tauri,
-    /// No update feed in this build.
+    /// No update feed in this build, or a package install (deb, rpm, msi).
     None,
+}
+
+/// Whether the Tauri updater may update a build packaged as `bundle`.
+///
+/// A package manager install (deb, rpm, msi) updates by installing the new
+/// package; the feed's msi and deb entries serve only installs from 0.1.7 and
+/// older. An unknown bundle (`cargo run`, `tauri dev`) keeps the updater.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn updates_in_app(bundle: Option<tauri::utils::config::BundleType>) -> bool {
+    use tauri::utils::config::BundleType;
+    !matches!(
+        bundle,
+        Some(BundleType::Deb | BundleType::Rpm | BundleType::Msi)
+    )
 }
 
 /// What the UI needs to show the update settings.
@@ -300,7 +317,7 @@ mod tauri_updater {
 
     use super::{
         Mechanism, UPDATE_PROGRESS, UpdateCheck, UpdateInfo, UpdateProgress, internal,
-        not_available,
+        not_available, updates_in_app,
     };
     use crate::commands::CmdError;
 
@@ -325,22 +342,24 @@ mod tauri_updater {
         }
     }
 
-    /// The updater plugin, when the config carries an updater feed
-    /// (`plugins.updater` in tauri.conf.json). Without it the app has no
-    /// updates instead of failing to start.
+    /// Whether this build updates in app: the config carries an updater feed
+    /// (`plugins.updater` in tauri.conf.json) and the app is not a package
+    /// install. Otherwise the app has no updates instead of failing to start.
+    fn enabled(config: &tauri::Config) -> bool {
+        config.plugins.0.contains_key("updater")
+            && updates_in_app(tauri::utils::platform::bundle_type())
+    }
+
+    /// The updater plugin, when this build updates in app.
     pub fn plugin<R: Runtime>(
         config: &tauri::Config,
     ) -> Option<tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config>> {
-        config
-            .plugins
-            .0
-            .contains_key("updater")
-            .then(|| tauri_plugin_updater::Builder::new().build())
+        enabled(config).then(|| tauri_plugin_updater::Builder::new().build())
     }
 
     /// Manages the updater state when the plugin is registered.
     pub fn init<R: Runtime>(app: &AppHandle<R>) {
-        if app.config().plugins.0.contains_key("updater") {
+        if enabled(app.config()) {
             app.manage(UpdaterState::default());
         }
     }
@@ -555,6 +574,30 @@ pub async fn update_relaunch<R: Runtime>(app: AppHandle<R>, proceed: bool) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_installs_do_not_update_in_app() {
+        use tauri::utils::config::BundleType;
+        for bundle in [BundleType::Deb, BundleType::Rpm, BundleType::Msi] {
+            assert!(!updates_in_app(Some(bundle.clone())), "{bundle:?}");
+        }
+        for bundle in [BundleType::AppImage, BundleType::Nsis, BundleType::App] {
+            assert!(updates_in_app(Some(bundle.clone())), "{bundle:?}");
+        }
+        assert!(updates_in_app(None));
+    }
+
+    /// Every signature the feed hands out must name its version, or the
+    /// updater rejects it (`requireSignedVersion`).
+    #[test]
+    fn the_updater_requires_signed_versions() -> Result<(), serde_json::Error> {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))?;
+        assert_eq!(
+            config["plugins"]["updater"]["requireSignedVersion"],
+            serde_json::Value::Bool(true)
+        );
+        Ok(())
+    }
 
     #[test]
     fn the_ui_reads_the_update_shapes() -> Result<(), serde_json::Error> {

@@ -1,4 +1,4 @@
-# Install Varve Community from GitHub releases with its Windows installer.
+# Install Varve from GitHub releases with its Windows installer.
 # https://github.com/getvarve/varve
 #Requires -Version 5.1
 
@@ -281,6 +281,41 @@ function Get-VarveChecksum {
     throw "checksum mismatch: SHA256SUMS has no entry for $Asset"
 }
 
+# Where the installer put the app, and whether an old Varve Community install is left next to it.
+# The installer reuses the folder of an earlier install, which may not be the default. Its
+# uninstall key and default folder are named after the product: Varve, or the name up to 0.1.7,
+# which an older release installs under (-LegacyFirst looks there first). CI runs this function
+# on its own (.github/workflows/ci.yml, Migration (windows)).
+function Find-VarveInstall {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppName,
+        [Parameter(Mandatory = $true)][string]$LegacyName,
+        [switch]$LegacyFirst
+    )
+    $installDir = $null
+    $legacyDir = $null
+    $names = if ($LegacyFirst) { @($LegacyName, $AppName) } else { @($AppName, $LegacyName) }
+    foreach ($name in $names) {
+        $dir = Join-Path $env:LOCALAPPDATA $name
+        $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$name"
+        $recorded = (Get-ItemProperty -Path $uninstallKey -Name 'InstallLocation' -ErrorAction SilentlyContinue).InstallLocation
+        if (-not [string]::IsNullOrWhiteSpace($recorded)) {
+            $dir = $recorded.Trim().Trim('"').TrimEnd('\')
+        }
+        if ($name -eq $LegacyName) {
+            $legacyDir = $dir
+        }
+        if ($null -eq $installDir -and (Test-Path -Path (Join-Path $dir 'varve.exe'))) {
+            $installDir = $dir
+        }
+    }
+    $legacyKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$LegacyName"
+    return [pscustomobject]@{
+        Dir        = $installDir
+        LegacyLeft = ($null -ne $installDir) -and ($installDir -ne $legacyDir) -and (Test-Path -Path $legacyKey)
+    }
+}
+
 try {
     if ($env:OS -ne 'Windows_NT') {
         throw 'unsupported platform: install.ps1 is for Windows. Use install.sh on macOS and Linux.'
@@ -298,7 +333,10 @@ try {
 
     $repo = 'getvarve/varve'
     $github = "https://github.com/$repo"
-    $appName = 'Varve Community'
+    $appName = 'Varve'
+    # Up to 0.1.7 the app was called Varve Community. The installer removes that install (see
+    # app/src-tauri/windows/hooks.nsh); an older release installs under the old name.
+    $legacyName = 'Varve Community'
     $asset = 'varve-windows-x64-setup.exe'
 
     if (-not [string]::IsNullOrWhiteSpace($env:VARVE_VERSION)) {
@@ -368,17 +406,23 @@ try {
         }
     }
 
-    # The installer reuses the folder of an earlier install, which may not be the default.
-    $installDir = Join-Path $env:LOCALAPPDATA $appName
-    $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$appName"
-    $recorded = (Get-ItemProperty -Path $uninstallKey -Name 'InstallLocation' -ErrorAction SilentlyContinue).InstallLocation
-    if (-not [string]::IsNullOrWhiteSpace($recorded)) {
-        $installDir = $recorded.Trim().Trim('"').TrimEnd('\')
+    # Releases up to 0.1.7 install as Varve Community.
+    $legacyRelease = $false
+    $requested = $null
+    if ([version]::TryParse($version.TrimStart('v'), [ref]$requested)) {
+        $legacyRelease = $requested -le [version]'0.1.7'
     }
+    $found = Find-VarveInstall -AppName $appName -LegacyName $legacyName -LegacyFirst:$legacyRelease
+    if ($legacyRelease) {
+        $appName = $legacyName
+    }
+    if ($null -eq $found.Dir) {
+        throw "the installer finished, but varve.exe is missing from $(Join-Path $env:LOCALAPPDATA $appName)"
+    }
+    $installDir = $found.Dir
     $exe = Join-Path $installDir 'varve.exe'
-    if (-not (Test-Path -Path $exe)) {
-        throw "the installer finished, but $exe is missing"
-    }
+    # The installer removes the old app after installing Varve; say so when that did not work.
+    $legacyLeft = $found.LegacyLeft
     Write-VarveStep -Label 'Installed' -Detail (Get-VarveDisplayPath -Path $installDir)
 
     $installed = $version.TrimStart('v')
@@ -389,13 +433,17 @@ try {
 
     $title = "$appName $installed is installed"
     $open = Format-VarveStyle -Text $appName -Code '1'
-    Write-VarveSummary -Lines @(
+    $lines = @(
         , @("$($script:MarkOk) $title", "$(Format-VarveStyle -Text $script:MarkOk -Code '1;32') $(Format-VarveStyle -Text $title -Code '1')")
         , @('', '')
         , @("Location  $(Get-VarveDisplayPath -Path $installDir)", "$(Format-VarveStyle -Text 'Location' -Code '2')  $(Get-VarveDisplayPath -Path $installDir)")
         , @("Next      open $appName from the Start menu", "$(Format-VarveStyle -Text 'Next' -Code '2')      open $open from the Start menu")
         , @('Remove    Settings > Apps > Installed apps', "$(Format-VarveStyle -Text 'Remove' -Code '2')    Settings > Apps > Installed apps")
     )
+    if ($legacyLeft) {
+        $lines += , @("Note      $legacyName is still installed; remove it in Installed apps", "$(Format-VarveStyle -Text 'Note' -Code '2')      $legacyName is still installed; remove it in Installed apps")
+    }
+    Write-VarveSummary -Lines $lines
 }
 catch {
     Write-VarveFailure -Message $_.Exception.Message

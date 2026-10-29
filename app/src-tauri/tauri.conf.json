@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Varve Community",
+  "productName": "Varve",
   "mainBinaryName": "varve",
   "identifier": "com.getvarve.desktop",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Varve Community",
+        "title": "Varve",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -33,8 +33,8 @@
     "category": "DeveloperTool",
     "shortDescription": "A calm database manager",
     "longDescription": "A calm desktop manager for PostgreSQL, MySQL, MariaDB and Redis.",
-    "copyright": "Copyright 2026 The Varve Authors",
-    "license": "Apache-2.0",
+    "copyright": "Copyright 2026 Sherin Bloemendaal",
+    "license": "AGPL-3.0-only",
     "macOS": {
       "entitlements": "Entitlements.plist",
       "files": {
@@ -56,6 +56,24 @@
         }
       }
     },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      },
+      "wix": {
+        "upgradeCode": "3023353a-1f9b-514e-ab8c-728816a0521b"
+      }
+    },
+    "linux": {
+      "deb": {
+        "conflicts": [
+          "varve-community"
+        ],
+        "replaces": [
+          "varve-community"
+        ]
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,6 +88,7 @@
       "endpoints": [
         "https://github.com/getvarve/varve/releases/latest/download/latest.json"
       ],
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }

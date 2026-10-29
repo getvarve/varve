@@ -1,8 +1,7 @@
 //! Shared types for Varve.
 //!
 //! Every other crate depends on this one, so it stays small: the supported
-//! database engines, capability identifiers, the app edition and the common
-//! error type.
+//! database engines, capability identifiers and the common error type.
 
 use std::fmt;
 
@@ -63,28 +62,7 @@ impl fmt::Display for Engine {
     }
 }
 
-/// Which build of the app is running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Edition {
-    /// Built from the public repository only.
-    Community,
-    /// The official build with closed extensions.
-    Pro,
-}
-
-impl Edition {
-    /// Product name shown in the UI.
-    #[must_use]
-    pub fn product_name(self) -> &'static str {
-        match self {
-            Edition::Community => "Varve Community",
-            Edition::Pro => "Varve Pro",
-        }
-    }
-}
-
-/// A dotted, lowercase identifier such as `pro.stats.history`.
+/// A dotted, lowercase identifier such as `acme.stats.history`.
 ///
 /// Used for capabilities, extension ids, command names and activity actions.
 /// Segments are `[a-z0-9_]+`, separated by single dots.
@@ -170,7 +148,7 @@ mod tests {
 
     #[test]
     fn dotted_id_accepts_valid_values() {
-        for value in ["core", "pro.stats", "pro.stats.history_v2", "a1.b_2"] {
+        for value in ["core", "acme.stats", "acme.stats.history_v2", "a1.b_2"] {
             assert!(DottedId::new(value).is_ok(), "{value} should be valid");
         }
     }
@@ -180,12 +158,12 @@ mod tests {
         for value in [
             "",
             ".",
-            "pro.",
-            ".pro",
-            "pro..stats",
-            "Pro.stats",
-            "pro-x",
-            "pro stats",
+            "acme.",
+            ".acme",
+            "acme..stats",
+            "Acme.stats",
+            "acme-x",
+            "acme stats",
         ] {
             assert!(DottedId::new(value).is_err(), "{value:?} should be invalid");
         }
@@ -193,25 +171,25 @@ mod tests {
 
     #[test]
     fn is_within_respects_segment_boundaries() -> Result<(), Error> {
-        let prefix = DottedId::new("pro.test")?;
-        assert!(DottedId::new("pro.test")?.is_within(&prefix));
-        assert!(DottedId::new("pro.test.ping")?.is_within(&prefix));
-        assert!(!DottedId::new("pro.tests.ping")?.is_within(&prefix));
-        assert!(!DottedId::new("pro")?.is_within(&prefix));
+        let prefix = DottedId::new("acme.test")?;
+        assert!(DottedId::new("acme.test")?.is_within(&prefix));
+        assert!(DottedId::new("acme.test.ping")?.is_within(&prefix));
+        assert!(!DottedId::new("acme.tests.ping")?.is_within(&prefix));
+        assert!(!DottedId::new("acme")?.is_within(&prefix));
         Ok(())
     }
 
     #[test]
     fn sql_prefix_replaces_dots() -> Result<(), Error> {
-        assert_eq!(DottedId::new("pro.test")?.to_sql_prefix(), "pro_test");
+        assert_eq!(DottedId::new("acme.test")?.to_sql_prefix(), "acme_test");
         Ok(())
     }
 
     #[test]
     fn dotted_id_round_trips_through_serde() -> Result<(), Box<dyn std::error::Error>> {
-        let id = DottedId::new("pro.sync")?;
+        let id = DottedId::new("acme.sync")?;
         let json = serde_json::to_string(&id)?;
-        assert_eq!(json, "\"pro.sync\"");
+        assert_eq!(json, "\"acme.sync\"");
         let back: DottedId = serde_json::from_str(&json)?;
         assert_eq!(back, id);
         assert!(serde_json::from_str::<DottedId>("\"Bad.Id\"").is_err());

@@ -61,7 +61,7 @@ def svg() -> str:
   <text x="{WIDTH / 2}" y="58" text-anchor="middle" font-family="{SANS}" font-size="19" font-weight="600" fill="#FFFFFF">Drag Varve to Applications</text>
   <text x="{WIDTH / 2}" y="82" text-anchor="middle" font-family="{SANS}" font-size="12.5" font-weight="500" fill="#FFFFFF">Then open it from your Applications folder or Spotlight.</text>
   <path d="M{x1} {y} Q {mid} {y - 34} {x2} {y}" fill="none" stroke="url(#arrow)" stroke-width="3" stroke-linecap="round" stroke-dasharray="0.1 9" marker-end="url(#head)"/>
-  <text x="{WIDTH / 2}" y="{HEIGHT - 52}" text-anchor="middle" font-family="{SANS}" font-size="11" font-weight="500" fill="#FFFFFF">Varve Community  ·  github.com/getvarve/varve</text>
+  <text x="{WIDTH / 2}" y="{HEIGHT - 52}" text-anchor="middle" font-family="{SANS}" font-size="11" font-weight="500" fill="#FFFFFF">Varve  ·  github.com/getvarve/varve</text>
 </svg>
 '''
 

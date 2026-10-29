@@ -1,8 +1,8 @@
 //! The Varve desktop app.
 //!
-//! Varve Community and Varve Pro are the same app: each edition is a small
-//! binary crate that calls [`run`] with its own Tauri context (product name,
-//! bundle id, frontend) and its list of extensions. Community passes none.
+//! A binary crate calls [`run`] with its Tauri context (product name, bundle
+//! id, frontend) and a list of extensions. The Varve binary in this crate
+//! passes none; the extension API is how plugins add to the app.
 
 pub mod activity_bridge;
 pub mod commands;
@@ -24,7 +24,6 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::Manager;
 use varve_activity::{Recorder, RecorderSettings};
-use varve_core::Edition;
 use varve_driver::Driver;
 use varve_extension::{
     AppContext, Extension, ExtensionError, ExtensionHost, ExtensionInfo, HostBuilder,
@@ -74,8 +73,6 @@ pub(crate) struct AppState {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AppInfo {
-    edition: Edition,
-    product_name: &'static str,
     version: &'static str,
     data_dir: String,
     extensions: Vec<ExtensionInfo>,
@@ -117,10 +114,11 @@ pub fn open_store(dir: &std::path::Path, host: &ExtensionHost) -> Result<Store, 
     Ok(store)
 }
 
-/// The data directory shared by every edition: `<OS data dir>/Varve`.
+/// The data directory: `<OS data dir>/Varve`.
 ///
-/// It does not depend on the bundle id, so Community and Pro read the same
-/// `app.db` (design doc section 2.3). [`DATA_DIR_ENV`] overrides it.
+/// It does not depend on the bundle id or the product name, so a renamed app
+/// keeps reading the same `app.db` (design doc section 2.3). [`DATA_DIR_ENV`]
+/// overrides it.
 fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     if let Some(dir) = std::env::var_os(DATA_DIR_ENV) {
         return Ok(PathBuf::from(dir));
@@ -176,7 +174,7 @@ pub fn device_id(store: &Store) -> Result<String, StoreError> {
     Ok(meta_get(store, "device_id")?.unwrap_or(id))
 }
 
-/// The database drivers of Varve Community.
+/// The database drivers of Varve.
 #[must_use]
 pub fn drivers() -> Vec<Arc<dyn Driver>> {
     vec![
@@ -194,7 +192,6 @@ pub fn build_services(
     store: Arc<Store>,
     dir: &std::path::Path,
     host: &ExtensionHost,
-    edition: Edition,
     secrets: Arc<dyn SecretStore>,
 ) -> Result<Arc<Services>, AppError> {
     let device = device_id(&store)?;
@@ -208,7 +205,6 @@ pub fn build_services(
     ));
     let ctx = AppContext {
         store: Arc::clone(&store),
-        edition,
     };
 
     // Activity events reach extensions through the on_activity hook.
@@ -331,12 +327,11 @@ pub fn secret_store() -> Arc<dyn SecretStore> {
 /// opened or migrated, or Tauri fails.
 pub fn run(
     context: tauri::Context<tauri::Wry>,
-    edition: Edition,
     extensions: Vec<Box<dyn Extension>>,
 ) -> Result<(), AppError> {
     init_tracing();
     let host = build_host(&extensions)?;
-    tracing::info!(edition = ?edition, extensions = host.extensions().len(), "starting Varve");
+    tracing::info!(extensions = host.extensions().len(), "starting Varve");
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -362,8 +357,7 @@ pub fn run(
             let dir = data_dir(app.handle())?;
             let store = Arc::new(open_store(&dir, &host)?);
             tracing::info!(path = %dir.display(), "app.db ready");
-            let services =
-                build_services(Arc::clone(&store), &dir, &host, edition, secret_store())?;
+            let services = build_services(Arc::clone(&store), &dir, &host, secret_store())?;
             if let Err(error) =
                 varve_activity::ActivityEvent::app_started(env!("CARGO_PKG_VERSION"))
                     .build()
@@ -378,7 +372,7 @@ pub fn run(
             // window.
             services.retry_keychain_cleanup_in_background();
             app.manage(AppState {
-                ctx: AppContext { store, edition },
+                ctx: AppContext { store },
                 host: host.clone(),
             });
             app.manage(services);
@@ -443,7 +437,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn community_host_is_empty_and_store_migrates() -> Result<(), Box<dyn std::error::Error>> {
+    fn empty_host_store_migrates() -> Result<(), Box<dyn std::error::Error>> {
         let host = build_host(&[])?;
         assert!(host.extensions().is_empty());
         let dir = std::env::temp_dir().join(format!("varve-app-test-{}", std::process::id()));

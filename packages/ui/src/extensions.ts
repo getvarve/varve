@@ -19,7 +19,7 @@ export type SlotName = (typeof SLOT_NAMES)[number];
 
 /** One thing an extension adds to a slot. */
 export interface SlotItem {
-  /** Unique id, must start with the extension id: `pro.stats.history-tab`. */
+  /** Unique id, must start with the extension id: `acme.stats.history-tab`. */
   id: string;
   /** Component rendered in the slot. */
   component: Component;

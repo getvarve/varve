@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use varve_activity::{ActivityEvent, ActivityFilter};
 use varve_app::commands::{CmdError, ExportRecord, SecretInput, Services, TestTarget};
-use varve_core::{Edition, Engine};
+use varve_core::Engine;
 use varve_driver::TlsMode;
 use varve_records::{
     ConnectionInput, ConnectionOptions, Environment, SshAuthMethod, SshSettings, TlsSettings,
@@ -44,13 +44,7 @@ fn fixture(name: &str) -> Res<Fixture> {
     let _ = std::fs::remove_dir_all(&dir);
     let host = varve_app::build_host(&[])?;
     let store = Arc::new(varve_app::open_store(&dir, &host)?);
-    let services = varve_app::build_services(
-        store,
-        &dir,
-        &host,
-        Edition::Community,
-        Arc::new(MemoryStore::default()),
-    )?;
+    let services = varve_app::build_services(store, &dir, &host, Arc::new(MemoryStore::default()))?;
     Ok(Fixture { services, dir })
 }
 

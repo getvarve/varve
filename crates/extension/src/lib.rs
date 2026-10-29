@@ -1,7 +1,7 @@
 //! The Varve extension API.
 //!
-//! This crate is the only way closed or third-party code reaches the app
-//! (design doc section 2.3). An [`Extension`] receives a [`Registry`] scoped to
+//! This crate is the plugin mechanism of the app: the only way code outside
+//! the core reaches it (design doc section 2.3). An [`Extension`] receives a [`Registry`] scoped to
 //! its own id and can **add**:
 //!
 //! - commands, callable from the UI as `<extension id>.<name>`
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use varve_core::{DottedId, Edition, Engine};
+use varve_core::{DottedId, Engine};
 use varve_store::{CORE_NAMESPACE, MigrationSet, SchemaMigration, Store};
 
 /// A boxed, sendable future.
@@ -29,7 +29,7 @@ pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// An extension that plugs into the app.
 pub trait Extension: Send + Sync {
-    /// Unique dotted id, for example `pro.stats`. Must not be `core` and must
+    /// Unique dotted id, for example `acme.stats`. Must not be `core` and must
     /// not start with `core.`.
     fn id(&self) -> &'static str;
 
@@ -120,15 +120,11 @@ pub type CommandResult = Result<Value, CommandError>;
 pub struct AppContext {
     /// The local `app.db`.
     pub store: Arc<Store>,
-    /// The running edition.
-    pub edition: Edition,
 }
 
 impl std::fmt::Debug for AppContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AppContext")
-            .field("edition", &self.edition)
-            .finish_non_exhaustive()
+        f.debug_struct("AppContext").finish_non_exhaustive()
     }
 }
 
@@ -483,7 +479,7 @@ impl std::fmt::Debug for ExtensionHost {
 }
 
 impl ExtensionHost {
-    /// A host with no extensions (Varve Community).
+    /// A host with no extensions.
     #[must_use]
     pub fn empty() -> Self {
         HostBuilder::new().build()
@@ -649,21 +645,20 @@ mod tests {
     fn ctx() -> Result<AppContext, ExtensionError> {
         Ok(AppContext {
             store: Arc::new(Store::open_in_memory()?),
-            edition: Edition::Pro,
         })
     }
 
     #[tokio::test]
     async fn commands_are_namespaced_and_callable() -> Result<(), Box<dyn std::error::Error>> {
         let mut builder = HostBuilder::new();
-        builder.add(&sample("pro.sample"))?;
+        builder.add(&sample("acme.sample"))?;
         let host = builder.build();
-        assert_eq!(host.command_names(), vec!["pro.sample.echo".to_string()]);
+        assert_eq!(host.command_names(), vec!["acme.sample.echo".to_string()]);
         let out = host
-            .invoke(ctx()?, "pro.sample.echo", json!({"a": 1}))
+            .invoke(ctx()?, "acme.sample.echo", json!({"a": 1}))
             .await?;
         assert_eq!(out, json!({"a": 1}));
-        let missing = host.invoke(ctx()?, "pro.sample.nope", Value::Null).await;
+        let missing = host.invoke(ctx()?, "acme.sample.nope", Value::Null).await;
         assert_eq!(
             missing.err().map(|e| e.code),
             Some("unknown_command".to_string())
@@ -674,11 +669,11 @@ mod tests {
     #[test]
     fn registers_capabilities_actions_and_migrations() -> Result<(), Box<dyn std::error::Error>> {
         let mut builder = HostBuilder::new();
-        builder.add(&sample("pro.sample"))?;
+        builder.add(&sample("acme.sample"))?;
         let host = builder.build();
-        assert_eq!(host.capabilities(), vec!["pro.sample.echo".to_string()]);
+        assert_eq!(host.capabilities(), vec!["acme.sample.echo".to_string()]);
         assert_eq!(
-            host.activity_category("pro.sample.echoed"),
+            host.activity_category("acme.sample.echoed"),
             Some(ActivityCategory::Tool)
         );
         let store = Store::open_in_memory()?;
@@ -703,17 +698,17 @@ mod tests {
             builder.add(&sample("Bad")),
             Err(ExtensionError::InvalidId(_))
         ));
-        assert!(builder.add(&sample("pro.sample")).is_ok());
+        assert!(builder.add(&sample("acme.sample")).is_ok());
         assert!(matches!(
-            builder.add(&sample("pro.sample")),
+            builder.add(&sample("acme.sample")),
             Err(ExtensionError::DuplicateExtension(_))
         ));
         assert!(matches!(
-            builder.add(&sample("pro.sample.inner")),
+            builder.add(&sample("acme.sample.inner")),
             Err(ExtensionError::DuplicateExtension(_))
         ));
         assert!(matches!(
-            builder.add(&sample("pro")),
+            builder.add(&sample("acme")),
             Err(ExtensionError::DuplicateExtension(_))
         ));
     }
@@ -723,7 +718,7 @@ mod tests {
         struct Broken;
         impl Extension for Broken {
             fn id(&self) -> &'static str {
-                "pro.broken"
+                "acme.broken"
             }
             fn name(&self) -> &'static str {
                 "Broken"
@@ -746,7 +741,7 @@ mod tests {
 
     #[test]
     fn hooks_fire() -> Result<(), Box<dyn std::error::Error>> {
-        let ext = sample("pro.sample");
+        let ext = sample("acme.sample");
         let counter = Arc::clone(&ext.connects);
         let mut builder = HostBuilder::new();
         builder.add(&ext)?;
@@ -767,7 +762,7 @@ mod tests {
         struct BadTables;
         impl Extension for BadTables {
             fn id(&self) -> &'static str {
-                "pro.bad"
+                "acme.bad"
             }
             fn name(&self) -> &'static str {
                 "Bad tables"

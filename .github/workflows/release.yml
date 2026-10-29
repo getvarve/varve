@@ -78,7 +78,28 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build Varve Community
+      - name: macOS release config
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          # macOS bundles Sparkle (fetched by beforeBuildCommand). It is a separate config: Tauri's
+          # build script checks bundle.macOS.frameworks on every macOS build, so in tauri.conf.json
+          # it would break cargo check in a fresh checkout and in apps that build on varve-app.
+          # CFBundleVersion is the run number, which only grows: Sparkle orders releases by it
+          # (sparkle:version), and any run number is above the "0.1.7" of older builds. The
+          # version people see (CFBundleShortVersionString) stays the semver.
+          node -e '
+            const fs = require("node:fs");
+            const config = JSON.parse(fs.readFileSync("app/src-tauri/tauri.sparkle.conf.json", "utf8"));
+            config.bundle.macOS.bundleVersion = process.env.BUILD_NUMBER;
+            fs.writeFileSync("app/src-tauri/tauri.macos-release.conf.json", JSON.stringify(config, null, 2));
+          '
+          cat app/src-tauri/tauri.macos-release.conf.json
+          echo "EXTRA_CONFIG=app/src-tauri/tauri.macos-release.conf.json" >> "$GITHUB_ENV"
+      - name: Build Varve
         shell: bash
         env:
           # Ad-hoc signature: no Apple certificate yet, but a valid signature
@@ -87,10 +108,7 @@ jobs:
           # With CI set, Tauri skips the Finder script that lays out the installer window
           # (background, window size, icon positions); this keeps it.
           TAURI_BUNDLER_DMG_IGNORE_CI: 'true'
-          # macOS bundles Sparkle (fetched by beforeBuildCommand). It is a separate config: Tauri's
-          # build script checks bundle.macOS.frameworks on every macOS build, so in tauri.conf.json
-          # it would break cargo check in a fresh checkout and in apps that build on varve-app.
-          EXTRA_CONFIG: ${{ runner.os == 'macOS' && 'app/src-tauri/tauri.sparkle.conf.json' || '' }}
+        # EXTRA_CONFIG comes from the macOS release config step; other platforms have none.
         # No signing keys here: every build script and download in this step could read them.
         # The update signatures are made in their own steps below.
         run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" ${EXTRA_CONFIG:+--config "$EXTRA_CONFIG"}
@@ -150,15 +168,28 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Every installer gets its <file>.sig for latest.json: the updater falls back from a
-          # missing installer-specific entry to the plain one, which would hand an MSI or deb
-          # install the wrong installer. The CLI reads the key from the environment.
+          # Every installer gets its <file>.sig for latest.json. The NSIS setup and the AppImage
+          # update in app. The .msi and .deb signatures exist only for installs from 0.1.7 and
+          # older, which still update in app and would otherwise fall back to the wrong installer
+          # (scripts/update-feeds.mjs, TAURI_PLATFORMS); they can go once those installs are gone.
+          # The CLI reads the key from the environment. --app-version binds the signature to this
+          # version: the app sets requireSignedVersion, so an older signed release cannot be served
+          # as a newer one.
+          version="${TAG#v}"
+          tab="$(printf '\t')"
           for file in dist/*.exe dist/*.msi dist/*.AppImage dist/*.deb; do
             [ -e "$file" ] || continue
-            ./node_modules/.bin/tauri signer sign "$file" > /dev/null
+            ./node_modules/.bin/tauri signer sign --app-version "$version" "$file" > /dev/null
             test -s "$file.sig"
+            # The trusted comment must carry the version (scripts/update-feeds.mjs checks it again).
+            trusted="$(base64 -d < "$file.sig" | sed -n 's/^trusted comment: //p')"
+            case "${tab}${trusted}${tab}" in
+              *"${tab}version:${version}${tab}"*) ;;
+              *) echo "the signature of $file does not carry version ${version}: ${trusted}" >&2; exit 1 ;;
+            esac
           done
           ls -la dist
       - uses: actions/upload-artifact@v6
@@ -268,7 +299,8 @@ jobs:
           gh release view "$TAG" --json body --jq .body > body.md
           awk 'BEGIN { skip = 0 } /^## Install/ { skip = 1; next } /^## / { skip = 0 } !skip' body.md > update-notes.md
           gh api markdown -f text="$(cat update-notes.md)" -f mode=gfm -f context="$GITHUB_REPOSITORY" > update-notes.html
-          node scripts/update-feeds.mjs dist "$TAG" update-notes.md update-notes.html
+          # The build number is the run number the macOS bundles carry as CFBundleVersion.
+          node scripts/update-feeds.mjs dist "$TAG" "${{ github.run_number }}" update-notes.md update-notes.html
           gh release upload "$TAG" dist/latest.json dist/appcast-arm64.xml dist/appcast-x64.xml --clobber
           # Now the release and its feeds go live together.
           gh release edit "$TAG" --draft=false --latest

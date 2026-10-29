@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AppInfo } from '../backend';
+import { onBeforeUnmount, onMounted } from 'vue';
 import { RouterLink, RouterView } from 'vue-router';
 import { installQuitGuard } from '../composables/useQuitGuard';
 import { installUpdates, useUpdates } from '../composables/useUpdates';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useWorkspaceActions } from '../composables/useWorkspaceActions';
-import { APP_INFO_KEY } from '../keys';
 import Icon from './common/Icon.vue';
 import ToastHost from './common/ToastHost.vue';
 import DialogHost from './dialogs/DialogHost.vue';
@@ -16,9 +14,6 @@ import WorkspaceTree from './sidebar/WorkspaceTree.vue';
 import StatusBar from './StatusBar.vue';
 import VarveMark from './VarveMark.vue';
 
-const info = inject(APP_INFO_KEY, ref<AppInfo | null>(null));
-const productName = computed(() => info.value?.productName ?? 'Varve');
-const isCommunity = computed(() => info.value?.edition !== 'pro');
 const workspace = useWorkspace();
 const actions = useWorkspaceActions();
 const updates = useUpdates();
@@ -66,7 +61,7 @@ onBeforeUnmount(() => {
         data-tauri-drag-region
       >
         <VarveMark :size="18" />
-        <span class="brand-name">{{ productName }}</span>
+        <span class="brand-name">Varve</span>
       </div>
       <div
         class="titlebar-slot"
@@ -104,13 +99,6 @@ onBeforeUnmount(() => {
             <Icon name="settings" />Settings
           </RouterLink>
           <ExtensionSlot name="main-menu" />
-          <RouterLink
-            v-if="isCommunity"
-            class="menu-item"
-            to="/about-pro"
-          >
-            <Icon name="sparkle" />About Varve Pro
-          </RouterLink>
         </nav>
         <WorkspaceTree class="tree" />
         <ExtensionSlot name="sidebar-sections" />

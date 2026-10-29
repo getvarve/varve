@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Varve Community from GitHub releases: the app on macOS, an AppImage with a
+# Install Varve from GitHub releases: the app on macOS, an AppImage with a
 # desktop entry on Linux. https://github.com/getvarve/varve
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -437,7 +437,11 @@ verify_checksum() {
   fi
 }
 
-app_name="Varve Community"
+app_name="Varve"
+# Up to 0.1.7 the app was called Varve Community. It has the same bundle id, so the installer
+# replaces a copy under the old name instead of installing Varve next to it.
+legacy_name="Varve Community"
+bundle_id="com.getvarve.desktop"
 
 # Sets $platform (macos or linux) and $asset_arch (arm64 or x64).
 detect_platform() {
@@ -490,8 +494,8 @@ absolute_dir() {
   (CDPATH='' cd -P -- "$1" >/dev/null && pwd)
 }
 
-# Fails when a process runs a binary inside the app bundle $1: replacing a running macOS app
-# breaks it. -ww keeps long command lines whole. The quoted case pattern is a fixed string (a
+# Fails when a process runs a binary inside the app bundle $1 (named $2 in the message): replacing
+# or trashing a running macOS app breaks it. -ww keeps long command lines whole. The quoted case pattern is a fixed string (a
 # bracket or plus sign in the path is no pattern) and needs no pipe, which under pipefail would
 # fail through SIGPIPE as soon as a grep -q stopped reading.
 refuse_when_running() {
@@ -502,8 +506,24 @@ refuse_when_running() {
   case "
 $processes" in
     *"
-$1/Contents/MacOS/"* | *" $1/Contents/MacOS/"*) die "${app_name} is running. Quit it and run the installer again." ;;
+$1/Contents/MacOS/"* | *" $1/Contents/MacOS/"*) die "${2} is running. Quit it and run the installer again." ;;
   esac
+}
+
+# Prints the bundle id of the app bundle $1, or nothing.
+bundle_id_of() {
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+# Moves $1 to the Trash with the Finder, so it can be put back. The path goes in as an argument,
+# never as script text.
+move_to_trash() {
+  osascript \
+    -e 'on run argv' \
+    -e 'set doomed to POSIX file (item 1 of argv) as alias' \
+    -e 'tell application "Finder" to delete doomed' \
+    -e 'end run' \
+    "$1" >/dev/null 2>&1 </dev/null
 }
 
 print_logo
@@ -550,21 +570,32 @@ notes_plain=()
 notes_painted=()
 
 install_macos() {
-  local apps_dir
+  local apps_dir found="" name
   if [ -n "${VARVE_INSTALL:-}" ]; then
     apps_dir="${VARVE_INSTALL%/}"
-  elif [ -d "/Applications/${app_name}.app" ]; then
-    # Upgrade an existing copy where it is, so a rerun never leaves a second one behind.
-    if [ ! -w /Applications ]; then
-      die "${app_name} is installed in /Applications by another account. Run this as an admin, or set VARVE_INSTALL=~/Applications."
-    fi
-    apps_dir="/Applications"
-  elif [ -d "${HOME}/Applications/${app_name}.app" ]; then
-    apps_dir="${HOME}/Applications"
-  elif [ -w /Applications ]; then
-    apps_dir="/Applications"
   else
-    apps_dir="${HOME}/Applications"
+    # Upgrade an existing copy where it is, so a rerun never leaves a second one behind. A copy
+    # under the old name counts as well.
+    for name in "$app_name" "$legacy_name"; do
+      if [ -d "/Applications/${name}.app" ]; then
+        found="/Applications"
+      elif [ -d "${HOME}/Applications/${name}.app" ]; then
+        found="${HOME}/Applications"
+      fi
+      if [ -n "$found" ]; then
+        break
+      fi
+    done
+    if [ "$found" = "/Applications" ] && [ ! -w /Applications ]; then
+      die "${name} is installed in /Applications by another account. Run this as an admin, or set VARVE_INSTALL=~/Applications."
+    fi
+    if [ -n "$found" ]; then
+      apps_dir="$found"
+    elif [ -w /Applications ]; then
+      apps_dir="/Applications"
+    else
+      apps_dir="${HOME}/Applications"
+    fi
   fi
   if ! mkdir -p "$apps_dir"; then
     die "could not create ${apps_dir}"
@@ -576,11 +607,23 @@ install_macos() {
   tar -xzf "$download_path" -C "$extract"
   local src="${extract}/${app_name}.app"
   if [ ! -d "$src" ]; then
+    # Releases up to 0.1.7 hold the app under its old name. It is installed as Varve.app all the
+    # same: macOS does not go by the bundle's file name.
+    src="${extract}/${legacy_name}.app"
+  fi
+  if [ ! -d "$src" ]; then
     die "archive does not contain ${app_name}.app"
   fi
 
   dest="${apps_dir}/${app_name}.app"
-  refuse_when_running "$dest"
+  refuse_when_running "$dest" "$app_name"
+  # The old app in the same folder is replaced, but only when it really is Varve.
+  local legacy="${apps_dir}/${legacy_name}.app"
+  if [ -d "$legacy" ] && [ "$(bundle_id_of "$legacy")" = "$bundle_id" ]; then
+    refuse_when_running "$legacy" "$legacy_name"
+  else
+    legacy=""
+  fi
 
   # Stage next to the destination so the final step is a rename on one volume.
   local stage="${apps_dir}/.${app_name}.app.new"
@@ -600,6 +643,16 @@ install_macos() {
   fi
   rm -rf "$old"
   step "Installed" "$(display_path "$dest")"
+
+  if [ -n "$legacy" ]; then
+    if move_to_trash "$legacy"; then
+      step "Replaced" "$(display_path "$legacy"), now in the Trash"
+    else
+      note "Replaced" "could not move $(display_path "$legacy") to the Trash"
+      notes_plain+=("Note      ${legacy_name}.app is still there; move it to the Trash")
+      notes_painted+=("${c_dim}Note${c_reset}      ${legacy_name}.app is still there; move it to the Trash")
+    fi
+  fi
 
   installed="${version#v}"
   local plist_version
