@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue';
 import { RouterLink, RouterView } from 'vue-router';
+import { installExternalChanges } from '../composables/useExternalChanges';
 import { installQuitGuard } from '../composables/useQuitGuard';
 import { installUpdates, useUpdates } from '../composables/useUpdates';
 import { useWorkspace } from '../composables/useWorkspace';
@@ -20,6 +21,7 @@ const updates = useUpdates();
 
 let removeQuitGuard: (() => void) | null = null;
 let removeUpdates: (() => void) | null = null;
+let removeExternalChanges: (() => void) | null = null;
 let unmounted = false;
 
 onMounted(() => {
@@ -41,12 +43,21 @@ onMounted(() => {
     .catch((error: unknown) => {
       console.error('Could not set up the update checks', error);
     });
+  installExternalChanges()
+    .then((remove) => {
+      if (unmounted) remove();
+      else removeExternalChanges = remove;
+    })
+    .catch((error: unknown) => {
+      console.error('Could not follow changes from MCP clients', error);
+    });
 });
 
 onBeforeUnmount(() => {
   unmounted = true;
   removeQuitGuard?.();
   removeUpdates?.();
+  removeExternalChanges?.();
 });
 </script>
 

@@ -159,6 +159,80 @@ pub fn save_secrets(store: &Store, settings: &SecretSettings) -> Result<(), Stor
     })
 }
 
+/// `core_meta` key of [`McpSettings::enabled`].
+const MCP_ENABLED_KEY: &str = "mcp.enabled";
+/// `core_meta` key of [`McpSettings::port`].
+const MCP_PORT_KEY: &str = "mcp.port";
+
+/// Port of the local MCP server unless the user picks another.
+pub const DEFAULT_MCP_PORT: u16 = 7465;
+
+/// Settings of the local MCP server (`crate::mcp`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSettings {
+    /// Serve MCP on the loopback address while the app runs. Off by default:
+    /// an MCP client can change every record and setting.
+    pub enabled: bool,
+    /// TCP port on `127.0.0.1`.
+    pub port: u16,
+}
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: DEFAULT_MCP_PORT,
+        }
+    }
+}
+
+/// Reads the stored MCP settings. Anything but `true` reads as off, and a
+/// port that is missing, unparsable or below 1024 reads as the default.
+///
+/// # Errors
+/// Storage errors.
+pub fn load_mcp(store: &Store) -> Result<McpSettings, StoreError> {
+    let enabled = meta_get(store, MCP_ENABLED_KEY)?.as_deref() == Some("true");
+    let port = meta_get(store, MCP_PORT_KEY)?
+        .and_then(|v| v.parse::<u16>().ok())
+        .filter(|p| *p >= 1024)
+        .unwrap_or(DEFAULT_MCP_PORT);
+    Ok(McpSettings { enabled, port })
+}
+
+/// Checks an MCP settings change from the UI.
+///
+/// # Errors
+/// A message for a port below 1024.
+pub fn validate_mcp(settings: &McpSettings) -> Result<(), String> {
+    if settings.port < 1024 {
+        return Err("Pick a port from 1024 to 65535.".into());
+    }
+    Ok(())
+}
+
+/// Stores the MCP settings.
+///
+/// # Errors
+/// Storage errors.
+pub fn save_mcp(store: &Store, settings: &McpSettings) -> Result<(), StoreError> {
+    let enabled = if settings.enabled { "true" } else { "false" };
+    let port = settings.port.to_string();
+    store.with_conn(|c| {
+        let tx = c.unchecked_transaction()?;
+        for (key, value) in [(MCP_ENABLED_KEY, enabled), (MCP_PORT_KEY, port.as_str())] {
+            tx.execute(
+                "INSERT INTO core_meta (key, value) VALUES (?1, ?2)
+                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                [key, value],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+}
+
 fn meta_get(store: &Store, key: &str) -> Result<Option<String>, StoreError> {
     store.with_conn(|c| {
         let mut stmt = c.prepare("SELECT value FROM core_meta WHERE key = ?1")?;
@@ -266,5 +340,50 @@ mod tests {
         })?;
         assert!(!load_secrets(&store)?.remember_for_session);
         Ok(())
+    }
+
+    #[test]
+    fn mcp_is_off_by_default_and_round_trips() -> Result<(), StoreError> {
+        let store = store()?;
+        assert_eq!(load_mcp(&store)?, McpSettings::default());
+        let on = McpSettings {
+            enabled: true,
+            port: 9000,
+        };
+        save_mcp(&store, &on)?;
+        assert_eq!(load_mcp(&store)?, on);
+        Ok(())
+    }
+
+    #[test]
+    fn a_damaged_mcp_row_reads_as_off_on_the_default_port() -> Result<(), StoreError> {
+        let store = store()?;
+        store.with_conn(|c| {
+            c.execute(
+                "INSERT INTO core_meta (key, value) VALUES ('mcp.enabled', 'yes'), ('mcp.port', '80')",
+                [],
+            )?;
+            Ok(())
+        })?;
+        assert_eq!(load_mcp(&store)?, McpSettings::default());
+        Ok(())
+    }
+
+    #[test]
+    fn privileged_mcp_ports_are_refused() {
+        assert!(
+            validate_mcp(&McpSettings {
+                enabled: true,
+                port: 443
+            })
+            .is_err()
+        );
+        assert!(
+            validate_mcp(&McpSettings {
+                enabled: true,
+                port: 1024
+            })
+            .is_ok()
+        );
     }
 }

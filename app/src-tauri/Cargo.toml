@@ -36,7 +36,24 @@ varve-live-stats = { path = "../../crates/live-stats" }
 varve-redis-syntax.workspace = true
 varve-tunnel = { path = "../../crates/tunnel" }
 async-trait.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "net", "io-std"] }
+# The local MCP server (src/mcp): Streamable HTTP on the loopback address,
+# and the client side of the `varve mcp` stdio bridge (plain HTTP to
+# 127.0.0.1, so reqwest needs no TLS).
+rmcp = { version = "3.8.0", default-features = false, features = ["server", "macros", "transport-streamable-http-server", "transport-io", "client", "transport-streamable-http-client-reqwest"] }
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+tokio-util = "0.7.20"
+getrandom = "0.3.4"
+subtle = "2.6.1"
+dirs = "7.0.0"
+# The bridge asks the server to prove it holds the token before sending it
+# (src/mcp/bridge.rs).
+hmac = "0.13.0"
+sha2 = "0.11.1"
+reqwest = { version = "0.13.5", default-features = false }
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

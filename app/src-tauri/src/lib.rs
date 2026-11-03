@@ -10,6 +10,7 @@ pub mod glass;
 mod ipc;
 pub mod keychain_cleanup;
 pub mod m2;
+pub mod mcp;
 pub mod permissions;
 pub mod quit;
 pub mod secret_versions;
@@ -375,6 +376,18 @@ pub fn run(
                 ctx: AppContext { store },
                 host: host.clone(),
             });
+            let mcp = Arc::new(mcp::McpController::new(
+                Arc::clone(&services),
+                Arc::new(mcp::TauriHost(app.handle().clone())),
+                dir.clone(),
+            ));
+            {
+                let mcp = Arc::clone(&mcp);
+                tauri::async_runtime::spawn(async move {
+                    mcp.start_from_settings().await;
+                });
+            }
+            app.manage(mcp);
             app.manage(services);
             app.manage(DataDir(dir));
             let transparent = app
@@ -421,7 +434,14 @@ pub fn run(
         })
         .invoke_handler(ipc::handler())
         .build(context)?
-        .run(|app, event| quit::on_run_event(app, &event));
+        .run(|app, event| {
+            quit::on_run_event(app, &event);
+            if matches!(event, tauri::RunEvent::Exit)
+                && let Some(mcp) = app.try_state::<Arc<mcp::McpController>>()
+            {
+                mcp.forget_endpoint();
+            }
+        });
     Ok(())
 }
 
