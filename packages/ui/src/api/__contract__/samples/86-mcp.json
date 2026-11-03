@@ -1,0 +1,6 @@
+[
+ {"id": "set_mcp_settings(settings)", "rust": "McpSettings", "ts": "mcp.McpSettings", "dir": "arg", "value": {"enabled": true, "port": 7465}},
+ {"id": "mcp_status() running", "rust": "McpStatus", "ts": "mcp.McpStatus", "dir": "result", "value": {"settings": {"enabled": true, "port": 7465}, "url": "http://127.0.0.1:7465/mcp", "error": null, "tokenFile": "/Users/me/Library/Application Support/Varve/mcp-token", "bridgeCommand": ["/Applications/Varve.app/Contents/MacOS/varve", "mcp"]}},
+ {"id": "mcp_status() port taken", "rust": "McpStatus", "ts": "mcp.McpStatus", "dir": "result", "value": {"settings": {"enabled": true, "port": 7465}, "url": null, "error": "Port 7465 is in use by another program. Pick another port.", "tokenFile": "/home/me/.local/share/Varve/mcp-token", "bridgeCommand": []}},
+ {"id": "mcp_status() off", "rust": "McpStatus", "ts": "mcp.McpStatus", "dir": "result", "value": {"settings": {"enabled": false, "port": 7465}, "url": null, "error": null, "tokenFile": "C:\\Users\\me\\AppData\\Roaming\\Varve\\mcp-token", "bridgeCommand": ["C:\\Users\\me\\AppData\\Local\\Varve\\varve.exe", "mcp"]}}
+]

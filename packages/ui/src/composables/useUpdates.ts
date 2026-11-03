@@ -269,6 +269,17 @@ async function setAutoCheck(autoCheck: boolean): Promise<void> {
   reschedule();
 }
 
+/** Reads the update settings again, after something outside this page changed them (an MCP tool). */
+async function refreshInfo(): Promise<void> {
+  if (!state.info) return;
+  try {
+    state.info = await fetchUpdateInfo();
+  } catch (error: unknown) {
+    useToasts().pushError(error, 'Could not read the update settings');
+  }
+  reschedule();
+}
+
 /**
  * Sparkle's "Install and Relaunch", and the status bar's "Restart to update":
  * answers `update_relaunch(true)` only when the unsaved check resolved
@@ -367,5 +378,6 @@ export function useUpdates() {
     download,
     installAndRelaunch,
     setAutoCheck,
+    refreshInfo,
   };
 }

@@ -304,6 +304,26 @@ fn set_activity_settings(svc: Svc<'_>, settings: ActivitySettings) -> R<u64> {
 }
 
 #[tauri::command]
+async fn mcp_status(mcp: State<'_, Arc<crate::mcp::McpController>>) -> R<crate::mcp::McpStatus> {
+    mcp.status().await
+}
+
+#[tauri::command]
+async fn set_mcp_settings(
+    mcp: State<'_, Arc<crate::mcp::McpController>>,
+    settings: crate::settings::McpSettings,
+) -> R<crate::mcp::McpStatus> {
+    mcp.set_settings(settings).await
+}
+
+#[tauri::command]
+async fn rotate_mcp_token(
+    mcp: State<'_, Arc<crate::mcp::McpController>>,
+) -> R<crate::mcp::McpStatus> {
+    mcp.rotate_token().await
+}
+
+#[tauri::command]
 fn secret_settings(svc: Svc<'_>) -> R<SecretSettings> {
     svc.secret_settings()
 }
@@ -1208,6 +1228,9 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         set_activity_settings,
         secret_settings,
         set_secret_settings,
+        mcp_status,
+        set_mcp_settings,
+        rotate_mcp_token,
         forget_cached_secrets,
         export_activity,
         redis_scan,

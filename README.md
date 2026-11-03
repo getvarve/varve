@@ -116,6 +116,16 @@ The interface never talks to a database itself. It sends typed commands to the R
 
 Tested against PostgreSQL 13 and 15 to 18, MySQL 8.0, 8.4 and 9.x, MariaDB 10.6 to 12, Redis 6.2 and newer, and Valkey.
 
+### 🤖 Local MCP server
+
+AI tools such as Claude Code can read and change your folders, connections, saved queries and settings through Varve's local [MCP](https://modelcontextprotocol.io) server. Turn it on in **Settings > Local MCP server**, then add it to Claude Code:
+
+```bash
+claude mcp add --scope user varve -- /Applications/Varve.app/Contents/MacOS/varve mcp
+```
+
+The server runs inside the app on `127.0.0.1`, needs a token only you can read, refuses web pages, and never hands out passwords. Streamable HTTP, Linux and Windows commands, and the tool list are in [docs/mcp.md](docs/mcp.md).
+
 ## 💎 Free and open
 
 Varve is one app, and all of it is free: every feature lives in this repository under AGPL-3.0. There is no paid edition and no license key.
