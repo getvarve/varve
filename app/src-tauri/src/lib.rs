@@ -331,6 +331,7 @@ pub fn run(
     extensions: Vec<Box<dyn Extension>>,
 ) -> Result<(), AppError> {
     init_tracing();
+    ensure_crypto_provider();
     let host = build_host(&extensions)?;
     tracing::info!(extensions = host.extensions().len(), "starting Varve");
 
@@ -443,6 +444,20 @@ pub fn run(
             }
         });
     Ok(())
+}
+
+/// Installs the rustls `ring` provider unless the process already chose one.
+///
+/// On Windows and Linux tauri-plugin-updater builds reqwest with rustls but
+/// without a provider, and building a `reqwest::Client` then panics. Call
+/// this before building one: the app does at start (for the updater), and
+/// [`mcp::http_client`] does for the `varve mcp` bridge.
+pub fn ensure_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        // Fails only when another thread installed a provider first, which
+        // is just as good.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
 }
 
 fn init_tracing() {

@@ -100,6 +100,7 @@ pub enum Identity {
 /// # Errors
 /// reqwest cannot set up its client.
 pub fn http_client() -> reqwest::Result<reqwest::Client> {
+    crate::ensure_crypto_provider();
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
