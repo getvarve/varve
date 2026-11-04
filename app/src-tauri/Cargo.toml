@@ -54,6 +54,10 @@ dirs = "7.0.0"
 hmac = "0.13.0"
 sha2 = "0.11.1"
 reqwest = { version = "0.13.5", default-features = false }
+# On Windows and Linux tauri-plugin-updater turns on reqwest's rustls without
+# a crypto provider, so every reqwest client needs one installed first
+# (ensure_crypto_provider in src/lib.rs): ring, as the drivers use.
+rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

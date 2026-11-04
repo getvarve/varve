@@ -110,7 +110,8 @@ impl Fixture {
 }
 
 async fn client(url: &str, token: &str) -> Result<Client, Box<dyn std::error::Error>> {
-    let transport = StreamableHttpClientTransport::from_config(
+    let transport = StreamableHttpClientTransport::with_client(
+        mcp::http_client()?,
         StreamableHttpClientTransportConfig::with_uri(url.to_string())
             .auth_header(token.to_string()),
     );
