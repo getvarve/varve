@@ -12,7 +12,7 @@ use rustls::pki_types::{
 };
 use rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use varve_driver::tls_key;
-use varve_driver::{DriverError, TlsMode, TlsParams};
+use varve_driver::{DriverError, TlsMode, TlsParams, native_roots};
 
 use crate::error;
 
@@ -65,7 +65,7 @@ pub async fn plan(
             algorithms: provider.signature_verification_algorithms,
         }),
         TlsMode::VerifyCa | TlsMode::VerifyFull => {
-            let roots = Arc::new(root_store(params.ca_path.as_deref())?);
+            let roots = Arc::new(root_store(params.ca_path.as_deref()).await?);
             let webpki = WebPkiServerVerifier::builder_with_provider(roots, provider.clone())
                 .build()
                 .map_err(error::tls)?;
@@ -126,7 +126,9 @@ fn read_certs(path: &str) -> Result<Vec<CertificateDer<'static>>, DriverError> {
     Ok(certs)
 }
 
-fn root_store(ca_path: Option<&str>) -> Result<RootCertStore, DriverError> {
+/// Trust anchors: the PEM file at `ca_path`, or the OS trust store (loaded
+/// once and shared, off the async worker threads: [`native_roots`]).
+async fn root_store(ca_path: Option<&str>) -> Result<RootCertStore, DriverError> {
     let mut roots = RootCertStore::empty();
     match ca_path {
         Some(path) => {
@@ -137,11 +139,17 @@ fn root_store(ca_path: Option<&str>) -> Result<RootCertStore, DriverError> {
             }
         }
         None => {
-            let native = rustls_native_certs::load_native_certs();
-            for problem in &native.errors {
+            let native = native_roots().await;
+            // Once per load of the store, not for every connection.
+            for problem in native.unreported_errors() {
                 tracing::warn!(%problem, "could not load an OS trust store certificate");
             }
-            let (added, _ignored) = roots.add_parsable_certificates(native.certs);
+            let (added, _ignored) = roots.add_parsable_certificates(
+                native
+                    .certs
+                    .iter()
+                    .map(|der| CertificateDer::from(der.clone())),
+            );
             if added == 0 {
                 return Err(error::tls("the OS trust store holds no usable certificate"));
             }

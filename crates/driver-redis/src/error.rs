@@ -77,6 +77,29 @@ pub fn tls(message: impl std::fmt::Display) -> DriverError {
     DriverError::new(ErrorKind::Tls, format!("TLS: {message}"))
 }
 
+/// True when the server refused a connection housekeeping command
+/// (`CLIENT SETNAME`, `CLIENT ID`, `INFO`, `HELLO`) rather than failing:
+/// an ACL that does not permit it (`NOPERM`, for example `-@dangerous`
+/// takes `INFO`), a command renamed away (`rename-command INFO ""`), a
+/// server too old for it (Redis 4 has no `CLIENT ID`), or a proxy that does
+/// not implement it. The session then works without what it would have
+/// told.
+pub fn refused(error: &DriverError) -> bool {
+    if error.code.as_deref() == Some("NOPERM") {
+        return true;
+    }
+    let message = error.message.to_ascii_lowercase();
+    [
+        "unknown command",
+        "unknown subcommand",
+        "unsupported command",
+        // Redis before 5 answers an unknown CLIENT subcommand this way.
+        "syntax error",
+    ]
+    .iter()
+    .any(|text| message.contains(text))
+}
+
 /// Error returned by a cancelled call.
 pub fn cancelled() -> DriverError {
     DriverError::new(ErrorKind::Cancelled, "The command was cancelled")
@@ -137,6 +160,26 @@ mod tests {
         match redis::parse_redis_value(format!("-{line}\r\n").as_bytes()) {
             Ok(redis::Value::ServerError(error)) => error,
             other => panic!("not an error reply: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn refusals_of_housekeeping_commands_are_told_apart() {
+        for line in [
+            "NOPERM User app has no permissions to run the 'info' command",
+            "ERR unknown command 'INFO', with args beginning with: 'server' ",
+            "ERR unknown subcommand 'ID'. Try CLIENT HELP.",
+            "ERR Syntax error, try CLIENT (LIST | KILL | GETNAME | SETNAME | PAUSE | REPLY)",
+            "ERR unsupported command 'client'",
+        ] {
+            assert!(refused(&from_server_error(&server_error(line))), "{line}");
+        }
+        for line in [
+            "WRONGPASS invalid username-password pair or user is disabled.",
+            "LOADING Redis is loading the dataset in memory",
+            "ERR max number of clients reached",
+        ] {
+            assert!(!refused(&from_server_error(&server_error(line))), "{line}");
         }
     }
 

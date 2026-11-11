@@ -1189,6 +1189,94 @@ async fn cancel_without_client_kill_permission() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+#[ignore = "needs the dev database matrix"]
+async fn connects_without_info_or_client_commands() -> TestResult {
+    let _guard = DB_LOCK.lock().await;
+    for server in servers() {
+        let label = server.label.clone();
+        let admin = connect(&params(&server)).await?;
+        let a = admin.as_ref();
+        flush_test_db(a).await?;
+        // A common ACL shape: no @dangerous (which takes INFO) and no CLIENT
+        // at all (CLIENT ID, CLIENT SETNAME, CLIENT KILL).
+        run(
+            a,
+            "ACL SETUSER varve_noinfo reset on >noinfo_secret ~* &* +@all -@dangerous -client",
+        )
+        .await?;
+        let mut p = params(&server);
+        p.username = Some("varve_noinfo".into());
+        p.password = Some(Secret::new("noinfo_secret".into()));
+        let session: std::sync::Arc<dyn Session> = connect(&p).await?.into();
+        // The version comes from HELLO, and the session says why.
+        assert_eq!(session.server_info().major, server.major, "{label}");
+        assert!(
+            session
+                .connect_notices()
+                .iter()
+                .any(|n| n.message.contains("refused INFO")),
+            "{label}"
+        );
+        run(session.as_ref(), "SET noinfo_key 1").await?;
+        assert_eq!(
+            cell(&one(session.as_ref(), "GET noinfo_key").await?),
+            Value::Text("1".into()),
+            "{label}"
+        );
+
+        // The key browser's root and the database selector load without
+        // INFO: the open database, counted with DBSIZE.
+        let keyspace = redis(session.as_ref()).keyspace().await?;
+        assert_eq!(keyspace.len(), 1, "{label}");
+        assert_eq!(
+            (keyspace[0].db, keyspace[0].keys, keyspace[0].expires),
+            (TEST_DB, 1, 0),
+            "{label}"
+        );
+        assert!(
+            session
+                .connect_notices()
+                .iter()
+                .any(|n| n.message.contains("shows only the open database")),
+            "{label}"
+        );
+
+        // Without a client id a cancel closes the connection and says the
+        // server may keep running the command.
+        let handle = session.cancel_handle();
+        let running = {
+            let session = std::sync::Arc::clone(&session);
+            tokio::spawn(async move {
+                session
+                    .execute("BLPOP noinfo_queue 30", &ExecOptions::default())
+                    .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        handle.cancel().await?;
+        let error = tokio::time::timeout(Duration::from_secs(5), running)
+            .await??
+            .err()
+            .unwrap_or_else(|| panic!("{label}: BLPOP was not cancelled"));
+        assert_eq!(error.kind, ErrorKind::Cancelled, "{label}");
+        assert!(
+            error
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.contains("CLIENT ID")),
+            "{label}: {:?}",
+            error.detail
+        );
+        // The session reconnects without the refused commands.
+        session.ping().await?;
+
+        run(a, "ACL DELUSER varve_noinfo").await?;
+        flush_test_db(a).await?;
+    }
+    Ok(())
+}
+
 /// A value of `len` bytes for console scripts.
 fn blob(tag: char, len: usize) -> String {
     tag.to_string().repeat(len)
