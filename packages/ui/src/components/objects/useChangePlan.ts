@@ -13,6 +13,8 @@ export interface ChangePlanState {
   /** The specs the steps were planned from, to plan again after a spent plan. */
   specs: StepSpec[];
   planning: boolean;
+  /** An input changed and a new plan is on its way: the steps shown are not what the form says any more. */
+  stale: boolean;
   /** Planning failed (for example `catalog` / `invalid` from the generator). */
   planProblem: ApplyProblem | null;
   applying: boolean;
@@ -29,8 +31,8 @@ export interface ChangePlanState {
 export interface ChangePlanContext {
   session: () => SessionInfo;
   connectionName: () => string;
-  /** Called with every failed call (tab error reporting). */
-  reportError?: (error: unknown) => void;
+  /** Called with every failed call (tab error reporting) and the id of the session the call was sent on. */
+  reportError?: (error: unknown, sessionId: string) => void;
   /** Called after any step ran (success or failure): refresh the tree and the editor. */
   onChanged: () => void;
   /**
@@ -46,6 +48,11 @@ export interface ChangePlanContext {
    * refresh opens the database by its new name).
    */
   afterRun?: (() => Promise<void>) | undefined;
+  /**
+   * Called when some steps ran and a later one failed: the object is no
+   * longer what the editor described (re-read it, keeping the form).
+   */
+  onPartial?: (() => void) | undefined;
 }
 
 /**
@@ -59,6 +66,7 @@ export function useChangePlan(context: ChangePlanContext) {
     steps: [],
     specs: [],
     planning: false,
+    stale: false,
     planProblem: null,
     applying: false,
     problem: null,
@@ -68,9 +76,15 @@ export function useChangePlan(context: ChangePlanContext) {
   });
   const latest = latestOnly();
 
-  /** Plans the specs; an empty list clears the preview. Only the latest call writes the state. */
+  /**
+   * Plans the specs; an empty list clears the preview. Only the latest call
+   * writes the state. Refused (false) while a plan is applying: the steps
+   * being run stay what the preview shows.
+   */
   async function plan(specs: StepSpec[]): Promise<boolean> {
+    if (state.applying) return false;
     const token = latest.next();
+    state.stale = false;
     state.specs = specs;
     state.problem = null;
     state.applied = false;
@@ -99,7 +113,7 @@ export function useChangePlan(context: ChangePlanContext) {
       state.planProblem = null;
       return true;
     } catch (error: unknown) {
-      context.reportError?.(error);
+      context.reportError?.(error, sessionId);
       if (!latest.isCurrent(token)) return false;
       state.steps = [];
       state.planProblem = applyProblem(error);
@@ -111,8 +125,10 @@ export function useChangePlan(context: ChangePlanContext) {
 
   /** Runs the pending steps. Resolves true when all of them ran. */
   async function apply(): Promise<boolean> {
-    if (state.applying || state.steps.length === 0) return false;
+    if (state.applying || state.stale || state.planning || state.steps.length === 0) return false;
     const session = context.session();
+    // The steps of this run; everything below judges these, whatever the preview holds by then.
+    const running = state.steps;
     state.applying = true;
     state.problem = null;
     state.declined = false;
@@ -125,8 +141,10 @@ export function useChangePlan(context: ChangePlanContext) {
     };
     try {
       // A destructive step always asks first (the backend refuses it unconfirmed): prepare after the yes.
-      if (!state.steps.some((s) => s.status !== 'done' && s.plan.destructive)) await prepare();
-      const run = await applySteps(state.steps, {
+      if (!running.some((s) => s.status !== 'done' && s.plan.destructive)) await prepare();
+      const run = await applySteps(running, {
+        environment: session.environment,
+        onConfirmedUpFront: prepare,
         editApply: async (planId, confirmed) => {
           if (confirmed) await prepare();
           return editApply(session.id, planId, confirmed);
@@ -147,17 +165,19 @@ export function useChangePlan(context: ChangePlanContext) {
       });
       state.runWarnings = run.warnings;
       state.declined = run.declined;
-      const ranDdl = state.steps.some((s) => s.spec.kind === 'ddl' && s.status !== 'pending');
-      if (run.error === null && !run.declined && state.steps.every((s) => s.status === 'done')) await context.afterRun?.();
+      const ranDdl = running.some((s) => s.spec.kind === 'ddl' && s.status !== 'pending');
+      const complete = run.error === null && !run.declined && running.every((s) => s.status === 'done');
+      if (complete) await context.afterRun?.();
       if (run.ran > 0 || (run.error !== null && !planKept(run.error))) context.onChanged();
+      if (run.ran > 0 && (run.error !== null || run.declined)) context.onPartial?.();
       if (ranDdl && (run.warnings.length > 0 || run.error !== null)) void useNotices().refreshRestores();
       if (run.error !== null) {
-        context.reportError?.(run.error);
+        context.reportError?.(run.error, session.id);
         state.problem = applyProblem(run.error);
         return false;
       }
-      state.applied = !run.declined && state.steps.every((s) => s.status === 'done');
-      return state.applied;
+      state.applied = complete;
+      return complete;
     } finally {
       state.applying = false;
     }
@@ -172,16 +192,32 @@ export function useChangePlan(context: ChangePlanContext) {
       await apply();
       return;
     }
-    const remaining = state.steps.length > 0 ? state.steps.filter((s) => s.status !== 'done').map((s) => s.spec) : state.specs;
     // "Retry" for a database in use runs the change again, not only its plan.
-    if ((await plan(remaining)) && problem.action === 'rerun') await apply();
+    if ((await planRemaining()) && problem.action === 'rerun') await apply();
   }
 
+  /**
+   * Plans the steps that did not run yet again (the steps that ran are not
+   * repeated): after a failure, or on a new session, whose plans the old
+   * plan ids do not name.
+   */
+  function planRemaining(): Promise<boolean> {
+    return plan(state.steps.length > 0 ? state.steps.filter((s) => s.status !== 'done').map((s) => s.spec) : state.specs);
+  }
+
+  /** An input of the plan changed; Apply waits for the next `plan()`. */
+  function markStale(): void {
+    if (!state.applying) state.stale = true;
+  }
+
+  /** Empties the preview; refused while a plan is applying. */
   function clear(): void {
+    if (state.applying) return;
     latest.next();
     state.steps = [];
     state.specs = [];
     state.planning = false;
+    state.stale = false;
     state.planProblem = null;
     state.problem = null;
     state.runWarnings = [];
@@ -189,7 +225,7 @@ export function useChangePlan(context: ChangePlanContext) {
     state.declined = false;
   }
 
-  return { state, plan, apply, retry, clear };
+  return { state, plan, apply, retry, planRemaining, clear, markStale };
 }
 
 export type ChangePlan = ReturnType<typeof useChangePlan>;

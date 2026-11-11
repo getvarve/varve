@@ -64,7 +64,7 @@ const overload = computed(() => (details.value ? createsOverload(form, details.v
 const tab = ref('definition');
 const tabs = computed(() => [{ id: 'definition', label: 'Definition' }, ...(editor.current.value ? [{ id: 'ddl', label: 'DDL' }] : [])]);
 const title = computed(() => (editor.current.value ? displayName(editor.current.value, 'postgres') : `New ${kind.value}`));
-const blocked = computed(() => Object.values(errors.value)[0] ?? null);
+const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
 const ids = {
   returns: useId(),
   language: useId(),
@@ -74,6 +74,7 @@ const ids = {
   bodyKind: useId(),
   file: useId(),
   settings: useId(),
+  languages: useId(),
 };
 const bodyHeader = computed(() => {
   switch (form.bodyKind) {
@@ -373,10 +374,10 @@ onMounted(() => void editor.load());
                   :id="ids.language"
                   v-model="form.language"
                   class="input mono"
-                  list="pg-routine-languages"
+                  :list="ids.languages"
                   spellcheck="false"
                 >
-                <datalist id="pg-routine-languages">
+                <datalist :id="ids.languages">
                   <option value="plpgsql" />
                   <option value="sql" />
                   <option value="c" />

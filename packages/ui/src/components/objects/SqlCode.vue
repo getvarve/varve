@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { MariaSQL, MySQL, PostgreSQL, sql } from '@codemirror/lang-sql';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Engine } from '../../api/records';
+import { OBJECT_EDITOR_CONTEXT } from './types';
 
 /**
  * SQL text with the engine's dialect highlighting: read only for DDL and
- * plan previews, editable for definitions and bodies (`v-model`).
+ * plan previews, editable for definitions and bodies (`v-model`). Inside
+ * an object editor it is read only while the editor applies a plan.
  */
 const props = withDefaults(
   defineProps<{
@@ -33,6 +35,15 @@ const host = ref<HTMLElement | null>(null);
 let view: EditorView | null = null;
 const readOnly = new Compartment();
 const attributes = new Compartment();
+/** Marks the transactions that copy `modelValue` in, so they are not emitted back. */
+const fromModel = Annotation.define<boolean>();
+const editor = inject(OBJECT_EDITOR_CONTEXT, null);
+const locked = computed(() => props.readonly || (editor?.busy.value ?? false));
+
+/** CodeMirror keeps `\n` line breaks only; text with `\r\n` is the same text. */
+function lineFeeds(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
+}
 
 const highlight = HighlightStyle.define([
   { tag: [tags.keyword, tags.operatorKeyword, tags.modifier], color: 'var(--code-keyword)' },
@@ -84,7 +95,7 @@ function language(engine: Engine): Extension {
 
 function contentAttributes(): Extension {
   const attrs: Record<string, string> = { 'aria-label': props.label, 'aria-multiline': 'true' };
-  if (props.readonly) attrs['aria-readonly'] = 'true';
+  if (locked.value) attrs['aria-readonly'] = 'true';
   if (props.describedBy) attrs['aria-describedby'] = props.describedBy;
   return EditorView.contentAttributes.of(attrs);
 }
@@ -100,10 +111,10 @@ onMounted(() => {
         language(props.engine),
         syntaxHighlighting(highlight),
         theme,
-        readOnly.of(EditorState.readOnly.of(props.readonly)),
+        readOnly.of(EditorState.readOnly.of(locked.value)),
         attributes.of(contentAttributes()),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) emit('update:modelValue', update.state.doc.toString());
+          if (update.docChanged && !update.transactions.some((t) => t.annotation(fromModel))) emit('update:modelValue', update.state.doc.toString());
           if (update.selectionSet || update.docChanged) {
             const head = update.state.selection.main.head;
             const line = update.state.doc.lineAt(head);
@@ -125,15 +136,15 @@ watch(
   (value) => {
     if (!view) return;
     const current = view.state.doc.toString();
-    if (current !== value) view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+    if (current !== lineFeeds(value)) view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: fromModel.of(true) });
   },
 );
 
 watch(
-  () => [props.readonly, props.label, props.describedBy] as const,
+  () => [locked.value, props.label, props.describedBy] as const,
   () => {
     view?.dispatch({
-      effects: [readOnly.reconfigure(EditorState.readOnly.of(props.readonly)), attributes.reconfigure(contentAttributes())],
+      effects: [readOnly.reconfigure(EditorState.readOnly.of(locked.value)), attributes.reconfigure(contentAttributes())],
     });
   },
 );
@@ -168,5 +179,11 @@ defineExpose({ goToLine, focus });
   overflow: hidden;
   border: 1px solid var(--border-inner);
   border-radius: var(--radius-control);
+}
+
+/* CodeMirror drops its own outline: show keyboard focus with the same ring as the other controls. */
+.code:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 </style>

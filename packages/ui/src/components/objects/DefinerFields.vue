@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useId } from 'vue';
+import { computed, useId, watch } from 'vue';
+import { parseDefiner } from '../../lib/ddlPlan';
 import type { DefinerChoice } from '../../lib/ddlPlan';
 import FormField from '../common/FormField.vue';
 
@@ -7,12 +8,29 @@ import FormField from '../common/FormField.vue';
  * The DEFINER of a MySQL/MariaDB view, routine, trigger or event. Editing
  * an existing object keeps its definer unless the user picks another one
  * (recreating it would otherwise make the current user its definer).
+ * `original` is the described definer (`user@host`): "Keep" names it, and
+ * choosing "Keep" again puts it back into the account fields. When the
+ * object is gone and the form became a create form, a kept definer stays
+ * chosen and names the account the fields still hold.
  */
-withDefaults(defineProps<{ errors: Record<string, string>; existing: boolean }>(), {});
+const props = withDefaults(defineProps<{ errors: Record<string, string>; existing: boolean; original?: string | null }>(), { original: null });
 const definer = defineModel<DefinerChoice>('definer', { required: true });
 const user = defineModel<string>('user', { required: true });
 const host = defineModel<string>('host', { required: true });
 const ids = { choice: useId(), user: useId(), host: useId() };
+const kept = computed(() => parseDefiner(props.original));
+/** The account "Keep" stands for: the described definer, or the account fields when nothing is described any more. */
+const keptLabel = computed(() => {
+  if (kept.value) return `${kept.value.user}@${kept.value.host}`;
+  if (props.original) return props.original;
+  return `${user.value.trim()}@${host.value.trim() === '' ? '%' : host.value.trim()}`;
+});
+
+watch(definer, (choice) => {
+  if (choice !== 'keep' || !kept.value) return;
+  user.value = kept.value.user;
+  host.value = kept.value.host;
+});
 </script>
 
 <template>
@@ -27,10 +45,10 @@ const ids = { choice: useId(), user: useId(), host: useId() };
         class="select"
       >
         <option
-          v-if="existing"
+          v-if="existing || definer === 'keep'"
           value="keep"
         >
-          Keep {{ user }}@{{ host }}
+          Keep {{ keptLabel }}
         </option>
         <option value="currentUser">
           CURRENT_USER

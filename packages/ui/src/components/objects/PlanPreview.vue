@@ -10,7 +10,9 @@ import type { ChangePlan } from './useChangePlan';
 /**
  * "Will run": the SQL the server planned for an editor's change, its
  * warnings and how it runs, the apply button and what went wrong. The SQL
- * shown is exactly what `edit_apply` runs.
+ * shown is the plan as the user should read it (`shown` of each step's
+ * plan); `edit_apply` runs the stored plan, whose run-time statements can
+ * be more than the one readable statement shown for them.
  */
 const props = withDefaults(
   defineProps<{
@@ -38,11 +40,18 @@ const destructive = computed(() => state.value.steps.some((s) => s.plan.destruct
 const problem = computed(() => state.value.problem ?? state.value.planProblem);
 const pending = computed(() => state.value.steps.some((s) => s.status !== 'done'));
 const canApply = computed(
-  () => !props.readOnly && !props.blocked && !state.value.planning && !state.value.applying && pending.value && state.value.planProblem === null,
+  () =>
+    !props.readOnly &&
+    !props.blocked &&
+    !state.value.planning &&
+    !state.value.stale &&
+    !state.value.applying &&
+    pending.value &&
+    state.value.planProblem === null,
 );
 const statusText = computed(() => {
   if (state.value.applying) return 'Running';
-  if (state.value.planning) return 'Planning';
+  if (state.value.planning || state.value.stale) return 'Planning';
   if (state.value.applied) return 'Applied';
   return '';
 });

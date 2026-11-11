@@ -37,7 +37,7 @@ const tabs = computed(() => [{ id: 'definition', label: 'Definition' }, ...(edit
 const revision = ref(0);
 const schema = computed(() => editor.current.value?.schema ?? schemaDefault.value);
 const title = computed(() => (editor.current.value ? displayName(editor.current.value, 'postgres') : 'New range type'));
-const blocked = computed(() => Object.values(errors.value)[0] ?? null);
+const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
 const fixed = computed(() => details.value !== null);
 const ids = { subtype: useId(), opclass: useId(), collation: useId(), canonical: useId(), diff: useId(), multi: useId() };
 

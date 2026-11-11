@@ -18,7 +18,7 @@ import {
   versioningSchema,
 } from '../../lib/ddlPlan';
 import type { HistoryQuery, SystemTimeMode, VersioningForm } from '../../lib/ddlPlan';
-import { applyProblem } from '../../lib/ddlApply';
+import { applyProblem, isMissing } from '../../lib/ddlApply';
 import type { ApplyProblem } from '../../lib/ddlApply';
 import { runWithConfirmation } from '../../lib/destructive';
 import { cellText, formatCount, formatDuration } from '../../lib/values';
@@ -45,23 +45,54 @@ const emit = defineEmits<ObjectEditorEmits>();
 
 const table = ref<MyTable | null>(null);
 const loading = ref(false);
+/** The table cannot be shown: the sections give way to this message. */
 const loadError = ref<string | null>(null);
+/** Reading the table again failed: the sections keep what was read before, under this message. */
+const reloadNotice = ref<{ text: string; tone: 'warning' | 'danger' } | null>(null);
 const tab = ref<'history' | 'versioning' | 'ddl'>('history');
+/** Edited DDL in the DDL section that has not run: it counts as unsaved for the tab, and no reload or section switch replaces it. */
+const ddlDirty = ref(false);
 
+function onDdlDirty(value: boolean): void {
+  ddlDirty.value = value;
+  props.reportDirty?.(value);
+}
+
+/**
+ * Reads the table (again). Only the first read shows "Loading": later ones
+ * keep the sections on screen, so the DDL section keeps its text, its
+ * result and its error. A read that fails keeps them too, except when the
+ * table is gone and no edited DDL would be lost.
+ */
 async function load(): Promise<void> {
   if (!props.object) {
     loadError.value = 'Open this view on a table.';
     return;
   }
   loading.value = true;
-  loadError.value = null;
+  const sessionId = props.session.id;
   try {
-    const d = await catalogDescribe(props.session.id, props.object);
-    if (d.engine === 'mysql' && d.object.kind === 'table') table.value = d.object;
-    else loadError.value = 'This object is not a MariaDB table.';
+    const d = await catalogDescribe(sessionId, props.object);
+    if (d.engine === 'mysql' && d.object.kind === 'table') {
+      table.value = d.object;
+      loadError.value = null;
+    } else {
+      loadError.value = 'This object is not a MariaDB table.';
+    }
+    reloadNotice.value = null;
   } catch (error: unknown) {
-    props.reportError?.(error);
-    loadError.value = presentError(toCmdError(error)).message;
+    props.reportError?.(error, sessionId);
+    const message = presentError(toCmdError(error)).message;
+    const gone = isMissing(error);
+    if (table.value === null || (gone && !ddlDirty.value)) {
+      loadError.value = message;
+      reloadNotice.value = null;
+    } else if (gone) {
+      // A script that dropped the table and then failed leaves the only copy of its definition in the DDL section.
+      reloadNotice.value = { text: `${title.value} no longer exists. The DDL you edited is kept.`, tone: 'warning' };
+    } else {
+      reloadNotice.value = { text: `Could not read it again: ${message}`, tone: 'danger' };
+    }
   } finally {
     loading.value = false;
   }
@@ -101,13 +132,14 @@ async function showVersions(): Promise<void> {
   running.value = true;
   runProblem.value = null;
   picked.value = [];
+  const sessionId = props.session.id;
   try {
-    const out = await execute(props.session.id, sql.value, false, query.limit);
+    const out = await execute(sessionId, sql.value, false, query.limit);
     const rows = out.results.find((r): r is Extract<StatementResult, { kind: 'rows' }> => r.kind === 'rows') ?? null;
     result.value = rows;
     resultMs.value = out.elapsedMs;
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     runProblem.value = applyProblem(error);
   } finally {
     running.value = false;
@@ -160,9 +192,10 @@ async function deleteHistory(): Promise<void> {
   deleting.value = true;
   deleteProblem.value = null;
   deleteNote.value = null;
+  const sessionId = props.session.id;
   try {
     const out = await runWithConfirmation(
-      (confirmed) => execute(props.session.id, statement, confirmed),
+      (confirmed) => execute(sessionId, statement, confirmed),
       (request) => useDialogs().askDestructive({ connectionName: props.connectionName, environment: request.environment, statements: request.statements }),
     );
     if (out) {
@@ -172,7 +205,7 @@ async function deleteHistory(): Promise<void> {
       emit('changed');
     }
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     deleteProblem.value = applyProblem(error);
   } finally {
     deleting.value = false;
@@ -184,7 +217,7 @@ const plan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const versioning = reactive<VersioningForm>({ columns: 'implicit', start: 'row_start', end: 'row_end', precision: 'timestamp', invisible: true });
 const versioningErrors = computed(() => errorsOf(versioningSchema, versioning));
@@ -255,8 +288,23 @@ onMounted(load);
     >
       <Icon name="lock" />Read-only connection. History browsing works; deleting history and changing versioning are disabled.
     </p>
+    <div
+      v-if="reloadNotice && !loadError"
+      :class="['notice', 'state', reloadNotice.tone === 'danger' ? 'tone-danger' : 'tone-warning']"
+      role="alert"
+    >
+      <Icon name="warning" /><span class="grow">{{ reloadNotice.text }}</span>
+      <button
+        type="button"
+        class="btn compact"
+        :disabled="loading"
+        @click="load"
+      >
+        Retry
+      </button>
+    </div>
     <p
-      v-if="loading"
+      v-if="loading && table === null"
       class="muted state"
       role="status"
     >
@@ -639,12 +687,15 @@ onMounted(load);
       />
     </div>
 
+    <!-- Its own condition, not a branch of the sections above: edited DDL that has not run stays mounted (hidden) while another section shows. -->
     <DdlView
-      v-else-if="table && tab === 'ddl' && object"
+      v-if="table && object && !loadError && (tab === 'ddl' || ddlDirty)"
+      v-show="tab === 'ddl'"
       :session="session"
       :connection-name="connectionName"
       :object="object"
       :report-error="reportError"
+      :report-dirty="onDdlDirty"
       @open-sql="emit('openSql', $event)"
       @changed="load(); emit('changed')"
       @reconnect="emit('reconnect')"

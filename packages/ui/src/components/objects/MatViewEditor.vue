@@ -2,9 +2,12 @@
 import { computed, onMounted, ref, useId, watch } from 'vue';
 import { fetchActivity } from '../../api/activity';
 import type { ActivityEvent } from '../../api/activity';
+import { catalogDescribe, catalogDropImpact } from '../../api/ddl';
 import type { PgMaterializedView } from '../../api/ddl';
+import { presentError, toCmdError } from '../../api/errors';
 import { useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
+import { latestOnly } from '../../lib/async';
 import { formatDateTime } from '../../lib/display';
 import {
   buildPgMatView,
@@ -13,10 +16,14 @@ import {
   errorsOf,
   objectRef,
   pgMatViewFormFrom,
+  pgMatViewRecreateProblem,
   pgMatViewSchema,
+  pgMatViewStanding,
+  pgMatViewStandingText,
 } from '../../lib/ddlPlan';
-import type { PgMatViewForm } from '../../lib/ddlPlan';
-import type { StepSpec } from '../../lib/ddlApply';
+import type { PgMatViewBuild, PgMatViewForm, PgMatViewStanding } from '../../lib/ddlPlan';
+import { isMissing } from '../../lib/ddlApply';
+import { refreshedMatView } from '../../lib/ddlText';
 import { formatBytes, formatCount, formatDuration } from '../../lib/values';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
@@ -34,8 +41,11 @@ import { useObjectEditor } from './useObjectEditor';
 
 /**
  * PostgreSQL materialized view editor (design canvas MatViewEditor):
- * definition (a changed query drops and recreates the view and its
- * indexes), refresh (plain or concurrent, WITH [NO] DATA), refresh history
+ * definition (a changed query creates the new view under a temporary name
+ * with its owner and indexes, then drops the old one and gives the new one
+ * and its indexes the real names; a recreate that stops part way keeps its
+ * remaining steps and says what exists on the server),
+ * refresh (plain or concurrent, WITH [NO] DATA), refresh history
  * from the activity log, indexes and DDL. Props and events: `ObjectEditorProps`
  * / `ObjectEditorEmits`. Opens for a `materializedView` node.
  */
@@ -45,25 +55,137 @@ const emit = defineEmits<ObjectEditorEmits>();
 const schemaDefault = computed(() => props.container?.schema ?? 'public');
 const database = computed(() => props.object?.database ?? props.container?.database ?? props.session.database);
 
+const built = (form: PgMatViewForm, view: PgMaterializedView | null): PgMatViewBuild => buildPgMatView(form, view, database.value);
+const named = (schema: string, name: string): string => displayName({ schema, database: null, name }, 'postgres');
+
+/** The materialized view of that name, or `null` when there is none. */
+async function describeView(schema: string, name: string): Promise<PgMaterializedView | null> {
+  try {
+    const described = await catalogDescribe(props.session.id, objectRef('materializedView', database.value, schema, name));
+    return described.engine === 'postgres' && described.object.kind === 'materializedView' ? described.object : null;
+  } catch (error: unknown) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Whether a recreate can start (nothing depends on the view, the temporary
+ * name and a new name are free), read from the server before it is planned.
+ * `null` until the look for the current `key` is back.
+ */
+const recreateCheck = ref<{ key: string; reason: string | null } | null>(null);
+/** What a recreate check depends on: the session, the view and the names the recreate uses. */
+const recreateKeyOf = (form: PgMatViewForm, view: PgMaterializedView): string =>
+  JSON.stringify([props.session.id, view.schema, view.name, form.schema.trim(), form.name.trim()]);
+/** Where a recreate that stopped part way stands; `null` when none did, or when the server could not be read. */
+const standing = ref<PgMatViewStanding | null>(null);
+
+/** What a recreate that stopped part way left on the server, as a sentence; `null` when the save was no recreate or nothing of it is left. */
+async function recreateStanding(form: PgMatViewForm, view: PgMaterializedView | null): Promise<string | null> {
+  const recreate = view ? built(form, view).recreate : null;
+  if (!view || !recreate) {
+    standing.value = null;
+    return null;
+  }
+  const schema = form.schema.trim();
+  const name = form.name.trim();
+  let found: { old: boolean; temporary: boolean; finalIndexes: string[] };
+  if ((await describeView(schema, recreate.tempName)) !== null) {
+    found = { old: (await describeView(view.schema, view.name)) !== null, temporary: true, finalIndexes: [] };
+  } else {
+    const final = await describeView(schema, name);
+    found = { old: false, temporary: false, finalIndexes: final?.indexes.map((i) => i.name) ?? [] };
+  }
+  standing.value = pgMatViewStanding(recreate, found);
+  if (standing.value === null) return null;
+  return pgMatViewStandingText(standing.value, {
+    old: named(view.schema, view.name),
+    temporary: named(schema, recreate.tempName),
+    final: named(schema, name),
+  });
+}
+
 const editor = useObjectEditor<PgMaterializedView, PgMatViewForm>({
   props,
   emit,
   pick: (d) => (d.engine === 'postgres' && d.object.kind === 'materializedView' ? d.object : 'This object is not a materialized view.'),
   formFrom: (view) => pgMatViewFormFrom(view, schemaDefault.value),
   validate: (form) => errorsOf(pgMatViewSchema, form),
-  build: (form, view) => {
-    const built = buildPgMatView(form, view, database.value);
-    const steps: StepSpec[] = built.changes.map((change) => ({ kind: 'edit', change }));
-    if (built.indexes.length > 0) {
-      steps.push({ kind: 'ddl', ddl: built.indexes.map((i) => `${i};`).join('\n'), database: null, label: 'Recreate indexes' });
-    }
-    return steps;
+  blocked: (form, view) => {
+    const build = built(form, view);
+    if (build.problems[0] !== undefined) return build.problems[0];
+    if (!view || !build.recreate) return null;
+    const check = recreateCheck.value;
+    if (check === null || check.key !== recreateKeyOf(form, view)) return 'Checking that the view can be dropped and recreated.';
+    return check.reason;
   },
+  build: (form, view) => built(form, view).steps,
   identity: (form) => objectRef('materializedView', database.value, form.schema.trim(), form.name.trim()),
+  unfinished: recreateStanding,
 });
 const { form, errors, details } = editor;
 
-const recreates = computed(() => details.value !== null && form.query.trim() !== pgMatViewFormFrom(details.value, details.value.schema).query.trim());
+/** The names a changed query recreates the view with, or `null` when the save changes it in place. */
+const recreate = computed(() => (details.value ? built(form, details.value).recreate : null));
+const recreates = computed(() => recreate.value !== null);
+/** The temporary name a recreate creates the new view under. */
+const tempName = computed(() => recreate.value?.tempName ?? null);
+/** A recreate stopped part way: the form waits until its remaining steps ran (or, while the old view still exists, the user reverts). */
+const unfinished = computed(() => editor.unfinished.value);
+
+const recreateKey = computed(() => (details.value && recreate.value ? recreateKeyOf(form, details.value) : null));
+const recreateChecks = latestOnly();
+/** Looks at the server before a recreate is planned; the result blocks the plan or lets it through. */
+async function checkRecreate(): Promise<void> {
+  const token = recreateChecks.next();
+  const key = recreateKey.value;
+  const view = details.value;
+  const object = editor.current.value;
+  const names = recreate.value;
+  recreateCheck.value = null;
+  // The temporary view of an unfinished recreate is its own; nothing new is planned until that is over.
+  if (key === null || view === null || object === null || names === null || unfinished.value) return;
+  const schema = form.schema.trim();
+  const name = form.name.trim();
+  let reason: string | null;
+  const sessionId = props.session.id;
+  try {
+    const impact = await catalogDropImpact(sessionId, object);
+    const temporaryTaken = (await describeView(schema, names.tempName)) !== null;
+    const renamed = schema !== view.schema || name !== view.name;
+    const nameTaken = renamed && (await describeView(schema, name)) !== null;
+    reason = pgMatViewRecreateProblem(
+      {
+        dependents: impact.dependents.filter((d) => d.effect === 'blocks').map((d) => d.description),
+        dependentsTruncated: impact.dependentsTruncated,
+        temporaryTaken,
+        nameTaken,
+      },
+      { temporary: named(schema, names.tempName), final: named(schema, name) },
+    );
+  } catch (error: unknown) {
+    props.reportError?.(error, sessionId);
+    const p = presentError(toCmdError(error));
+    reason = `Could not check that the view can be dropped and recreated (${p.detail ? `${p.message}; ${p.detail}` : p.message}). Reload the editor to check again.`;
+  }
+  if (!recreateChecks.isCurrent(token)) return;
+  recreateCheck.value = { key, reason };
+}
+watch(recreateKey, () => void checkRecreate());
+// A reload may have changed what depends on the view, and a run that failed may have left the temporary view.
+watch(details, () => void checkRecreate());
+watch(
+  () => editor.plan.state.applying,
+  (applying) => {
+    if (!applying) void checkRecreate();
+  },
+);
+// The plan waited for the check: plan now that it allows it (unless the edit's own plan is still on its way).
+watch(recreateCheck, (check) => {
+  if (check !== null && check.reason === null) editor.planIfDue();
+});
+
 const tab = ref('definition');
 const tabs = computed(() => [
   { id: 'definition', label: 'Definition' },
@@ -72,7 +194,7 @@ const tabs = computed(() => [
   ...(editor.current.value ? [{ id: 'ddl', label: 'DDL' }] : []),
 ]);
 const title = computed(() => (editor.current.value ? displayName(editor.current.value, 'postgres') : 'New materialized view'));
-const blocked = computed(() => Object.values(errors.value)[0] ?? null);
+const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
 const ids = { tablespace: useId(), withData: useId() };
 
 // Refresh
@@ -83,7 +205,7 @@ const refreshPlan = useChangePlan({
     emit('changed');
     void loadHistory();
   },
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const refreshWithData = ref(true);
 const concurrentProblem = computed(() => (details.value ? concurrentRefreshProblem(details.value, refreshWithData.value) : 'Not created yet.'));
@@ -110,6 +232,12 @@ async function planRefresh(concurrently: boolean): Promise<void> {
 watch(refreshWithData, () => {
   if (refreshMode.value !== null) void planRefresh(refreshMode.value === 'concurrent' && concurrentProblem.value === null);
 });
+// A planned refresh names the view as it was: after a save, rename or reload it may name another one.
+watch(details, () => {
+  if (refreshPlan.state.applying) return;
+  refreshMode.value = null;
+  refreshPlan.clear();
+});
 
 async function refreshed(): Promise<void> {
   refreshMode.value = null;
@@ -123,13 +251,24 @@ const historyError = ref<string | null>(null);
 async function loadHistory(): Promise<void> {
   if (!editor.current.value) return;
   try {
+    const view = editor.current.value;
     const page = await fetchActivity({
       actions: ['matview.refreshed'],
       connectionId: props.session.connectionId,
-      text: editor.current.value.name,
-      limit: 10,
+      text: view.name,
+      // Read more than are shown: the filter below drops other views' refreshes.
+      limit: 50,
     });
-    history.value = page.events.filter((e) => (e.target ?? '').includes(editor.current.value?.name ?? ''));
+    // The text filter matches anywhere (sales also finds sales_daily and eu.sales): keep the refreshes of exactly
+    // this view. The event's target names it as `schema.name` (`name` for a change planned without a schema),
+    // whatever the log keeps of the statement; events from before targets were recorded are matched by statement.
+    const qualified = view.schema === null ? view.name : `${view.schema}.${view.name}`;
+    history.value = page.events.filter((e) => {
+      if (e.target !== null) return e.target === qualified || e.target === view.name;
+      const statement = typeof e.details === 'object' && e.details !== null ? (e.details as { statement?: unknown }).statement : undefined;
+      const refreshedView = typeof statement === 'string' ? refreshedMatView(statement) : null;
+      return refreshedView !== null && refreshedView.name === view.name && refreshedView.schema === view.schema;
+    }).slice(0, 10);
     historyError.value = null;
   } catch (error: unknown) {
     historyError.value = error instanceof Error ? error.message : 'The activity log could not be read.';
@@ -176,7 +315,8 @@ watch(
       <button
         type="button"
         class="btn compact"
-        :disabled="!editor.dirty.value"
+        :disabled="!editor.dirty.value || (unfinished && standing !== 'both')"
+        :title="unfinished && standing !== 'both' ? 'The old view is gone: finish the save with its remaining steps.' : undefined"
         @click="editor.revert"
       >
         Revert
@@ -185,7 +325,7 @@ watch(
         v-if="editor.current.value"
         type="button"
         class="btn compact"
-        :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :disabled="session.readOnly || editor.mode.value === 'drop' || unfinished"
         @click="editor.startDrop"
       >
         Drop
@@ -204,13 +344,14 @@ watch(
               <span
                 v-if="editor.current.value"
                 class="hint"
-              >Changing it recreates the view (DROP and CREATE); its indexes are created again.</span>
+              >Changing it recreates the view; its indexes are created again.</span>
             </div>
             <div class="code-box tall">
               <SqlCode
                 v-model="form.query"
                 engine="postgres"
                 label="Materialized view query"
+                :readonly="unfinished"
               />
             </div>
             <span
@@ -219,12 +360,14 @@ watch(
               role="alert"
             >{{ errors.query }}</span>
             <p
-              v-if="recreates"
+              v-if="recreates && !unfinished"
               class="notice tone-warning"
               role="note"
             >
-              <Icon name="warning" />The view is dropped and created again: grants on it are lost, and views that depend on it make the drop fail
-              (the server refuses it; nothing is dropped then).
+              <Icon name="warning" />The new query is created first as <span class="mono">{{ tempName }}</span>, with its owner and indexes, so a
+              query or an index that fails changes nothing. Then the old view is dropped and the new one takes its name: grants on the old view
+              are lost. If the drop fails (something came to depend on the view meanwhile), the old view stays and the editor says what exists
+              and offers the remaining steps.
             </p>
           </section>
           <ChangePanel
@@ -322,7 +465,7 @@ watch(
               <button
                 type="button"
                 class="btn compact"
-                :disabled="session.readOnly"
+                :disabled="session.readOnly || unfinished"
                 @click="planRefresh(false)"
               >
                 <Icon name="refresh" />Refresh
@@ -330,7 +473,7 @@ watch(
               <button
                 type="button"
                 class="btn compact"
-                :disabled="session.readOnly || concurrentProblem !== null"
+                :disabled="session.readOnly || unfinished || concurrentProblem !== null"
                 :title="concurrentProblem ?? undefined"
                 @click="planRefresh(true)"
               >
@@ -364,36 +507,42 @@ watch(
             aria-label="Properties"
           >
             <h2>Properties</h2>
-            <IdentityFields
-              v-model:name="form.name"
-              v-model:schema="form.schema"
-              v-model:owner="form.owner"
-              v-model:comment="form.comment"
-              :session="session"
-              :errors="errors"
-            />
-            <FormField
-              label="Tablespace"
-              :input-id="ids.tablespace"
-              help="Blank uses the database default."
+            <!-- An unfinished recreate runs its remaining steps as planned: the fields wait. -->
+            <fieldset
+              class="contents"
+              :disabled="unfinished"
             >
-              <input
-                :id="ids.tablespace"
-                v-model="form.tablespace"
-                class="input mono"
-                autocomplete="off"
-                spellcheck="false"
+              <IdentityFields
+                v-model:name="form.name"
+                v-model:schema="form.schema"
+                v-model:owner="form.owner"
+                v-model:comment="form.comment"
+                :session="session"
+                :errors="errors"
+              />
+              <FormField
+                label="Tablespace"
+                :input-id="ids.tablespace"
+                help="Blank uses the database default."
               >
-            </FormField>
-            <label
-              v-if="editor.creating.value"
-              class="check"
-            >
-              <input
-                v-model="form.withData"
-                type="checkbox"
-              ><span>Populate when created (WITH DATA)</span>
-            </label>
+                <input
+                  :id="ids.tablespace"
+                  v-model="form.tablespace"
+                  class="input mono"
+                  autocomplete="off"
+                  spellcheck="false"
+                >
+              </FormField>
+              <label
+                v-if="editor.creating.value"
+                class="check"
+              >
+                <input
+                  v-model="form.withData"
+                  type="checkbox"
+                ><span>Populate when created (WITH DATA)</span>
+              </label>
+            </fieldset>
           </section>
         </div>
       </div>
@@ -499,5 +648,14 @@ watch(
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Groups the fields for `disabled` only; no box of its own, so they stay items of the section. */
+fieldset.contents {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from 'vue';
+import { computed, onMounted, ref, useId, watch } from 'vue';
 import type { PgSequence } from '../../api/ddl';
 import {
   buildPgSequence,
@@ -12,6 +12,7 @@ import {
   parseBigInteger,
   pgSequenceFormFrom,
   pgSequenceGoesBack,
+  pgSequenceProblem,
   pgSequenceState,
   pgSequenceSchema,
 } from '../../lib/ddlPlan';
@@ -42,6 +43,7 @@ const editor = useObjectEditor<PgSequence, PgSequenceForm>({
   pick: (d) => (d.engine === 'postgres' && d.object.kind === 'sequence' ? d.object : 'This object is not a PostgreSQL sequence.'),
   formFrom: (seq) => pgSequenceFormFrom(seq, schemaDefault.value),
   validate: (form) => errorsOf(pgSequenceSchema, form),
+  blocked: (form, seq) => pgSequenceProblem(form, seq),
   build: (form, seq) => buildPgSequence(form, seq, database.value).map((change) => ({ kind: 'edit', change })),
   identity: (form) => objectRef('sequence', database.value, form.schema.trim(), form.name.trim()),
 });
@@ -50,7 +52,7 @@ const { form, errors, details } = editor;
 const tab = ref('general');
 const tabs = computed(() => [{ id: 'general', label: 'General' }, ...(editor.current.value ? [{ id: 'ddl', label: 'DDL' }] : [])]);
 const title = computed(() => (editor.current.value ? displayName(editor.current.value, 'postgres') : 'New sequence'));
-const blocked = computed(() => Object.values(errors.value)[0] ?? null);
+const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
 const ids = { type: useId(), inc: useId(), start: useId(), cache: useId(), min: useId(), max: useId(), owned: useId(), log: useId(), reset: useId() };
 
 // Values arrive as exact decimal text; BigInt keeps them exact.
@@ -77,7 +79,7 @@ const resetPlan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const resetKind = ref<'setval' | 'restart'>('setval');
 const resetValue = ref('');
@@ -102,6 +104,11 @@ async function planReset(): Promise<void> {
     resetKind.value === 'restart' ? buildPgSequenceRestart(s, v) : v === null ? null : buildPgSequenceSetValue(s, v, !nextReturnsIt.value);
   await resetPlan.plan(change ? [{ kind: 'edit', change }] : []);
 }
+
+// The preview runs what was planned: a changed value or kind needs a new preview.
+watch([resetKind, resetValue, nextReturnsIt], () => {
+  if (!resetPlan.state.applying) resetPlan.clear();
+});
 
 async function afterReset(): Promise<void> {
   resetPlan.clear();

@@ -24,7 +24,7 @@ const props = withDefaults(
     cascade?: boolean;
     /** WITH (FORCE) is chosen (PostgreSQL database drop). */
     force?: boolean;
-    reportError?: ((error: unknown) => void) | null;
+    reportError?: ((error: unknown, sessionId: string) => void) | null;
   }>(),
   { cascade: false, force: false, reportError: null },
 );
@@ -42,13 +42,14 @@ async function load(): Promise<void> {
   const token = latest.next();
   loading.value = true;
   error.value = null;
+  const sessionId = props.session.id;
   try {
-    const found = await catalogDropImpact(props.session.id, props.object);
+    const found = await catalogDropImpact(sessionId, props.object);
     if (!latest.isCurrent(token)) return;
     impact.value = found;
     emit('loaded', found);
   } catch (e: unknown) {
-    props.reportError?.(e);
+    props.reportError?.(e, sessionId);
     if (!latest.isCurrent(token)) return;
     impact.value = null;
     const p = presentError(toCmdError(e));

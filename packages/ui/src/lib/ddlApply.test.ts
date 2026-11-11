@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DdlApplied, EditApplied, EditPlan } from '../api/ddl';
 import { CommandFailure } from '../api/errors';
 import type { CmdError } from '../api/errors';
-import { applyProblem, applySteps, isMissing, planKept, stepsNotes, stepsSql, stepsWarnings } from './ddlApply';
+import { applyProblem, applySteps, isMissing, planKept, statementHead, stepsNotes, stepsSql, stepsWarnings } from './ddlApply';
 import type { PlannedStep } from './ddlApply';
 
 const plan = (statements: string[], extra: Partial<EditPlan> = {}): EditPlan => ({ statements, transactional: true, destructive: false, warnings: [], ...extra });
@@ -57,6 +57,70 @@ describe('applySteps', () => {
     expect(failedSteps.map((s) => s.status)).toEqual(['done', 'failed', 'pending']);
   });
 
+  it('confirms a destructive step behind other steps before anything runs, and runs nothing on a no', async () => {
+    const steps = () => [editStep('create'), editStep('drop', plan(['DROP MATERIALIZED VIEW "s"."v" RESTRICT'], { destructive: true })), editStep('rename')];
+    const declinedSteps = steps();
+    const editApply = vi.fn(async () => applied);
+    const confirm = vi.fn(async () => false);
+    const declined = await applySteps(declinedSteps, { editApply, ddlApply: async () => ddlApplied, confirm, environment: 'staging' });
+    expect(declined).toMatchObject({ ran: 0, declined: true });
+    expect(confirm).toHaveBeenCalledWith({ environment: 'staging', statements: ['DROP MATERIALIZED VIEW'] });
+    expect(editApply).not.toHaveBeenCalled();
+    expect(declinedSteps.every((s) => s.status === 'pending')).toBe(true);
+
+    const confirmedSteps = steps();
+    const run = await applySteps(confirmedSteps, { editApply, ddlApply: async () => ddlApplied, confirm: async () => true, environment: 'staging' });
+    expect(run).toMatchObject({ ran: 3, declined: false });
+    // The confirmed step runs confirmed at once; the others run as usual.
+    expect(editApply.mock.calls).toEqual([['create', false], ['drop', true], ['rename', false]]);
+  });
+
+  it('tells the caller about the yes to the up-front confirmation before the first step runs, and stops when that fails', async () => {
+    const steps = () => [editStep('create'), editStep('drop', plan(['DROP DATABASE shop'], { destructive: true }))];
+    const order: string[] = [];
+    const editApply = vi.fn(async (id: string) => {
+      order.push(id);
+      return applied;
+    });
+    const run = await applySteps(steps(), {
+      editApply,
+      ddlApply: async () => ddlApplied,
+      confirm: async () => true,
+      environment: 'staging',
+      onConfirmedUpFront: async () => {
+        order.push('prepared');
+      },
+    });
+    expect(run).toMatchObject({ ran: 2, declined: false });
+    expect(order).toEqual(['prepared', 'create', 'drop']);
+
+    // Declined: nothing is prepared and nothing runs.
+    const onConfirmedUpFront = vi.fn(async () => undefined);
+    await applySteps(steps(), { editApply, ddlApply: async () => ddlApplied, confirm: async () => false, environment: 'staging', onConfirmedUpFront });
+    expect(onConfirmedUpFront).not.toHaveBeenCalled();
+
+    // Preparing failed: no step runs, and the failure is the run's error.
+    const failing = steps();
+    const failure = new Error('could not close the sessions');
+    const failed = await applySteps(failing, {
+      editApply: async () => applied,
+      ddlApply: async () => ddlApplied,
+      confirm: async () => true,
+      environment: 'staging',
+      onConfirmedUpFront: async () => {
+        throw failure;
+      },
+    });
+    expect(failed).toMatchObject({ ran: 0, declined: false, error: failure });
+    expect(failing.every((s) => s.status === 'pending')).toBe(true);
+  });
+
+  it('names the leading keywords of statements', () => {
+    expect(statementHead('DROP MATERIALIZED VIEW "s"."v" RESTRICT')).toBe('DROP MATERIALIZED VIEW');
+    expect(statementHead('ALTER TABLE t DROP COLUMN c')).toBe('ALTER TABLE');
+    expect(statementHead('select 1')).toBe('Other');
+  });
+
   it('skips steps that already ran', async () => {
     const steps = [{ ...editStep('a'), status: 'done' as const }, editStep('b')];
     const editApply = vi.fn(async () => applied);
@@ -106,5 +170,30 @@ describe('step summaries', () => {
     ]);
     expect(stepsNotes([editStep('a', plan(['A', 'B'], { transactional: false }))], 'mysql')[0]).toMatch(/commit DDL implicitly/);
     expect(stepsNotes([], 'postgres')).toEqual([]);
+  });
+
+  it('shows the readable statements of a plan and keeps counting the ones that run', () => {
+    // MySQL runs a view change as several statements; the user reads it as one.
+    const runs = ['SET @v = 1', 'ALTER VIEW `v` AS SELECT 1', 'SET @v = NULL'];
+    const steps = [editStep('a', plan(runs, { shown: ['ALTER VIEW `v` AS SELECT 1'], transactional: false })), editStep('b', plan(['COMMENT ON VIEW v IS NULL']))];
+    // A plan without `shown` (a DDL step, an older backend) shows its statements.
+    expect(stepsSql(steps)).toBe('ALTER VIEW `v` AS SELECT 1;\n\nCOMMENT ON VIEW v IS NULL;');
+    // What runs is untouched, and the notes go by it.
+    expect(steps[0]?.plan.statements).toEqual(runs);
+    expect(stepsNotes([editStep('a', plan(['A', 'B'], { shown: ['AB'] }))], 'postgres')).toContain('Runs in one transaction: on failure everything is rolled back.');
+  });
+
+  it('names the readable statements in the up-front confirmation', async () => {
+    const steps = [
+      editStep('create'),
+      editStep('drop', plan(['SET @x = 1', 'DROP TABLE `t`', 'SET @x = NULL'], { shown: ['DROP TABLE `t`'], destructive: true })),
+    ];
+    const confirm = vi.fn(async () => true);
+    const editApply = vi.fn(async () => applied);
+    const run = await applySteps(steps, { editApply, ddlApply: async () => ddlApplied, confirm, environment: 'staging' });
+    expect(confirm).toHaveBeenCalledWith({ environment: 'staging', statements: ['DROP TABLE'] });
+    // The steps still run by plan id, one call each.
+    expect(run.ran).toBe(2);
+    expect(editApply.mock.calls).toEqual([['create', false], ['drop', true]]);
   });
 });

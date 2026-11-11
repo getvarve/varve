@@ -7,6 +7,8 @@
 import { anyDriverErrorOf, openTransactionOf, presentError, toCmdError } from '../api/errors';
 import type { CmdError } from '../api/errors';
 import type { DdlApplied, EditApplied, EditPlan, EngineChange } from '../api/ddl';
+import { readableStatements } from '../api/plans';
+import type { Environment } from '../api/records';
 import { runWithConfirmation } from './destructive';
 import type { ConfirmationRequest } from './destructive';
 
@@ -141,6 +143,30 @@ export interface ApplyDeps {
   editApply: (planId: string, confirmed: boolean) => Promise<EditApplied>;
   ddlApply: (ddl: string, database: string | null, confirmed: boolean) => Promise<DdlApplied>;
   confirm: (request: ConfirmationRequest) => Promise<boolean>;
+  /**
+   * The session's environment. With it, destructive steps after the first
+   * pending one are confirmed before anything runs, so declining leaves
+   * nothing half done (for example a materialized view created under a
+   * temporary name whose old version would then not be dropped).
+   */
+  environment?: Environment;
+  /**
+   * Called once the user said yes to the up-front confirmation, before the
+   * first step runs: what must happen "after the yes" (closing the app's
+   * own sessions on a database, ...) then also precedes a first step that
+   * needs no confirmation itself.
+   */
+  onConfirmedUpFront?: () => Promise<void>;
+}
+
+/** The leading keywords of a statement (`DROP MATERIALIZED VIEW`), for the confirmation dialog. */
+export function statementHead(statement: string): string {
+  const words: string[] = [];
+  for (const word of statement.trim().split(/\s+/)) {
+    if (!/^[A-Z]+$/.test(word) || words.length === 3) break;
+    words.push(word);
+  }
+  return words.length > 0 ? words.join(' ') : 'Other';
 }
 
 export interface ApplyRun {
@@ -164,6 +190,30 @@ export interface ApplyRun {
  */
 export async function applySteps(steps: PlannedStep[], deps: ApplyDeps): Promise<ApplyRun> {
   const run: ApplyRun = { ran: 0, declined: false, failedAt: null, error: null, warnings: [], durationMs: 0 };
+  // A destructive step behind other steps is confirmed up front: asked when it is reached, a "no" would leave the
+  // steps before it applied on their own.
+  const confirmedUpFront = new Set<PlannedStep>();
+  if (deps.environment !== undefined) {
+    const later = steps.filter((s) => s.status !== 'done').slice(1).filter((s) => s.plan.destructive);
+    if (later.length > 0) {
+      // The dialog lists what the user read in the preview, not the run-time statement groups behind it.
+      const statements = later.flatMap((s) => readableStatements(s.plan).map(statementHead));
+      if (!(await deps.confirm({ environment: deps.environment, statements }))) {
+        run.declined = true;
+        return run;
+      }
+      for (const s of later) confirmedUpFront.add(s);
+      try {
+        await deps.onConfirmedUpFront?.();
+      } catch (error: unknown) {
+        // Nothing ran: the steps stay pending and the failure is shown like a failed step's.
+        run.error = error;
+        return run;
+      }
+    }
+  }
+  const confirming = <T>(step: PlannedStep, call: (confirmed: boolean) => Promise<T>): Promise<T | null> =>
+    confirmedUpFront.has(step) ? call(true) : runWithConfirmation(call, deps.confirm);
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i] as PlannedStep;
     if (step.status === 'done') continue;
@@ -171,7 +221,7 @@ export async function applySteps(steps: PlannedStep[], deps: ApplyDeps): Promise
       if (step.spec.kind === 'edit') {
         const planId = step.planId;
         if (planId === null) throw new Error('The step was not planned.');
-        const result = await runWithConfirmation((confirmed) => deps.editApply(planId, confirmed), deps.confirm);
+        const result = await confirming(step, (confirmed) => deps.editApply(planId, confirmed));
         if (result === null) {
           run.declined = true;
           return run;
@@ -179,7 +229,7 @@ export async function applySteps(steps: PlannedStep[], deps: ApplyDeps): Promise
         run.durationMs += result.durationMs;
       } else {
         const spec = step.spec;
-        const result = await runWithConfirmation((confirmed) => deps.ddlApply(spec.ddl, spec.database, confirmed), deps.confirm);
+        const result = await confirming(step, (confirmed) => deps.ddlApply(spec.ddl, spec.database, confirmed));
         if (result === null) {
           run.declined = true;
           return run;
@@ -204,10 +254,10 @@ export function ddlStepPlan(ddl: string): EditPlan {
   return { statements: [ddl.trim().replace(/;\s*$/, '')], transactional: false, destructive: false, warnings: [] };
 }
 
-/** All statements of the steps, for "Will run" and Copy, each ending in `;`. */
+/** All statements of the steps as the user reads them (`shown`), for "Will run" and Copy, each ending in `;`. */
 export function stepsSql(steps: readonly PlannedStep[]): string {
   return steps
-    .flatMap((s) => s.plan.statements)
+    .flatMap((s) => readableStatements(s.plan))
     .map((s) => (s.trimEnd().endsWith(';') ? s.trimEnd() : `${s.trimEnd()};`))
     .join('\n\n');
 }

@@ -359,6 +359,29 @@ export function parseQualified(text: string): { schema: string | null; name: str
 }
 
 /**
+ * The materialized view a `REFRESH MATERIALIZED VIEW [CONCURRENTLY] name
+ * [WITH [NO] DATA]` statement refreshes (quoted parts unquoted), or `null`
+ * for any other statement.
+ */
+export function refreshedMatView(statement: string): { schema: string | null; name: string } | null {
+  const head = /^\s*REFRESH\s+MATERIALIZED\s+VIEW\s+(?:CONCURRENTLY\s+)?/i.exec(statement);
+  if (!head) return null;
+  const rest = statement.slice(head[0].length);
+  // The name runs to the first blank or `;` outside double quotes.
+  let end = 0;
+  let quoted = false;
+  while (end < rest.length) {
+    const c = rest[end] as string;
+    if (c === '"') quoted = !quoted;
+    else if (!quoted && (/\s/.test(c) || c === ';')) break;
+    end += 1;
+  }
+  const target = rest.slice(0, end);
+  if (target === '' || quoted) return null;
+  return parseQualified(target);
+}
+
+/**
  * The arguments of a trigger's function call in `pg_get_triggerdef` text
  * (`... EXECUTE FUNCTION f('a', 'b''c')`): string literals, unquoted.
  */

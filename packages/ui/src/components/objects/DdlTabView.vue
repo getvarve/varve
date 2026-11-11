@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, shallowRef, watch } from 'vue';
 import type { DdlTab } from '../../composables/useTabs';
 import { useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
@@ -14,6 +14,14 @@ import DdlView from './DdlView.vue';
 const props = defineProps<{ tab: DdlTab }>();
 
 const tabs = useTabs();
+// Kept while a reconnect clears the tab's session, so edited DDL is not unmounted (the workspace hides the tab meanwhile).
+const session = shallowRef(props.tab.session);
+watch(
+  () => props.tab.session,
+  (next) => {
+    if (next) session.value = next;
+  },
+);
 const profile = computed(() => useWorkspace().connection(props.tab.connectionId));
 
 function openSql(sql: string): void {
@@ -23,11 +31,11 @@ function openSql(sql: string): void {
 
 <template>
   <DdlView
-    v-if="tab.session"
-    :session="tab.session"
+    v-if="session"
+    :session="session"
     :connection-name="profile?.name ?? tab.title"
     :object="tab.object"
-    :report-error="(error: unknown) => tabs.reportTabError(tab.id, error)"
+    :report-error="(error: unknown, sessionId: string) => tabs.reportTabError(tab.id, error, sessionId)"
     :report-dirty="(dirty: boolean) => tabs.setUnsaved(tab.id, dirty)"
     @open-sql="openSql"
     @changed="useObjectBrowser().refresh(tab.connectionId)"

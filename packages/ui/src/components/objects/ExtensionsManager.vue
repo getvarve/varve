@@ -8,6 +8,7 @@ import { catalogAvailableExtensions, catalogDescribe } from '../../api/ddl';
 import type { PgAvailableExtension, PgExtension } from '../../api/ddl';
 import { presentError, toCmdError } from '../../api/errors';
 import { useDialogs } from '../../composables/useDialogs';
+import { latestOnly } from '../../lib/async';
 import { formatDateTime } from '../../lib/display';
 import {
   buildExtensionDrop,
@@ -58,7 +59,7 @@ const plan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const action = ref<string | null>(null);
 
@@ -70,20 +71,21 @@ const filter = ref('');
 const showInstalled = ref(false);
 
 async function loadAvailable(): Promise<void> {
+  const sessionId = props.session.id;
   try {
-    available.value = await catalogAvailableExtensions(props.session.id);
+    available.value = await catalogAvailableExtensions(sessionId);
     availableError.value = null;
   } catch (error: unknown) {
     // The picker falls back to typing the name; the tab still learns about a lost session.
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     available.value = null;
     availableError.value = presentError(toCmdError(error)).message;
   }
   try {
     const db = database.value;
-    schemas.value = db ? (await catalogSchemas(props.session.id, db)).filter((s) => !s.system).map((s) => s.object.name) : [];
+    schemas.value = db ? (await catalogSchemas(sessionId, db)).filter((s) => !s.system).map((s) => s.object.name) : [];
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     schemas.value = [];
   }
 }
@@ -91,11 +93,12 @@ async function loadAvailable(): Promise<void> {
 async function load(): Promise<void> {
   loading.value = true;
   loadError.value = null;
+  const sessionId = props.session.id;
   try {
-    installed.value = await catalogList(props.session.id, { database: database.value, schema: null, parent: null }, 'extension', true);
+    installed.value = await catalogList(sessionId, { database: database.value, schema: null, parent: null }, 'extension', true);
     if (selectedName.value) await select(selectedName.value);
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     loadError.value = presentError(toCmdError(error)).message;
   } finally {
     loading.value = false;
@@ -105,24 +108,31 @@ async function load(): Promise<void> {
     const page = await fetchActivity({ actions: ['schema.changed', 'object.dropped'], connectionId: props.session.connectionId, text: 'EXTENSION', limit: 8 });
     changes.value = page.events;
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
   }
 }
 
+/** Only the latest selection's answer is used: a slow describe of an extension clicked before must not win. */
+const latestSelect = latestOnly();
+
 async function select(name: string): Promise<void> {
+  const token = latestSelect.next();
   // Re-reading the same extension (after an update or move) keeps its
   // comment editor mounted, so typed text survives.
   if (selected.value?.name !== name) selected.value = null;
   selectedName.value = name;
+  const sessionId = props.session.id;
   try {
-    const d = await catalogDescribe(props.session.id, objectRef('extension', database.value, null, name));
+    const d = await catalogDescribe(sessionId, objectRef('extension', database.value, null, name));
+    if (!latestSelect.isCurrent(token)) return;
     if (d.engine === 'postgres' && d.object.kind === 'extension') {
       selected.value = d.object;
       updateVersion.value = d.object.availableUpdates[d.object.availableUpdates.length - 1] ?? '';
       moveSchema.value = d.object.schema;
     }
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
+    if (!latestSelect.isCurrent(token)) return;
     loadError.value = presentError(toCmdError(error)).message;
   }
 }
@@ -242,7 +252,10 @@ async function done(): Promise<void> {
   plan.clear();
   action.value = null;
   if (kind === 'drop' && selected.value) {
-    emit('dropped', objectRef('extension', database.value, null, selected.value.name));
+    // The manager keeps going with the other extensions. Only a tab opened for the dropped extension hears of
+    // it (the tab then stops naming it); the tree already refreshed through the plan.
+    const dropped = objectRef('extension', database.value, null, selected.value.name);
+    if (props.object?.name === dropped.name) emit('dropped', dropped);
     selectedName.value = null;
     selected.value = null;
   } else if (name && !(kind === 'install' && commentDirty.value && selectedName.value !== null)) {

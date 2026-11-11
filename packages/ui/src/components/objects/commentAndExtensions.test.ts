@@ -297,6 +297,21 @@ describe('ObjectTabView fallback', () => {
   });
 });
 
+describe('ObjectTabView reconnect', () => {
+  it('keeps the view mounted while the tab reconnects, then hands it the new session', async () => {
+    const tab = { id: 't1', kind: 'object', connectionId: 'c1', title: 'orders_pk', session: session('postgres'), database: 'shop', object: constraint, createKind: null, container: { database: 'shop', schema: 'public', parent: null }, intent: 'view' } as unknown as ObjectTab;
+    const wrapper = mount(ObjectTabView, { props: { tab }, global: { stubs: { DdlView: true, SqlCode: true } } });
+    await flushPromises();
+    const ddl = wrapper.findComponent({ name: 'DdlView' });
+    await wrapper.setProps({ tab: { ...tab, session: null } as unknown as ObjectTab });
+    await flushPromises();
+    expect(wrapper.findComponent({ name: 'DdlView' }).vm).toBe(ddl.vm);
+    await wrapper.setProps({ tab: { ...tab, session: session('postgres', { id: 's2' }) } as unknown as ObjectTab });
+    await flushPromises();
+    expect(wrapper.findComponent({ name: 'DdlView' }).props('session')).toMatchObject({ id: 's2' });
+  });
+});
+
 describe('ExtensionsManager install picker', () => {
   it('lists what is not installed, picks a version, schema and CASCADE, and plans the install', async () => {
     installedList = ['plpgsql', 'cube'];
@@ -441,6 +456,30 @@ describe('ExtensionsManager install picker', () => {
     // Only the section's own Drop button is left; the preview for hstore is gone.
     expect(wrapper.findAll('button').filter((b) => b.text() === 'Drop')).toHaveLength(1);
     expect(applied).toEqual([]);
+  });
+
+  it('stays open after dropping an extension, and only tells a tab opened for that extension', async () => {
+    installedList = ['hstore', 'citext'];
+    details['extension:hstore'] = installedDetails('hstore');
+    details['extension:citext'] = installedDetails('citext');
+    const wrapper = mount(ExtensionsManager, { props: { session: session('postgres'), connectionName: 'Shop', object: extRef('hstore') }, global: { stubs: { SqlCode: true } } });
+    await flushPromises();
+    await wrapper.findAll('[aria-label="Installed extensions"] button').find((b) => b.text().startsWith('citext'))?.trigger('click');
+    await flushPromises();
+    await button(wrapper, 'Drop').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').filter((b) => b.text() === 'Drop').at(-1)?.trigger('click');
+    await flushPromises();
+    expect(applied).toHaveLength(1);
+    expect(wrapper.emitted('dropped')).toBeUndefined();
+
+    await wrapper.findAll('[aria-label="Installed extensions"] button').find((b) => b.text().startsWith('hstore'))?.trigger('click');
+    await flushPromises();
+    await button(wrapper, 'Drop').trigger('click');
+    await flushPromises();
+    await wrapper.findAll('button').filter((b) => b.text() === 'Drop').at(-1)?.trigger('click');
+    await flushPromises();
+    expect(wrapper.emitted('dropped')).toEqual([[extRef('hstore')]]);
   });
 
   it('reports a typed extension comment as unsaved and asks before switching (CM-M3)', async () => {

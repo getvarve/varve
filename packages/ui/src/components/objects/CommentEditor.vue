@@ -42,7 +42,7 @@ const props = withDefaults(
     session: SessionInfo;
     connectionName: string;
     object: ObjectRef;
-    reportError?: ((error: unknown) => void) | null;
+    reportError?: ((error: unknown, sessionId: string) => void) | null;
     reportDirty?: ((dirty: boolean) => void) | null;
   }>(),
   { reportError: null, reportDirty: null },
@@ -62,7 +62,7 @@ const plan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const previewing = computed(() => plan.state.steps.length > 0 || plan.state.planning || plan.state.planProblem !== null);
 
@@ -74,8 +74,9 @@ async function load(): Promise<void> {
   const token = latest.next();
   loading.value = true;
   loadError.value = null;
+  const sessionId = props.session.id;
   try {
-    const details = await catalogDescribe(props.session.id, props.object);
+    const details = await catalogDescribe(sessionId, props.object);
     if (!latest.isCurrent(token)) return;
     const comment = commentOf(details);
     if (comment === undefined) {
@@ -90,7 +91,7 @@ async function load(): Promise<void> {
     current.value = comment;
     draft.value = comment ?? '';
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     if (!latest.isCurrent(token)) return;
     current.value = undefined;
     loadError.value = presentError(toCmdError(error)).message;
@@ -134,9 +135,10 @@ watch(dirty, (value) => props.reportDirty?.(value));
 onBeforeUnmount(() => {
   if (dirty.value) props.reportDirty?.(false);
 });
-// Typing after a preview makes the planned SQL stale.
+// Typing after a preview makes the planned SQL stale, also while that preview is still being planned
+// (clearing drops the plan in flight).
 watch(draft, () => {
-  if (plan.state.steps.length > 0 && !plan.state.applying) plan.clear();
+  if ((plan.state.steps.length > 0 || plan.state.planning) && !plan.state.applying) plan.clear();
 });
 watch(
   () => props.object,
