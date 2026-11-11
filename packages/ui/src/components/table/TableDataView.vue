@@ -2,15 +2,16 @@
 import { computed } from 'vue';
 import { displayName } from '../../api/catalog';
 import type { TableDataTab } from '../../composables/useTabs';
-import { useTabs } from '../../composables/useTabs';
+import { useLastSession, useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import EnvBadge from '../common/EnvBadge.vue';
 import TableData from './TableData.vue';
 
 /**
  * Tab view of kind `tableData` (U1 contract): the rows of `tab.object`
- * with grid editing for tables that have a usable key. Rendered by
- * WorkspaceView only while `tab.status === 'ready'`.
+ * with grid editing for tables that have a usable key. WorkspaceView shows
+ * it only while `tab.status === 'ready'`; it stays mounted on the last
+ * session while the session is lost, so staged edits survive a reconnect.
  */
 const props = defineProps<{ tab: TableDataTab }>();
 const emit = defineEmits<{
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 }>();
 const tabs = useTabs();
 const workspace = useWorkspace();
+const session = useLastSession(() => props.tab);
 
 const profile = computed(() => workspace.connection(props.tab.connectionId));
 const connectionName = computed(() => profile.value?.name ?? 'this connection');
@@ -39,14 +41,14 @@ function design(): void {
   tabs.openTableDesigner(p, o, { database: o.database, schema: o.schema, parent: null });
 }
 
-function onError(error: unknown): void {
-  tabs.reportTabError(props.tab.id, error);
+function onError(error: unknown, sessionId: string): void {
+  tabs.reportTabError(props.tab.id, error, sessionId);
 }
 </script>
 
 <template>
   <div
-    v-if="tab.session"
+    v-if="session"
     class="view"
   >
     <header class="head">
@@ -61,11 +63,11 @@ function onError(error: unknown): void {
       >
         Design
       </button>
-      <EnvBadge :environment="tab.session.environment" />
+      <EnvBadge :environment="session.environment" />
     </header>
     <TableData
       class="body"
-      :session="tab.session"
+      :session="session"
       :connection-name="connectionName"
       :object="tab.object"
       @dirty="tabs.setUnsaved(tab.id, $event)"

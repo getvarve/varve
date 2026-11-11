@@ -103,6 +103,7 @@ const summary = computed(() =>
       <button
         type="button"
         class="btn"
+        data-autofocus
         @click="emit('done', null)"
       >
         Cancel

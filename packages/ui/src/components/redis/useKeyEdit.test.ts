@@ -167,4 +167,22 @@ describe('useKeyEdit', () => {
     expect(done).toHaveLength(1);
     expect(applyCalls.map((c) => c.planId)).toEqual(['p1', 'p1']);
   });
+
+  it('plans on the session the tab has when the planning starts, also when an expired plan is planned again', async () => {
+    let session = 's1';
+    const edit = useKeyEdit({ tabId: () => 'tab-x', sessionId: () => session, connectionName: () => 'Cache', done: () => undefined });
+    const plannedOn: string[] = [];
+    const planner = vi.fn(async (sessionId: string) => {
+      plannedOn.push(sessionId);
+      // A reconnect while the plan call runs does not change which session the call belongs to.
+      session = 's2';
+      return { planId: `p${plannedOn.length}`, plan: { key: 'k', db: 0, commands: ['XGROUP CREATE k g $'], checks: [], risk: 'write' as const, destructive: false, unchecked: false, warnings: [] } };
+    });
+    expect(await edit.reviewWith(planner)).toBe(true);
+    expect(plannedOn).toEqual(['s1']);
+    // The plan expired: it is planned again, on the session the tab has by then.
+    applyAnswers = [{ kind: 'notFound', message: 'The plan has expired.' }];
+    await edit.apply();
+    expect(plannedOn).toEqual(['s1', 's2']);
+  });
 });

@@ -16,6 +16,7 @@ use varve_catalog::{
 };
 use varve_core::Engine;
 use varve_driver::Session;
+use varve_records::ConnectionProfile;
 
 use crate::commands::{CmdError, SecretInput, Services};
 use crate::sessions::{SessionError, SessionInfo, SessionLock};
@@ -358,6 +359,43 @@ impl Services {
         ssh_secret: Option<SecretInput>,
         tls_passphrase: Option<SecretInput>,
     ) -> CmdResult<SessionInfo> {
+        let profile = self.database_profile(id, database)?;
+        self.open_profile_session(&profile, password, ssh_secret, tls_passphrase)
+            .await
+    }
+
+    /// [`Self::open_database_session`] with the version of the profile
+    /// each typed secret was entered for (see `Services::open_session_for`).
+    ///
+    /// # Errors
+    /// As [`Self::open_database_session`]; `secretRequired` for a typed
+    /// secret entered for older settings.
+    pub async fn open_database_session_for(
+        self: &Arc<Self>,
+        id: &str,
+        database: &str,
+        typed_for: crate::commands::TypedFor,
+        password: Option<SecretInput>,
+        ssh_secret: Option<SecretInput>,
+        tls_passphrase: Option<SecretInput>,
+    ) -> CmdResult<SessionInfo> {
+        let profile = self.database_profile(id, database)?;
+        self.refuse_outdated_typed(
+            &profile,
+            crate::commands::TypedVersions::of(
+                typed_for,
+                password.is_some(),
+                ssh_secret.is_some(),
+                tls_passphrase.is_some(),
+            ),
+        )
+        .await?;
+        self.open_profile_session(&profile, password, ssh_secret, tls_passphrase)
+            .await
+    }
+
+    /// The saved profile `id` with `database` as its database.
+    fn database_profile(&self, id: &str, database: &str) -> CmdResult<ConnectionProfile> {
         let database = database.trim();
         if database.is_empty() {
             return Err(CmdError::Invalid {
@@ -372,8 +410,7 @@ impl Services {
             });
         }
         profile.database = Some(database.to_string());
-        self.open_profile_session(&profile, password, ssh_secret, tls_passphrase)
-            .await
+        Ok(profile)
     }
 }
 

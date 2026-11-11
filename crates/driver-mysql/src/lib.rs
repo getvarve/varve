@@ -141,7 +141,11 @@ impl MysqlDriver {
                 ),
             ));
         }
-        let opened = connect::open(params).await?;
+        // After a TLS failure the next connect reads the OS trust store
+        // again: the user may add the missing CA and retry.
+        let opened = connect::open(params)
+            .await
+            .inspect_err(varve_driver::refresh_native_roots_after)?;
         Ok(MysqlSession::new(opened, params.connect_timeout))
     }
 }

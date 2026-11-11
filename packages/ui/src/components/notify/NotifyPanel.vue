@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue';
+import { computed, onMounted, ref, shallowRef, useId, watch } from 'vue';
 import { MAX_PAYLOAD_BYTES } from '../../api/notify';
 import { useToasts } from '../../composables/useToasts';
+import { useVisibleClock } from '../../composables/useVisibleClock';
 import { formatCount } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import {
@@ -20,7 +21,7 @@ import {
   statusText,
 } from './notifyLog';
 import type { LogEntry } from './notifyLog';
-import { rate as messageRate } from './notifyPanel';
+import { prettyPayload, rate as messageRate } from './notifyPanel';
 import { useNotify } from './useNotify';
 
 /**
@@ -135,16 +136,8 @@ async function copySql(): Promise<void> {
 const filter = ref('');
 const channelFilter = ref<string | null>(null);
 const selectedId = ref<number | null>(null);
-const now = ref(Date.now());
-let clock: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-  clock = setInterval(() => {
-    now.value = Date.now();
-  }, 1000);
-});
-onBeforeUnmount(() => {
-  if (clock) clearInterval(clock);
-});
+// Paused while the tab is hidden (its view stays mounted).
+const now = useVisibleClock();
 
 const shown = computed<LogEntry[]>(() => {
   void panel.value.version;
@@ -206,13 +199,6 @@ function onRowKey(event: KeyboardEvent, index: number): void {
   }
 }
 
-function prettyPayload(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}
 const pretty = ref(true);
 </script>
 

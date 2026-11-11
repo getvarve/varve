@@ -25,7 +25,6 @@ tracing.workspace = true
 # patch re-applied or dropped.
 mysql_async = { version = "=0.37.1", default-features = false, features = ["minimal-rust", "rustls-tls", "tls12", "ring"] }
 rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
-rustls-native-certs = "0.8.5"
 
 [dev-dependencies]
 serde_json.workspace = true

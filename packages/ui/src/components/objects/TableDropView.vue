@@ -22,7 +22,7 @@ const props = withDefaults(
     session: SessionInfo;
     connectionName: string;
     object: ObjectRef;
-    reportError?: ((error: unknown) => void) | null;
+    reportError?: ((error: unknown, sessionId: string) => void) | null;
   }>(),
   { reportError: null },
 );
@@ -34,7 +34,7 @@ const plan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const name = computed(() => displayName(props.object, props.session.engine));
 

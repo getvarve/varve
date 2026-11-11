@@ -126,7 +126,7 @@ function confirm(): void {
   padding: 8px 10px;
   border: 1px solid var(--border-inner);
   border-radius: var(--radius-control);
-  background: var(--ground);
+  background: var(--inset);
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;

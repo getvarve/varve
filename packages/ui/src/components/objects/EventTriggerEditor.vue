@@ -38,7 +38,7 @@ const { form, errors, details } = editor;
 const tab = ref('definition');
 const tabs = computed(() => [{ id: 'definition', label: 'Event trigger' }, ...(editor.current.value ? [{ id: 'ddl', label: 'DDL' }] : [])]);
 const title = computed(() => (editor.current.value ? editor.current.value.name : 'New event trigger'));
-const blocked = computed(() => Object.values(errors.value)[0] ?? null);
+const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
 const ids = { event: useId(), tags: useId(), fn: useId() };
 const EVENTS = computed(() => [
   { value: 'ddlCommandStart', label: 'ddl_command_start' },

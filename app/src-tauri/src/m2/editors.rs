@@ -10,13 +10,17 @@ use serde::{Deserialize, Serialize};
 use varve_activity::{ActivityEvent, Category, Outcome as EventOutcome, SqlDialect};
 use varve_catalog::EditPlan;
 use varve_catalog::mysql::edit::MyChange;
-use varve_catalog::postgres::edit::{DatabaseChange, DatabaseOperation, PgChange};
+use varve_catalog::postgres::edit::{
+    DatabaseChange, DatabaseOperation, MaterializedViewChange, PgChange,
+};
 use varve_core::Engine;
+#[cfg(test)]
+use varve_driver::classify;
 use varve_driver::{
     Dialect, DriverError, ExecOptions, ExecOutput, StatementKind, split_statements,
 };
 
-use super::plans::{Planned, StoredPlan, wrong_kind};
+use super::plans::{EditPlanView, Planned, StoredPlan, wrong_kind};
 use super::{elapsed_ms, error_details, sql_dialect};
 use crate::commands::{CmdError, Services};
 use crate::sessions::{ExecSpec, SessionError, SessionInfo};
@@ -39,7 +43,8 @@ pub enum EngineChange {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditApplied {
-    /// Statements of the plan that ran.
+    /// Statements of the plan that ran, counted as the user reads them
+    /// ([`EditPlan::shown`]).
     pub statements: usize,
     /// True when they ran in one transaction that was committed.
     pub transactional: bool,
@@ -85,6 +90,34 @@ pub fn plan_kinds(statements: &[String], dialect: Dialect) -> Result<Vec<Stateme
         kinds.push(span.kind);
     }
     Ok(kinds)
+}
+
+/// The statement kinds of a plan as the user reads it
+/// ([`EditPlan::shown`]), one per shown statement: what the destructive
+/// check, the confirmation labels and the activity log go by. What runs is
+/// checked with [`plan_kinds`].
+///
+/// A shown statement is classified by its first statement only. The
+/// readable form of a statement built at run time quotes its texts with
+/// doubled quotes, so a text with a backslash can read as an open string
+/// and a `;` in a later text as a statement end; the kind comes from the
+/// leading `ALTER` or `CREATE`, which that cannot change.
+///
+/// # Errors
+/// [`CmdError::Invalid`] for a shown statement that holds no statement.
+pub fn shown_kinds(shown: &[String], dialect: Dialect) -> Result<Vec<StatementKind>, CmdError> {
+    shown
+        .iter()
+        .enumerate()
+        .map(|(index, statement)| {
+            split_statements(statement, dialect)
+                .first()
+                .map(|span| span.kind)
+                .ok_or_else(|| CmdError::Invalid {
+                    message: format!("Statement {} of the plan is empty.", index + 1),
+                })
+        })
+        .collect()
 }
 
 /// The labels the confirmation dialog shows: the destructive kinds, or
@@ -135,9 +168,22 @@ pub(crate) fn schema_action(statements: &[String], kinds: &[StatementKind]) -> &
     }
 }
 
-/// Adds where a non-transactional plan stopped to a driver error.
-fn stopped_at(mut error: DriverError, index: usize, total: usize) -> DriverError {
-    let note = if index == 0 {
+/// Adds where a non-transactional plan stopped to a driver error. `index`
+/// is the failed statement of `plan.statements`; the note counts the
+/// statements the user reads ([`EditPlan::shown`]).
+fn stopped_at(mut error: DriverError, plan: &EditPlan, index: usize) -> DriverError {
+    let total = plan.shown().len();
+    let (index, ran) = plan.shown_position(index);
+    let note = if ran {
+        // The clean-up after a statement built at run time failed: the
+        // statement itself ran.
+        format!(
+            "Statement {} of {total} ran, but cleaning up after it failed; the {} statement(s) \
+             up to it ran and are not rolled back.",
+            index + 1,
+            index + 1
+        )
+    } else if index == 0 {
         format!("Statement 1 of {total} failed; nothing ran.")
     } else {
         format!(
@@ -188,11 +234,47 @@ fn database_target(change: &EngineChange) -> Option<String> {
     }
 }
 
-/// The plan of a stored editor plan, and the database it drops or renames.
-fn edit_parts(stored: &StoredPlan) -> CmdResult<(&EditPlan, Option<&str>)> {
+/// The materialized view an editor change refreshes, as `schema.name`
+/// (the form other activity targets take), or `name` when the change named
+/// no schema.
+fn refresh_target(change: &EngineChange) -> Option<String> {
+    let EngineChange::Postgres(change) = change else {
+        return None;
+    };
+    let PgChange::MaterializedView(MaterializedViewChange::Refresh { name, .. }) = change.as_ref()
+    else {
+        return None;
+    };
+    Some(match &name.schema {
+        Some(schema) => format!("{schema}.{}", name.name),
+        None => name.name.clone(),
+    })
+}
+
+/// The parts of a stored editor plan.
+struct EditParts<'a> {
+    /// What runs.
+    plan: &'a EditPlan,
+    /// The PostgreSQL database it drops or renames.
+    database: Option<&'a str>,
+    /// The materialized view it refreshes, for the activity event.
+    target: Option<&'a str>,
+}
+
+/// The plan of a stored editor plan, the database it drops or renames and
+/// the view it refreshes.
+fn edit_parts(stored: &StoredPlan) -> CmdResult<EditParts<'_>> {
+    let parts = |plan, database, target| EditParts {
+        plan,
+        database,
+        target,
+    };
     match stored {
-        StoredPlan::Edit(plan) => Ok((plan, None)),
-        StoredPlan::EditDatabase { plan, database } => Ok((plan, Some(database.as_str()))),
+        StoredPlan::Edit(plan) => Ok(parts(plan, None, None)),
+        StoredPlan::EditDatabase { plan, database } => {
+            Ok(parts(plan, Some(database.as_str()), None))
+        }
+        StoredPlan::EditRefresh { plan, target } => Ok(parts(plan, None, Some(target.as_str()))),
         other => Err(wrong_kind("edit_apply", other)),
     }
 }
@@ -209,7 +291,7 @@ impl Services {
         &self,
         session_id: &str,
         change: &EngineChange,
-    ) -> CmdResult<Planned<EditPlan>> {
+    ) -> CmdResult<Planned<EditPlanView>> {
         let info = self.session_info(session_id)?;
         let plan = match (change, info.engine) {
             (EngineChange::Postgres(change), Engine::Postgres) => {
@@ -226,16 +308,24 @@ impl Services {
         };
         if let Some(dialect) = sql_dialect(info.engine) {
             plan_kinds(&plan.statements, dialect)?;
+            shown_kinds(&plan.shown(), dialect)?;
         }
-        let stored = match database_target(change) {
-            Some(database) => StoredPlan::EditDatabase {
+        let stored = match (database_target(change), refresh_target(change)) {
+            (Some(database), _) => StoredPlan::EditDatabase {
                 plan: plan.clone(),
                 database,
             },
-            None => StoredPlan::Edit(plan.clone()),
+            (None, Some(target)) => StoredPlan::EditRefresh {
+                plan: plan.clone(),
+                target,
+            },
+            (None, None) => StoredPlan::Edit(plan.clone()),
         };
         let plan_id = self.m2.plans.put(session_id, stored);
-        Ok(Planned { plan_id, plan })
+        Ok(Planned {
+            plan_id,
+            plan: plan.into(),
+        })
     }
 
     /// Runs a stored editor plan, exactly as planned.
@@ -249,7 +339,12 @@ impl Services {
     /// - Transactional plans (PostgreSQL only) run as one `BEGIN ... COMMIT`
     ///   script, checked and rolled back on failure under one session lock.
     /// - Other plans run statement by statement and stop at the first
-    ///   failure, whose detail says how many statements ran.
+    ///   failure, whose detail says how many statements ran (counted as
+    ///   the user reads them). After a failure, what a MySQL statement
+    ///   built at run time leaves in the session is removed.
+    /// - The destructive check, the confirmation labels and the activity
+    ///   event go by the statements as the user reads them
+    ///   ([`EditPlan::shown`]); what runs is the plan's statements.
     /// - Every statement is logged as a query, and the plan as
     ///   `schema.changed`, `object.dropped` or `matview.refreshed`.
     ///
@@ -264,14 +359,18 @@ impl Services {
     ) -> CmdResult<EditApplied> {
         let info = self.session_info(session_id)?;
         let stored = self.m2.plans.peek(session_id, plan_id)?;
-        let (plan, database) = edit_parts(&stored)?;
+        let EditParts { plan, database, .. } = edit_parts(&stored)?;
         let Some(dialect) = sql_dialect(info.engine) else {
             return Err(CmdError::Invalid {
                 message: "Editor plans run on PostgreSQL, MySQL and MariaDB sessions.".into(),
             });
         };
         Self::require_writable(&info, "changing objects")?;
-        let kinds = plan_kinds(&plan.statements, dialect)?;
+        // What runs is checked as it runs; what it does is read from the
+        // statements the user sees.
+        plan_kinds(&plan.statements, dialect)?;
+        let shown = plan.shown();
+        let kinds = shown_kinds(&shown, dialect)?;
         if plan.transactional && info.engine != Engine::Postgres {
             return Err(CmdError::Invalid {
                 message: "MySQL and MariaDB commit DDL implicitly; the plan cannot run in a \
@@ -299,7 +398,11 @@ impl Services {
             labels.clone(),
         )?;
         let stored = self.m2.plans.take(session_id, plan_id)?;
-        let (plan, database) = edit_parts(&stored)?;
+        let EditParts {
+            plan,
+            database,
+            target,
+        } = edit_parts(&stored)?;
         if let Some(database) = database {
             // The browser's own sessions on the database would make
             // PostgreSQL refuse; they reopen on their next use.
@@ -329,9 +432,14 @@ impl Services {
                 .map(|output| vec![output])
                 .map_err(|error| (error, 0))
         } else {
-            self.run_statements(&info, &plan.statements, confirmed, forced, Some(&effect))
+            let ran = self
+                .run_statements(&info, &plan.statements, confirmed, forced, Some(&effect))
                 .await
-                .map_err(|stopped| *stopped)
+                .map_err(|stopped| *stopped);
+            if let Err((SessionError::Driver { .. }, _)) = &ran {
+                self.clean_up_after_failure(&info, plan).await;
+            }
+            ran
         };
         let duration_ms = elapsed_ms(started);
         let result = match result {
@@ -343,26 +451,28 @@ impl Services {
             }
             Err((SessionError::Driver { error }, index)) if !plan.transactional => {
                 Err(CmdError::from(SessionError::Driver {
-                    error: stopped_at(error, index, plan.statements.len()),
+                    error: stopped_at(error, plan, index),
                 }))
             }
             Err((other, _)) => Err(CmdError::from(other)),
         };
 
-        let mut event =
-            ActivityEvent::builder(Category::Schema, schema_action(&plan.statements, &kinds))
-                .detail("statements", plan.statements.len())
-                .detail(
-                    "kinds",
-                    kinds
-                        .iter()
-                        .map(|k| format!("{k:?}").to_ascii_lowercase())
-                        .collect::<Vec<_>>(),
-                )
-                .detail("transactional", plan.transactional)
-                .detail("destructive", plan.destructive)
-                .duration_ms(duration_ms)
-                .statement(plan.statements.join(";\n"), SqlDialect::from(info.engine));
+        let mut event = ActivityEvent::builder(Category::Schema, schema_action(&shown, &kinds))
+            .detail("statements", plan.statements.len())
+            .detail(
+                "kinds",
+                kinds
+                    .iter()
+                    .map(|k| format!("{k:?}").to_ascii_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+            .detail("transactional", plan.transactional)
+            .detail("destructive", plan.destructive)
+            .duration_ms(duration_ms)
+            .statement(plan.statements.join(";\n"), SqlDialect::from(info.engine));
+        if let Some(target) = target {
+            event = event.target(target);
+        }
         if let Err(CmdError::Session {
             error: SessionError::Driver { error },
         }) = &result
@@ -376,11 +486,32 @@ impl Services {
         self.record(&info, event);
         let outputs = result?;
         Ok(EditApplied {
-            statements: plan.statements.len(),
+            statements: shown.len(),
             transactional: plan.transactional,
             outputs,
             duration_ms,
         })
+    }
+
+    /// Removes what a failed statement of `plan` can leave in the session
+    /// ([`EditPlan::cleanup_after_failure`]: the prepared statement and the
+    /// user variable of a MySQL statement built at run time). Nothing runs
+    /// for a plan without such a statement. Errors are ignored: each
+    /// statement fails when there is nothing to remove, and a session that
+    /// is gone holds nothing.
+    async fn clean_up_after_failure(&self, info: &SessionInfo, plan: &EditPlan) {
+        for statement in plan.cleanup_after_failure() {
+            let _ignored = self
+                .sessions
+                .execute_with(
+                    &info.id,
+                    &statement,
+                    false,
+                    &ExecOptions::default(),
+                    &ExecSpec::default(),
+                )
+                .await;
+        }
     }
 
     /// Runs statements one at a time through the session manager, each
@@ -446,6 +577,58 @@ mod tests {
         Ok(())
     }
 
+    /// A refresh names its view as `schema.name`; other changes name none.
+    #[test]
+    fn refreshes_name_their_view() {
+        use varve_catalog::postgres::edit::QualifiedName;
+
+        let refresh = |name: QualifiedName| {
+            EngineChange::Postgres(Box::new(PgChange::MaterializedView(
+                MaterializedViewChange::Refresh {
+                    name,
+                    concurrently: false,
+                    has_unique_index: false,
+                    with_data: true,
+                },
+            )))
+        };
+        assert_eq!(
+            refresh_target(&refresh(QualifiedName::new("sales", "daily totals"))),
+            Some("sales.daily totals".to_owned())
+        );
+        assert_eq!(
+            refresh_target(&refresh(QualifiedName {
+                schema: None,
+                name: "m".into(),
+            })),
+            Some("m".to_owned())
+        );
+        let drop = EngineChange::Postgres(Box::new(PgChange::Database(DatabaseChange::Drop {
+            name: "d".into(),
+            if_exists: false,
+            force: false,
+        })));
+        assert_eq!(refresh_target(&drop), None);
+        let plan = EditPlan {
+            statements: vec!["REFRESH MATERIALIZED VIEW \"sales\".\"m\"".into()],
+            transactional: true,
+            destructive: false,
+            warnings: vec![],
+        };
+        let stored = StoredPlan::EditRefresh {
+            plan,
+            target: "sales.m".into(),
+        };
+        assert!(matches!(
+            edit_parts(&stored),
+            Ok(EditParts {
+                target: Some("sales.m"),
+                database: None,
+                ..
+            })
+        ));
+    }
+
     #[test]
     fn plans_are_checked_statement_by_statement() {
         let ok = plan_kinds(
@@ -494,18 +677,133 @@ mod tests {
         assert_eq!(confirmation_labels(&[StatementKind::Ddl]), ["Ddl"]);
     }
 
+    fn plan_of(statements: Vec<String>) -> EditPlan {
+        EditPlan {
+            statements,
+            transactional: false,
+            destructive: false,
+            warnings: vec![],
+        }
+    }
+
+    /// The five statements MySQL runs for a statement built at run time,
+    /// shown as `shown`.
+    fn prepared(shown: &str) -> Vec<String> {
+        vec![
+            "SET @varve_ddl = CONCAT(X'414C544552')".into(),
+            "PREPARE varve_ddl FROM @varve_ddl".into(),
+            "SET @varve_ddl = NULL".into(),
+            format!("EXECUTE varve_ddl /* {shown} */"),
+            "DEALLOCATE PREPARE varve_ddl".into(),
+        ]
+    }
+
+    fn stopped(plan: &EditPlan, index: usize) -> String {
+        stopped_at(
+            DriverError::new(varve_driver::ErrorKind::Query, "boom"),
+            plan,
+            index,
+        )
+        .detail
+        .unwrap_or_default()
+    }
+
     #[test]
     fn stopped_plans_say_how_far_they_got() {
-        let error = stopped_at(
-            DriverError::new(varve_driver::ErrorKind::Query, "boom"),
-            2,
-            3,
-        );
+        let plain = plan_of(vec![
+            "CREATE TABLE a (x int)".into(),
+            "CREATE TABLE b (x int)".into(),
+            "CREATE TABLE c (x int)".into(),
+        ]);
+        assert!(stopped(&plain, 0).contains("Statement 1 of 3 failed; nothing ran."));
+        assert!(stopped(&plain, 2).contains("Statement 3 of 3 failed; the 2 statement(s) before"));
+    }
+
+    /// A statement built at run time is one statement for the user: the
+    /// note counts shown statements, whichever of its steps failed.
+    #[test]
+    fn stopped_plans_count_the_statements_the_user_reads() {
+        let mut statements = vec!["ALTER TABLE `t` ADD COLUMN `a` int".to_string()];
+        statements.extend(prepared("ALTER TABLE `t` COMMENT='a\\b'"));
+        statements.push("DROP TABLE `old`".into());
+        let plan = plan_of(statements);
+        // SET, PREPARE, the clearing SET and EXECUTE: statement 2 failed.
+        for index in 1..=4 {
+            let note = stopped(&plan, index);
+            assert!(
+                note.contains("Statement 2 of 3 failed; the 1 statement(s) before"),
+                "{index}: {note}"
+            );
+        }
+        // DEALLOCATE PREPARE: statement 2 ran.
+        let note = stopped(&plan, 5);
         assert!(
-            error
-                .detail
-                .as_deref()
-                .is_some_and(|d| d.contains("Statement 3 of 3"))
+            note.contains("Statement 2 of 3 ran, but cleaning up after it failed; the 2"),
+            "{note}"
         );
+        let note = stopped(&plan, 6);
+        assert!(
+            note.contains("Statement 3 of 3 failed; the 2 statement(s) before"),
+            "{note}"
+        );
+        let first = plan_of(prepared("CREATE TABLE `t` (`a` int COMMENT 'a\\b')"));
+        assert!(stopped(&first, 3).contains("Statement 1 of 1 failed; nothing ran."));
+    }
+
+    /// What a plan does is read from the statements the user sees; what
+    /// runs is still checked statement by statement.
+    #[test]
+    fn run_time_statements_are_classified_as_shown() -> Result<(), CmdError> {
+        let mut statements = prepared("ALTER TABLE `t` DROP COLUMN `a`, COMMENT='a\\b'");
+        statements.push("DROP TABLE `old`".into());
+        let plan = plan_of(statements);
+        assert_eq!(plan_kinds(&plan.statements, Dialect::Mysql)?.len(), 6);
+        let shown = plan.shown();
+        let kinds = shown_kinds(&shown, Dialect::Mysql)?;
+        assert_eq!(
+            kinds,
+            classify(
+                "ALTER TABLE `t` DROP COLUMN `a`; DROP TABLE `old`",
+                Dialect::Mysql
+            )
+        );
+        assert!(kinds.iter().all(|kind| kind.is_destructive()));
+        assert_eq!(schema_action(&shown, &kinds), "schema.changed");
+        // The internal statements alone name no destructive kind.
+        let internal = plan_kinds(&plan.statements[..5], Dialect::Mysql)?;
+        assert!(!internal.iter().any(|kind| kind.is_destructive()));
+
+        // A readable form whose quoting reads as several statements (a
+        // backslash before the closing quote, a `;` in a later text) keeps
+        // the kind of its leading keyword.
+        let odd = plan_of(prepared(
+            "ALTER TABLE `t` MODIFY `a` int COMMENT 'x\\', MODIFY `b` int COMMENT 'y;z'",
+        ));
+        assert_eq!(
+            shown_kinds(&odd.shown(), Dialect::Mysql)?,
+            [StatementKind::Ddl]
+        );
+        assert!(shown_kinds(&[String::new()], Dialect::Mysql).is_err());
+        Ok(())
+    }
+
+    /// The view the UI gets holds the readable statements next to the ones
+    /// that run, always.
+    #[test]
+    fn planned_edits_carry_the_shown_statements() -> Result<(), serde_json::Error> {
+        let mut statements = prepared("ALTER TABLE `t` COMMENT='a\\b'");
+        statements.push("DROP TABLE `old`".into());
+        let view = EditPlanView::from(plan_of(statements));
+        let json = serde_json::to_value(&view)?;
+        assert_eq!(json["statements"].as_array().map(Vec::len), Some(6));
+        assert_eq!(
+            json["shown"],
+            json!(["ALTER TABLE `t` COMMENT='a\\b'", "DROP TABLE `old`"])
+        );
+        assert_eq!(json["transactional"], false);
+        let plain =
+            serde_json::to_value(EditPlanView::from(plan_of(vec!["DROP TABLE `old`".into()])))?;
+        assert_eq!(plain["shown"], plain["statements"]);
+        Ok(())
     }
 }

@@ -1441,9 +1441,32 @@ impl ScriptRead {
     }
 }
 
-/// True for statement kinds that never return a result set: their result
-/// must be an OK packet.
-fn returns_no_rows(kind: StatementKind) -> bool {
+/// True for statements that never return a result set: their result must
+/// be an OK packet. The kind alone does not tell: `EXPLAIN ANALYZE DELETE`
+/// and MariaDB's `ANALYZE UPDATE` are classified as the statement they run
+/// and answer with the plan, and MariaDB's `INSERT`, `REPLACE` and `DELETE`
+/// return rows with `RETURNING`.
+fn returns_no_rows(kind: StatementKind, text: &str) -> bool {
+    kind_returns_no_rows(kind) && !text_may_return_rows(text)
+}
+
+/// True when the statement starts with `EXPLAIN`, `DESCRIBE`, `DESC` or
+/// `ANALYZE` (the server answers with a plan or a table), or has the word
+/// `RETURNING` outside literals and comments.
+fn text_may_return_rows(text: &str) -> bool {
+    let mut words = varve_driver::lex(text, Dialect::Mysql, true)
+        .into_iter()
+        .filter(|l| l.kind == LexKind::Word)
+        .map(|l| text.get(l.start..l.end).unwrap_or_default());
+    let reports = words.next().is_some_and(|first| {
+        ["EXPLAIN", "DESCRIBE", "DESC", "ANALYZE"]
+            .iter()
+            .any(|word| first.eq_ignore_ascii_case(word))
+    });
+    reports || words.any(|word| word.eq_ignore_ascii_case("RETURNING"))
+}
+
+fn kind_returns_no_rows(kind: StatementKind) -> bool {
     matches!(
         kind,
         StatementKind::Insert
@@ -1463,15 +1486,18 @@ fn returns_no_rows(kind: StatementKind) -> bool {
     )
 }
 
-/// True when `results` are what a statement of `kind` with `shape` gives.
-fn results_fit(kind: StatementKind, shape: Shape, results: &[StatementResult]) -> bool {
+/// True when `results` are what the statement `text` of `kind` with
+/// `shape` gives.
+fn results_fit(kind: StatementKind, text: &str, shape: Shape, results: &[StatementResult]) -> bool {
     let is_rows = |r: &StatementResult| matches!(r, StatementResult::Rows { .. });
     let procedure_like = |results: &[StatementResult]| match results.split_last() {
         Some((last, rows)) => !is_rows(last) && rows.iter().all(is_rows),
         None => false,
     };
     match shape {
-        Shape::One => matches!(results, [only] if !(returns_no_rows(kind) && is_rows(only))),
+        Shape::One => {
+            matches!(results, [only] if !(returns_no_rows(kind, text) && is_rows(only)))
+        }
         Shape::Procedure => procedure_like(results),
         Shape::Execute => results.len() == 1 || procedure_like(results),
         Shape::Compound => false,
@@ -1700,7 +1726,7 @@ fn assign(
             Shape::Compound => return (done, false),
         }
         let produced = results.get(start..next).unwrap_or_default();
-        if !results_fit(stmt.kind, shape, produced) {
+        if !results_fit(stmt.kind, text, shape, produced) {
             return (done, false);
         }
         done.push((*stmt, open.get(next - 1).copied().flatten()));
@@ -1944,7 +1970,9 @@ fn attribute(
         match shape {
             // A statement that never returns rows got a result set: the
             // results do not belong to the statements Varve split.
-            Shape::One if returns_no_rows(statement.kind) && is_rows(next) => return None,
+            Shape::One if returns_no_rows(statement.kind, statement.text) && is_rows(next) => {
+                return None;
+            }
             Shape::One | Shape::Compound => {}
             Shape::Procedure => {
                 while is_rows(next) {
@@ -2762,6 +2790,94 @@ mod tests {
             }]
         );
         Ok(())
+    }
+
+    fn plan_rows() -> StatementResult {
+        StatementResult::Rows {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            truncated: false,
+        }
+    }
+
+    fn ok_packet() -> StatementResult {
+        StatementResult::Command {
+            tag: "OK".into(),
+            rows_affected: Some(0),
+        }
+    }
+
+    /// Runs [`assign`] for a script whose statements go in one request.
+    fn assigned(sql: &str, results: &[StatementResult]) -> (usize, bool) {
+        let statements: Vec<Stmt> = split_statements(sql, Dialect::Mysql)
+            .iter()
+            .map(|s| Stmt {
+                offset: s.offset,
+                len: s.text.len(),
+                end: s.offset + s.text.len(),
+                kind: s.kind,
+                definition: false,
+            })
+            .collect();
+        let open = vec![Some(false); results.len()];
+        let (done, fits) = assign(sql, &statements, results, &open, false, false);
+        (done.len(), fits)
+    }
+
+    #[test]
+    fn a_plan_of_a_write_that_ran_is_its_statements_result() {
+        // Classified as the write they run, answered with a result set.
+        for sql in [
+            "EXPLAIN ANALYZE DELETE t FROM t JOIN u ON t.id = u.id",
+            "explain analyze update t set x = 1",
+            "DESCRIBE ANALYZE INSERT INTO t VALUES (1)",
+            "ANALYZE UPDATE t SET x = 1",
+            "analyze format=json delete from t where id = 1",
+            "/* plan */ EXPLAIN ANALYZE DELETE FROM t",
+            // MariaDB returns the rows a statement changed.
+            "INSERT INTO t VALUES (1) RETURNING id",
+            "DELETE FROM t WHERE id = 1 RETURNING *",
+        ] {
+            let spans = split_statements(sql, Dialect::Mysql);
+            assert!(spans[0].kind.writes(), "{sql}");
+            assert!(!returns_no_rows(spans[0].kind, sql), "{sql}");
+            assert_eq!(assigned(sql, &[plan_rows()]), (1, true), "{sql}");
+            assert_eq!(
+                attribute(&spans, &[plan_rows()], &[Some(false)]),
+                Some(vec![Some(false)]),
+                "{sql}"
+            );
+        }
+        // In a script, between statements that give an OK packet.
+        let sql = "SET @a = 1; EXPLAIN ANALYZE DELETE FROM t; DELETE FROM t WHERE id = 2";
+        let results = [ok_packet(), plan_rows(), ok_packet()];
+        assert_eq!(assigned(sql, &results), (3, true));
+        let spans = split_statements(sql, Dialect::Mysql);
+        assert_eq!(
+            attribute(&spans, &results, &[Some(false); 3]),
+            Some(vec![Some(false); 3])
+        );
+    }
+
+    #[test]
+    fn a_write_that_returns_rows_is_not_the_statement_varve_split() {
+        for sql in [
+            "DELETE FROM t",
+            "UPDATE t SET x = 1 WHERE id = 2",
+            "INSERT INTO t VALUES ('explain analyze', 'returning')",
+            "UPDATE t SET note = 1 -- returning\n WHERE id = 2",
+            "TRUNCATE t",
+        ] {
+            let spans = split_statements(sql, Dialect::Mysql);
+            assert!(returns_no_rows(spans[0].kind, sql), "{sql}");
+            assert_eq!(assigned(sql, &[plan_rows()]), (0, false), "{sql}");
+            assert_eq!(
+                attribute(&spans, &[plan_rows()], &[Some(false)]),
+                None,
+                "{sql}"
+            );
+            assert_eq!(assigned(sql, &[ok_packet()]), (1, true), "{sql}");
+        }
     }
 
     #[test]

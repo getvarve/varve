@@ -30,6 +30,13 @@ export interface KeyEditOptions {
 }
 
 /**
+ * Asks the server for a plan on the given session. The id is read when the
+ * planning starts, so a failure is reported for the session it was sent on
+ * and a plan made again after an expiry goes to the session the tab has then.
+ */
+export type KeyPlanner = (sessionId: string) => Promise<Planned<RedisEditPlan>>;
+
+/**
  * Plan, preview and apply of Redis key edits: the plan is shown first, a
  * destructive one asks for confirmation, and every outcome (applied,
  * conflict, failed) re-reads the key.
@@ -39,32 +46,33 @@ export function useKeyEdit(options: KeyEditOptions) {
 
   /** Plans `request` and opens the preview. Resolves false when the backend refused. */
   function review(request: RedisEditRequest): Promise<boolean> {
-    return reviewWith(() => redisEditPlan(options.sessionId(), request), request.edits);
+    return reviewWith((sessionId) => redisEditPlan(sessionId, request), request.edits);
   }
 
   /**
    * Plans with `planner` (value edits, or a stream group change) and opens the
    * preview; `edits` name what the plan does in the outcome message.
    */
-  async function reviewWith(planner: () => Promise<Planned<RedisEditPlan>>, edits: readonly KeyEdit[] = []): Promise<boolean> {
+  async function reviewWith(planner: KeyPlanner, edits: readonly KeyEdit[] = []): Promise<boolean> {
     if (state.planning || state.applying) return false;
     state.error = null;
     return planWith(planner, edits);
   }
 
   /** The planner of the shown plan, so an expired plan can be planned again. */
-  let lastPlanner: (() => Promise<Planned<RedisEditPlan>>) | null = null;
+  let lastPlanner: KeyPlanner | null = null;
 
-  async function planWith(planner: () => Promise<Planned<RedisEditPlan>>, edits: readonly KeyEdit[]): Promise<boolean> {
+  async function planWith(planner: KeyPlanner, edits: readonly KeyEdit[]): Promise<boolean> {
     state.planning = true;
+    const sessionId = options.sessionId();
     try {
-      const planned = await planner();
+      const planned = await planner(sessionId);
       state.planned = planned;
       state.edits = [...edits];
       lastPlanner = planner;
       return true;
     } catch (e: unknown) {
-      state.error = redisErrorView(useTabs().reportTabError(options.tabId(), e));
+      state.error = redisErrorView(useTabs().reportTabError(options.tabId(), e, sessionId));
       return false;
     } finally {
       state.planning = false;
@@ -121,7 +129,7 @@ export function useKeyEdit(options: KeyEditOptions) {
       state.edits = [];
       options.done(view);
     } catch (e: unknown) {
-      const cmd = useTabs().reportTabError(options.tabId(), e);
+      const cmd = useTabs().reportTabError(options.tabId(), e, sessionId);
       const view = redisErrorView(cmd);
       // The plan expired or was evicted: refused before anything ran. The
       // edits stay staged; plan them again for a fresh preview.

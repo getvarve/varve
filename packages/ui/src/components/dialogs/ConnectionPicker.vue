@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
-import { computed, useId } from 'vue';
+import { computed, ref, useId } from 'vue';
 import type { ConnectionProfile } from '../../api/records';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { pickerFormSchema } from '../../lib/forms';
@@ -20,6 +20,34 @@ const connections = computed(() => {
   const needle = (filter.value ?? '').trim().toLocaleLowerCase();
   return workspace.records.value.connections.filter((c) => c.name.toLocaleLowerCase().includes(needle));
 });
+
+const list = ref<HTMLElement | null>(null);
+const filterInput = ref<HTMLInputElement | null>(null);
+
+function items(): HTMLButtonElement[] {
+  return [...(list.value?.querySelectorAll<HTMLButtonElement>('button.item') ?? [])];
+}
+
+/** Enter in the filter picks the only match; with more matches it moves to the first one, like ArrowDown. */
+function onFilterEnter(): void {
+  const only = connections.value.length === 1 ? connections.value[0] : undefined;
+  if (only) emit('done', only);
+  else items()[0]?.focus();
+}
+
+/** Arrow keys move between the connections; ArrowUp on the first goes back to the filter. */
+function onItemKeydown(event: KeyboardEvent): void {
+  const all = items();
+  const at = all.indexOf(event.currentTarget as HTMLButtonElement);
+  if (event.key === 'ArrowDown') all[Math.min(at + 1, all.length - 1)]?.focus();
+  else if (event.key === 'ArrowUp') {
+    if (at <= 0) filterInput.value?.focus();
+    else all[at - 1]?.focus();
+  } else if (event.key === 'Home') all[0]?.focus();
+  else if (event.key === 'End') all.at(-1)?.focus();
+  else return;
+  event.preventDefault();
+}
 </script>
 
 <template>
@@ -34,11 +62,14 @@ const connections = computed(() => {
     >Filter connections</label>
     <input
       :id="filterId"
+      ref="filterInput"
       v-model="filter"
       class="input"
       placeholder="Filter connections"
       data-autofocus
       :aria-invalid="!!errors.filter"
+      @keydown.enter.prevent="onFilterEnter"
+      @keydown.down.prevent="items()[0]?.focus()"
     >
     <p
       v-if="errors.filter"
@@ -48,6 +79,7 @@ const connections = computed(() => {
       {{ errors.filter }}
     </p>
     <ul
+      ref="list"
       class="list"
       aria-label="Connections"
     >
@@ -59,6 +91,7 @@ const connections = computed(() => {
           type="button"
           class="item"
           @click="emit('done', c)"
+          @keydown="onItemKeydown"
         >
           <EngineTile :engine="c.engine" />
           <span class="name">{{ c.name }}</span>

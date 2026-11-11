@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { catalogDdl } from '../../api/catalog';
 import { ddlApply } from '../../api/ddl';
 import type { DdlApplied } from '../../api/ddl';
@@ -9,7 +9,7 @@ import { presentError, toCmdError } from '../../api/errors';
 import { useDialogs } from '../../composables/useDialogs';
 import { useToasts } from '../../composables/useToasts';
 import { latestOnly } from '../../lib/async';
-import { applyProblem } from '../../lib/ddlApply';
+import { applyProblem, planKept } from '../../lib/ddlApply';
 import type { ApplyProblem } from '../../lib/ddlApply';
 import { headerCollationDatabase, outline, sessionHeader, withoutComments } from '../../lib/ddlText';
 import { runWithConfirmation } from '../../lib/destructive';
@@ -17,7 +17,7 @@ import { formatDuration } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { useNotices } from '../notices/useNotices';
 import SqlCode from './SqlCode.vue';
-import { displayName } from './types';
+import { OBJECT_EDITOR_CONTEXT, displayName } from './types';
 import type { DdlViewProps } from './types';
 
 /**
@@ -25,7 +25,8 @@ import type { DdlViewProps } from './types';
  * highlighting, an outline, copy, save to a file and "Open in editor".
  * "Edit and run" makes the text editable and runs it with `ddl_apply`
  * (confirmation, read-only, open-transaction and collation-header rules of
- * the contract).
+ * the contract). Inside an object editor, edited DDL that has not run
+ * counts as an unsaved change of the editor.
  */
 const props = withDefaults(defineProps<DdlViewProps>(), { reportError: null, reportDirty: null });
 const emit = defineEmits<{ openSql: [sql: string]; changed: []; reconnect: [] }>();
@@ -44,6 +45,12 @@ const cursor = ref({ line: 1, column: 1 });
 const code = ref<InstanceType<typeof SqlCode> | null>(null);
 const latest = latestOnly();
 const outlineId = useId();
+const editor = inject(OBJECT_EDITOR_CONTEXT, null);
+
+function reportDirty(dirty: boolean): void {
+  if (editor) editor.reportDdlDirty(dirty);
+  else props.reportDirty?.(dirty);
+}
 
 const engine = computed(() => props.session.engine);
 const isPostgres = computed(() => engine.value === 'postgres');
@@ -54,18 +61,17 @@ const collationDatabase = computed(() => (isPostgres.value ? null : headerCollat
 const lines = computed(() => shown.value.split('\n').length);
 const edited = computed(() => text.value !== original.value);
 const name = computed(() => displayName(props.object, engine.value));
-watch(
-  () => editing.value && edited.value,
-  (dirty) => props.reportDirty?.(dirty),
-);
-onBeforeUnmount(() => props.reportDirty?.(false));
+const unsaved = computed(() => editing.value && edited.value);
+watch(unsaved, reportDirty);
+onBeforeUnmount(() => reportDirty(false));
 
 async function load(): Promise<void> {
   const token = latest.next();
   loading.value = true;
   loadError.value = null;
+  const sessionId = props.session.id;
   try {
-    const ddl = await catalogDdl(props.session.id, props.object);
+    const ddl = await catalogDdl(sessionId, props.object);
     if (!latest.isCurrent(token)) return;
     original.value = ddl;
     text.value = ddl;
@@ -73,7 +79,7 @@ async function load(): Promise<void> {
     result.value = null;
     problem.value = null;
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     if (!latest.isCurrent(token)) return;
     const p = presentError(toCmdError(error));
     loadError.value = p.detail ? `${p.message} (${p.detail})` : p.message;
@@ -83,10 +89,34 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
+// A new session (reconnect) or object: read the DDL again, but never over edits that have not run.
 watch(
   () => [props.session.id, props.object.kind, props.object.database, props.object.schema, props.object.parent, props.object.name, props.object.signature],
-  load,
+  () => {
+    if (!unsaved.value) void load();
+  },
 );
+
+/** The reload button: asks first when it would discard edited DDL. */
+async function reload(): Promise<void> {
+  if (unsaved.value) {
+    const discard = await useDialogs().askConfirm({
+      title: 'Discard the edited DDL?',
+      message: 'The DDL you edited has not run. Reloading replaces it with the DDL read from the server.',
+      confirmLabel: 'Discard and reload',
+      danger: false,
+    });
+    if (!discard) return;
+  }
+  await load();
+}
+
+/** True when a failed run may still have changed something (refusals before running change nothing). */
+function mayHaveRun(error: unknown): boolean {
+  const cmd = toCmdError(error);
+  if (planKept(error) || cmd.kind === 'invalid' || cmd.kind === 'notFound') return false;
+  return !(cmd.kind === 'session' && (cmd.error.kind === 'notFound' || cmd.error.kind === 'confirmationRequired'));
+}
 
 async function copy(): Promise<void> {
   try {
@@ -133,9 +163,10 @@ async function run(): Promise<void> {
   result.value = null;
   // MySQL/MariaDB: the object's database, needed by a collation_database header.
   const database = isPostgres.value ? null : props.object.database;
+  const sessionId = props.session.id;
   try {
     const applied = await runWithConfirmation(
-      (confirmed) => ddlApply(props.session.id, text.value, database, confirmed),
+      (confirmed) => ddlApply(sessionId, text.value, database, confirmed),
       (request) => useDialogs().askDestructive({ connectionName: props.connectionName, environment: request.environment, statements: request.statements }),
     );
     if (applied === null) return;
@@ -144,9 +175,10 @@ async function run(): Promise<void> {
     emit('changed');
     if (applied.warnings.length > 0) void useNotices().refreshRestores();
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     problem.value = applyProblem(error);
-    emit('changed');
+    // A script stops at its first failing statement; the ones before it ran and committed.
+    if (mayHaveRun(error)) emit('changed');
     // A failed run can leave a collation restore pending: show its banner at once.
     void useNotices().refreshRestores();
   } finally {
@@ -157,7 +189,7 @@ async function run(): Promise<void> {
 async function act(): Promise<void> {
   const action = problem.value?.action;
   if (action === 'reconnect') emit('reconnect');
-  else if (action === 'refresh') await load();
+  else if (action === 'refresh') await reload();
   else if (action === 'retry' || action === 'replan' || action === 'rerun') await run();
 }
 </script>
@@ -212,7 +244,7 @@ async function act(): Promise<void> {
         class="icon-btn"
         aria-label="Reload the DDL"
         :disabled="loading || running"
-        @click="load"
+        @click="reload"
       >
         <Icon name="refresh" />
       </button>

@@ -950,8 +950,9 @@ async fn read_only_and_open_transactions(ctx: &Ctx) -> TestResult {
     Ok(())
 }
 
-/// PostgreSQL values the client does not see as stored: arrays with lower
-/// bounds other than 1 (the driver drops the bounds), also behind a domain,
+/// PostgreSQL values the client does not see as a plain value: arrays with
+/// lower bounds other than 1 (the driver keeps them as the server's text,
+/// bounds included), also behind a domain,
 /// `xml` with an XML declaration (not sent to the client, while what
 /// follows it, a CRLF or an indented line, is), also behind a domain, and a
 /// key whose unique index has

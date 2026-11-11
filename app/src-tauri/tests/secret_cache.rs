@@ -16,7 +16,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 
 use varve_activity::ActivityFilter;
-use varve_app::commands::{CmdError, SecretInput, Services, TestTarget};
+use varve_app::commands::{CmdError, SecretInput, Services, TestTarget, TypedFor};
 use varve_app::sessions::SessionError;
 use varve_core::Engine;
 use varve_driver::ErrorKind;
@@ -443,6 +443,312 @@ async fn profile_changes_forget_the_cached_secrets() -> TestResult {
     s.delete_connection(&profile.id).await?;
     assert!(s.secret_cache.is_empty());
     assert!(f.keychain.inner().get(&db)?.is_none());
+    Ok(())
+}
+
+/// A secret typed for a profile is not sent once an edit moved the
+/// profile to another server (an MCP client, for example), even when the
+/// window still holds it: the call asks for it again instead. A secret
+/// typed after that edit goes out. No server needed: nothing listens on
+/// the port, and a refusal comes before any connection.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_secret_typed_for_the_old_server_is_not_sent_to_the_new_one() -> TestResult {
+    let f = fixture("typed-for")?;
+    let s = &f.services;
+    let closed = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+    let profile = s.create_connection(&input("typed", Engine::Postgres, closed))?;
+    let typed_for = profile.version;
+    let mut elsewhere = input("typed", Engine::Postgres, closed);
+    elsewhere.host = "localhost".into();
+    let moved = s.update_connection(&profile.id, &elsewhere).await?;
+
+    let refused = |error: Option<CmdError>| {
+        matches!(
+            error,
+            Some(CmdError::SecretRequired {
+                secret: SecretKindName::DbPassword
+            })
+        )
+    };
+    let opened = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::all(typed_for),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(opened), "open_session");
+    let tested = s
+        .test_connection_for(
+            TestTarget::Saved {
+                id: profile.id.clone(),
+            },
+            TypedFor::all(typed_for),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(tested), "test_connection");
+    let browsed = s
+        .open_database_session_for(
+            &profile.id,
+            "other",
+            TypedFor::all(typed_for),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(browsed), "open_database_session");
+    assert_eq!(refused_logins(s, &profile.id)?, 0, "nothing was sent");
+
+    // A rename later changes nothing: a secret typed for the moved
+    // profile is sent (and fails on the closed port, not before).
+    let mut renamed = elsewhere.clone();
+    renamed.name = "renamed".into();
+    s.update_connection(&profile.id, &renamed).await?;
+    let sent = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::all(moved.version),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(sent.is_some(), "nothing listens on the port");
+    assert!(!refused(sent), "a secret typed for the new server goes out");
+    Ok(())
+}
+
+/// Every typed secret is checked against the last edit that matters for
+/// its own kind. The profile reaches its database through a bastion with
+/// a key file; the database password is typed for version 1, then another
+/// key file is chosen (version 2) and its passphrase typed. Both go out:
+/// the password still belongs to the same server and route. Only a
+/// passphrase typed for the old key file is refused, and by its own kind.
+/// No server needed: nothing listens on the bastion's port.
+#[tokio::test(flavor = "multi_thread")]
+async fn secrets_typed_for_different_versions_are_checked_one_by_one() -> TestResult {
+    let f = fixture("typed-for-mixed")?;
+    let s = &f.services;
+    let mut tunnelled = ssh_input("mixed")?;
+    tunnelled.ssh.auth = SshAuthMethod::KeyFile;
+    tunnelled.ssh.key_path = Some(f.dir.join("old-key").to_string_lossy().into_owned());
+    let profile = s.create_connection(&tunnelled)?;
+    let password_typed_for = profile.version;
+    let mut other_key = tunnelled.clone();
+    other_key.ssh.key_path = Some(f.dir.join("new-key").to_string_lossy().into_owned());
+    let edited = s.update_connection(&profile.id, &other_key).await?;
+    assert!(edited.version > password_typed_for);
+    assert_eq!(
+        s.secret_invalidated_at(&profile.id, SecretKindName::DbPassword)?,
+        None,
+        "another key file leaves the database password usable"
+    );
+    assert_eq!(
+        s.secret_invalidated_at(&profile.id, SecretKindName::SshKeyPassphrase)?,
+        Some(edited.version)
+    );
+
+    let asks_again =
+        |error: &Option<CmdError>| matches!(error, Some(CmdError::SecretRequired { .. }));
+    let mixed = TypedFor {
+        password: Some(password_typed_for),
+        ssh_secret: Some(edited.version),
+        tls_passphrase: None,
+    };
+    let opened = s
+        .open_session_for(
+            &profile.id,
+            mixed,
+            Some(secret("pw")?),
+            Some(secret("new-passphrase")?),
+            None,
+        )
+        .await
+        .err();
+    assert!(opened.is_some(), "nothing listens on the bastion's port");
+    assert!(!asks_again(&opened), "open_session: {opened:?}");
+    let tested = s
+        .test_connection_for(
+            TestTarget::Saved {
+                id: profile.id.clone(),
+            },
+            mixed,
+            Some(secret("pw")?),
+            Some(secret("new-passphrase")?),
+            None,
+        )
+        .await
+        .err();
+    assert!(!asks_again(&tested), "test_connection: {tested:?}");
+    let browsed = s
+        .open_database_session_for(
+            &profile.id,
+            "other",
+            mixed,
+            Some(secret("pw")?),
+            Some(secret("new-passphrase")?),
+            None,
+        )
+        .await
+        .err();
+    assert!(!asks_again(&browsed), "open_database_session: {browsed:?}");
+
+    // The passphrase of the old key file is the one that is asked again.
+    let stale = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::all(password_typed_for),
+            Some(secret("pw")?),
+            Some(secret("old-passphrase")?),
+            None,
+        )
+        .await
+        .err();
+    assert!(
+        matches!(
+            stale,
+            Some(CmdError::SecretRequired {
+                secret: SecretKindName::SshKeyPassphrase
+            })
+        ),
+        "{stale:?}"
+    );
+    Ok(())
+}
+
+/// A typed secret that comes without a version is sent only while no edit
+/// ever made secrets of its kind unusable; after such an edit it cannot
+/// be told from one typed for the old settings, so it is asked again.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_typed_secret_without_a_version_is_refused_once_the_server_changed() -> TestResult {
+    let f = fixture("typed-for-none")?;
+    let s = &f.services;
+    let closed = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+    let profile = s.create_connection(&input("unversioned", Engine::Postgres, closed))?;
+    let refused = |error: &Option<CmdError>| {
+        matches!(
+            error,
+            Some(CmdError::SecretRequired {
+                secret: SecretKindName::DbPassword
+            })
+        )
+    };
+
+    // Never moved: it is sent (and fails on the closed port).
+    let sent = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::default(),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(sent.is_some(), "nothing listens on the port");
+    assert!(!refused(&sent), "{sent:?}");
+
+    let mut elsewhere = input("unversioned", Engine::Postgres, closed);
+    elsewhere.host = "localhost".into();
+    let moved = s.update_connection(&profile.id, &elsewhere).await?;
+    let failed_before = refused_logins(s, &profile.id)?;
+    let opened = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::default(),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(&opened), "open_session: {opened:?}");
+    let tested = s
+        .test_connection_for(
+            TestTarget::Saved {
+                id: profile.id.clone(),
+            },
+            TypedFor::default(),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(&tested), "test_connection: {tested:?}");
+    let browsed = s
+        .open_database_session_for(
+            &profile.id,
+            "other",
+            TypedFor::default(),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(refused(&browsed), "open_database_session: {browsed:?}");
+    assert_eq!(
+        refused_logins(s, &profile.id)?,
+        failed_before,
+        "nothing was sent"
+    );
+
+    // A call without typed secrets needs no version, and a version for
+    // the moved profile is accepted as before.
+    let plain = s
+        .open_session_for(&profile.id, TypedFor::default(), None, None, None)
+        .await
+        .err();
+    assert!(!refused(&plain), "{plain:?}");
+    let versioned = s
+        .open_session_for(
+            &profile.id,
+            TypedFor::all(moved.version),
+            Some(secret("pw")?),
+            None,
+            None,
+        )
+        .await
+        .err();
+    assert!(!refused(&versioned), "{versioned:?}");
+    Ok(())
+}
+
+/// The window sends one version per typed secret, in camelCase; a secret
+/// it does not send has none.
+#[test]
+fn the_versions_of_typed_secrets_are_read_per_secret() -> TestResult {
+    let mixed: TypedFor = serde_json::from_value(serde_json::json!({
+        "password": 1,
+        "sshSecret": 2
+    }))?;
+    assert_eq!(
+        mixed,
+        TypedFor {
+            password: Some(1),
+            ssh_secret: Some(2),
+            tls_passphrase: None,
+        }
+    );
+    let all: TypedFor = serde_json::from_value(serde_json::json!({
+        "password": null,
+        "sshSecret": null,
+        "tlsPassphrase": 4
+    }))?;
+    assert_eq!(all.tls_passphrase, Some(4));
+    assert_eq!(all.password, None);
+    assert!(serde_json::from_value::<TypedFor>(serde_json::json!(3)).is_err());
     Ok(())
 }
 

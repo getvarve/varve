@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue';
+import { computed, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
 import { redisPubsub, redisPublish } from '../../api/redis';
 import type { PubSubNameKind, PubSubSnapshot } from '../../api/redis';
 import { useDialogs } from '../../composables/useDialogs';
-import { useTabs } from '../../composables/useTabs';
+import { useTabs, useTabVisible } from '../../composables/useTabs';
 import { useToasts } from '../../composables/useToasts';
+import { useVisibleClock } from '../../composables/useVisibleClock';
 import { runWithConfirmation } from '../../lib/destructive';
 import { textValue } from '../../lib/redisEdit';
 import { redisErrorView } from '../../lib/redisErrors';
 import {
+  EndFollower,
   exportMessages,
   gapText,
   isGap,
@@ -107,7 +109,7 @@ async function publish(): Promise<void> {
     );
     if (receivers !== null) lastPublish.value = { receivers, at: Date.now() };
   } catch (e: unknown) {
-    const view = redisErrorView(useTabs().reportTabError(props.tabId, e));
+    const view = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId));
     pubError.value = view.hint ? `${view.message} ${view.hint}` : view.message;
   } finally {
     publishing.value = false;
@@ -118,11 +120,12 @@ async function publish(): Promise<void> {
 const snapshot = ref<PubSubSnapshot | null>(null);
 const snapshotError = ref<string | null>(null);
 async function loadSnapshot(): Promise<void> {
+  const sessionId = props.sessionId;
   try {
-    snapshot.value = await redisPubsub(props.sessionId, null, 200);
+    snapshot.value = await redisPubsub(sessionId, null, 200);
     snapshotError.value = null;
   } catch (e: unknown) {
-    snapshotError.value = redisErrorView(useTabs().reportTabError(props.tabId, e)).message;
+    snapshotError.value = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId)).message;
   }
 }
 watch(() => props.sessionId, loadSnapshot);
@@ -132,16 +135,8 @@ onMounted(loadSnapshot);
 const filter = ref('');
 const pretty = ref(true);
 const selectedId = ref<number | null>(null);
-const now = ref(Date.now());
-let clock: ReturnType<typeof setInterval> | null = null;
-onMounted(() => {
-  clock = setInterval(() => {
-    now.value = Date.now();
-  }, 1000);
-});
-onBeforeUnmount(() => {
-  if (clock) clearInterval(clock);
-});
+// Paused while the tab is hidden (its view stays mounted).
+const now = useVisibleClock();
 
 const shown = computed<ViewEntry[]>(() => {
   void panel.value.version;
@@ -167,7 +162,7 @@ async function copyCommand(command: string): Promise<void> {
 }
 const rate = computed(() => {
   void panel.value.version;
-  return messageRate(panel.value.times, now.value);
+  return messageRate(panel.value.rate, now.value);
 });
 const live = computed(() => panel.value.subscriptionId !== null);
 
@@ -211,6 +206,75 @@ function onRowKey(event: KeyboardEvent, index: number): void {
   selectedId.value = target.id;
   document.getElementById(`${uid}-m-${target.id}`)?.focus();
 }
+
+// Following new messages: a list scrolled to the end stays at the end as
+// batches arrive; a list scrolled up keeps the rows in view where they are
+// (also when old rows are dropped from the top) and offers a jump to the end.
+// While the tab is hidden the list is `display: none`: it measures 0 and loses
+// its scroll offset, so the follower measures nothing then and puts the list
+// back (at the end, or where it was) when the tab is shown again.
+const rowsEl = ref<HTMLElement | null>(null);
+const tabVisible = useTabVisible();
+const follower = reactive(new EndFollower()) as EndFollower;
+let lastReceived = panel.value.received;
+/** The first row in view and its distance from the top of the list, before a batch is rendered. */
+let anchor: { id: string; offset: number } | null = null;
+
+function firstRowInView(el: HTMLElement): { id: string; offset: number } | null {
+  const top = el.getBoundingClientRect().top;
+  for (const row of el.querySelectorAll<HTMLElement>('[data-entry]')) {
+    const box = row.getBoundingClientRect();
+    if (box.bottom > top) return { id: row.dataset.entry ?? '', offset: box.top - top };
+  }
+  return null;
+}
+
+function scrollToEnd(): void {
+  follower.jumpToEnd(rowsEl.value);
+}
+
+function onRowsScroll(): void {
+  const el = rowsEl.value;
+  if (el) follower.scrolled(el, tabVisible.value);
+}
+
+watch(
+  () => panel.value.version,
+  () => {
+    const el = rowsEl.value;
+    follower.beforeBatch(el, tabVisible.value);
+    anchor = el && tabVisible.value && !follower.following ? firstRowInView(el) : null;
+  },
+  { flush: 'pre' },
+);
+watch(
+  () => panel.value.version,
+  () => {
+    const el = rowsEl.value;
+    const arrived = Math.max(0, panel.value.received - lastReceived);
+    lastReceived = panel.value.received;
+    const hold = follower.afterBatch(el, tabVisible.value, arrived, panel.value.messages.length === 0);
+    if (!hold || !el || !anchor) return;
+    const row = el.querySelector<HTMLElement>(`[data-entry="${CSS.escape(anchor.id)}"]`);
+    // The anchor row itself was dropped: there is nothing to hold on to.
+    if (row) el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.offset;
+    follower.scrolled(el, true);
+  },
+  { flush: 'post' },
+);
+watch(
+  tabVisible,
+  (visible) => {
+    const el = rowsEl.value;
+    if (visible && el) follower.shown(el);
+  },
+  { flush: 'post' },
+);
+// Another panel (a reconnect): start counting from its messages.
+watch(panel, (p) => {
+  lastReceived = p.received;
+  follower.restart();
+});
 </script>
 
 <template>
@@ -322,6 +386,7 @@ function onRowKey(event: KeyboardEvent, index: number): void {
               type="button"
               class="icon-btn"
               :aria-label="`Unsubscribe from ${n.name}`"
+              :disabled="panel.busy"
               @click="unsubscribe(n)"
             >
               <Icon name="close" />
@@ -562,7 +627,11 @@ function onRowKey(event: KeyboardEvent, index: number): void {
             class="num"
           >Size</span>
         </div>
-        <div class="rows">
+        <div
+          ref="rowsEl"
+          class="rows"
+          @scroll="onRowsScroll"
+        >
           <template
             v-for="(m, i) in shown"
             :key="m.id"
@@ -571,6 +640,7 @@ function onRowKey(event: KeyboardEvent, index: number): void {
               v-if="isGap(m)"
               class="gap"
               role="row"
+              :data-entry="m.id"
             >
               <span
                 role="cell"
@@ -582,6 +652,7 @@ function onRowKey(event: KeyboardEvent, index: number): void {
               :id="`${uid}-m-${m.id}`"
               class="row mono"
               role="row"
+              :data-entry="m.id"
               tabindex="0"
               :aria-selected="m.id === selectedId"
               @click="selectedId = m.id"
@@ -618,6 +689,14 @@ function onRowKey(event: KeyboardEvent, index: number): void {
           </p>
         </div>
       </div>
+      <button
+        v-if="follower.unseen > 0"
+        type="button"
+        class="btn compact new-messages"
+        @click="scrollToEnd"
+      >
+        {{ formatCount(String(follower.unseen)) }} new message{{ follower.unseen === 1 ? '' : 's' }}
+      </button>
 
       <div
         v-if="selected"
@@ -841,6 +920,12 @@ hr {
   background: var(--surface);
 }
 
+.new-messages {
+  flex-shrink: 0;
+  align-self: center;
+  margin: 6px 0;
+}
+
 .toolbar {
   display: flex;
   flex-shrink: 0;
@@ -925,10 +1010,15 @@ hr {
   outline: none;
 }
 
-.rows .row:focus-visible,
+/* Selection is the tint and left bar; keyboard focus is its own ring, so the two never look alike. */
 .rows .row[aria-selected='true'] {
   background: var(--accent-tint);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rows .row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .ellipsis {

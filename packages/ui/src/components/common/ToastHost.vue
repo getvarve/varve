@@ -121,19 +121,19 @@ function pinLeaving(el: Element): void {
 }
 
 .edge-success {
-  box-shadow: inset 3px 0 0 var(--success), var(--shadow-dialog);
+  box-shadow: inset 3px 0 0 var(--success), var(--shadow-dialog), var(--glass-edge);
 }
 
 .edge-info {
-  box-shadow: inset 3px 0 0 var(--info), var(--shadow-dialog);
+  box-shadow: inset 3px 0 0 var(--info), var(--shadow-dialog), var(--glass-edge);
 }
 
 .edge-warning {
-  box-shadow: inset 3px 0 0 var(--warning), var(--shadow-dialog);
+  box-shadow: inset 3px 0 0 var(--warning), var(--shadow-dialog), var(--glass-edge);
 }
 
 .edge-danger {
-  box-shadow: inset 3px 0 0 var(--danger), var(--shadow-dialog);
+  box-shadow: inset 3px 0 0 var(--danger), var(--shadow-dialog), var(--glass-edge);
 }
 
 .text {

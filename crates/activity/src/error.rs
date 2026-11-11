@@ -16,7 +16,8 @@ pub enum ActivityError {
     /// The event breaks another rule of the event model.
     #[error("invalid activity event: {0}")]
     InvalidEvent(String),
-    /// A `before_id` cursor names an event that does not exist (any more).
+    /// A `before_id` is not a page cursor, or is a bare event id (the old
+    /// cursor form) of an event that does not exist (any more).
     #[error("unknown activity cursor `{0}`")]
     UnknownCursor(String),
     /// The retention setting is not usable.

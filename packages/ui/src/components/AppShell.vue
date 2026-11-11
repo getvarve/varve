@@ -125,7 +125,12 @@ onBeforeUnmount(() => {
       </aside>
 
       <main class="main">
-        <RouterView />
+        <!-- The workspace stays alive on the other pages, so its open tabs keep their views and unsaved work. -->
+        <RouterView v-slot="{ Component }">
+          <KeepAlive include="WorkspaceView">
+            <component :is="Component" />
+          </KeepAlive>
+        </RouterView>
       </main>
     </div>
 
@@ -148,10 +153,17 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* 84px clears the macOS window buttons drawn over the title bar. */
   padding: 0 12px 0 84px;
   background: var(--chrome);
   border-bottom: 1px solid var(--border);
   user-select: none;
+}
+
+/* Windows and Linux draw their window buttons in a frame of their own. */
+:root[data-platform='windows'] .titlebar,
+:root[data-platform='linux'] .titlebar {
+  padding-left: 12px;
 }
 
 .brand {
@@ -219,6 +231,11 @@ onBeforeUnmount(() => {
 .menu :deep(a:hover) {
   background: var(--surface-raised);
   color: var(--text);
+}
+
+/* Drawn inside the row: the sidebar clips an outline outside it. */
+.menu-item:focus-visible {
+  outline-offset: -2px;
 }
 
 .menu-item.router-link-exact-active {

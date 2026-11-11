@@ -48,14 +48,15 @@ async function run(): Promise<void> {
   if (!q) return;
   const token = requests.next();
   querying.value = true;
+  const sessionId = props.sessionId;
   try {
-    const out = await redisModuleQuery(props.sessionId, props.keyName, q);
+    const out = await redisModuleQuery(sessionId, props.keyName, q);
     if (!requests.isCurrent(token)) return;
     queryError.value = out ? null : 'This key no longer exists.';
     result.value = out;
   } catch (e: unknown) {
     if (!requests.isCurrent(token)) return;
-    const view = redisErrorView(useTabs().reportTabError(props.tabId, e));
+    const view = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId));
     queryError.value = view.hint ? `${view.message} ${view.hint}` : view.message;
   } finally {
     if (requests.isCurrent(token)) querying.value = false;

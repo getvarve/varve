@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import type { VueWrapper } from '@vue/test-utils';
+import { defineComponent, h, inject } from 'vue';
 import type * as CatalogModule from '../../api/catalog';
 import type * as DdlModule from '../../api/ddl';
 import type { DropImpact, EngineChange, ObjectDetails, ObjectRef } from '../../api/ddl';
@@ -14,6 +15,7 @@ import PolicyEditor from './PolicyEditor.vue';
 import RuleEditor from './RuleEditor.vue';
 import SchemaEditor from './SchemaEditor.vue';
 import TableDropView from './TableDropView.vue';
+import { OBJECT_EDITOR_CONTEXT } from './types';
 
 const planned: EngineChange[] = [];
 const applied: string[] = [];
@@ -110,6 +112,18 @@ function session(engine: SessionInfo['engine'], extra: Partial<SessionInfo> = {}
 const ref = (kind: ObjectRef['kind'], name: string, extra: Partial<ObjectRef> = {}): ObjectRef => ({ kind, database: 'shop', schema: null, parent: null, name, signature: null, ...extra });
 
 const stubs = { SqlCode: true, DdlView: true };
+
+/** A DDL section that reports edited DDL to its editor the way `DdlView` does (`reportDirty`), without the rest of it. */
+const DdlStub = defineComponent({
+  name: 'DdlView',
+  emits: ['changed'],
+  setup(_props, { expose }) {
+    const editor = inject(OBJECT_EDITOR_CONTEXT, null);
+    expose({ reportDirty: (dirty: boolean) => editor?.reportDdlDirty(dirty) });
+    return () => h('div', { class: 'ddl-stub' });
+  },
+});
+const ddlStubs = { SqlCode: true, DdlView: DdlStub };
 
 /** Waits for the debounced plan (400 ms) and the promises after it. */
 async function settle(): Promise<void> {
@@ -362,6 +376,201 @@ describe('schema editor', () => {
     await wrapper.find('.drop input[type="checkbox"]').setValue(true);
     await settle();
     expect(lastChange()).toEqual({ object: 'schema', action: 'drop', name: 'sales', behavior: 'cascade' });
+  });
+});
+
+describe('editor reloads keep the form (audit P4)', () => {
+  const sales = (owner: string): ObjectDetails => ({ engine: 'postgres', object: { kind: 'schema', name: 'sales', owner, extension: null, comment: null, system: false } });
+
+  async function ddlTab(wrapper: VueWrapper) {
+    await button(wrapper, 'DDL').trigger('click');
+    const ddl = wrapper.findComponent({ name: 'DdlView' });
+    expect(ddl.exists()).toBe(true);
+    return ddl;
+  }
+
+  it('keeps typed fields and the DDL section mounted when the DDL tab ran something, and takes the rest from the server', async () => {
+    details['schema:sales'] = sales('app');
+    const dirty: boolean[] = [];
+    const wrapper = mount(SchemaEditor, {
+      props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales'), reportDirty: (value: boolean) => dirty.push(value) },
+      global: { stubs },
+    });
+    await settle();
+    await input(wrapper, 'Name').setValue('sales2');
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    details['schema:sales'] = sales('bob');
+    ddl.vm.$emit('changed');
+    await wrapper.vm.$nextTick();
+    // Read again in place: no "Loading" over the section, the DDL view is the same one.
+    expect(wrapper.text()).not.toContain('Loading');
+    expect(wrapper.findComponent({ name: 'DdlView' }).vm).toBe(ddl.vm);
+    await settle();
+    expect(wrapper.text()).toContain('owner bob');
+    await button(wrapper, 'Schema').trigger('click');
+    expect((input(wrapper, 'Name').element as HTMLInputElement).value).toBe('sales2');
+    expect(dirty.at(-1)).toBe(true);
+    expect(lastChange()).toMatchObject({ object: 'schema', action: 'alter', name: 'sales' });
+    wrapper.unmount();
+  });
+
+  it('turns into a create form with the typed fields when the object is gone', async () => {
+    details['schema:sales'] = sales('app');
+    const wrapper = mount(SchemaEditor, { props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales') }, global: { stubs } });
+    await settle();
+    await input(wrapper, 'Name').setValue('sales2');
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    Reflect.deleteProperty(details, 'schema:sales');
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).toContain('sales no longer exists. Saving creates it from the form.');
+    expect((input(wrapper, 'Name').element as HTMLInputElement).value).toBe('sales2');
+    expect(lastChange()).toMatchObject({ object: 'schema', action: 'create', name: 'sales2' });
+    wrapper.unmount();
+  });
+
+  const mountSales = (extra: Record<string, unknown> = {}) =>
+    mount(SchemaEditor, {
+      props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales'), ...extra },
+      global: { stubs: ddlStubs },
+    });
+  /** The component instance behind a wrapper (the stub exposes an API, so its public `vm` is not one stable object). */
+  const instance = (found: VueWrapper): number => found.vm.$.uid;
+  const reportDdlDirty = (ddl: VueWrapper, dirty: boolean): void => (ddl.vm as unknown as { reportDirty: (dirty: boolean) => void }).reportDirty(dirty);
+
+  it('keeps the sections, with the edited DDL, when the object is gone and only the DDL section holds edits', async () => {
+    details['schema:sales'] = sales('app');
+    const wrapper = mountSales();
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    // A script that dropped the object and then failed: the edited text has not run, and the object is gone.
+    reportDdlDirty(ddl, true);
+    Reflect.deleteProperty(details, 'schema:sales');
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).toContain('sales no longer exists. The DDL you edited is kept.');
+    expect(instance(wrapper.findComponent({ name: 'DdlView' }))).toBe(instance(ddl));
+    expect(wrapper.text()).not.toContain('not found');
+    // Once the DDL ran (the object exists again), the editor reads it as usual.
+    details['schema:sales'] = sales('bob');
+    reportDdlDirty(ddl, false);
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).not.toContain('no longer exists');
+    expect(wrapper.text()).toContain('owner bob');
+    wrapper.unmount();
+  });
+
+  it('does not turn into a create form over edited DDL: the form and the DDL section both stay', async () => {
+    details['schema:sales'] = sales('app');
+    const wrapper = mountSales();
+    await settle();
+    await input(wrapper, 'Name').setValue('sales2');
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    reportDdlDirty(ddl, true);
+    Reflect.deleteProperty(details, 'schema:sales');
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).toContain('sales no longer exists. The DDL you edited and the form are kept.');
+    expect(wrapper.text()).not.toContain('Saving creates it from the form');
+    expect(instance(wrapper.findComponent({ name: 'DdlView' }))).toBe(instance(ddl));
+    await button(wrapper, 'Schema').trigger('click');
+    expect((input(wrapper, 'Name').element as HTMLInputElement).value).toBe('sales2');
+    wrapper.unmount();
+  });
+
+  it('keeps edited DDL mounted while another section shows, and lets a clean DDL section go', async () => {
+    details['schema:sales'] = sales('app');
+    const dirty: boolean[] = [];
+    const wrapper = mountSales({ reportDirty: (value: boolean) => dirty.push(value) });
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    reportDdlDirty(ddl, true);
+    await wrapper.vm.$nextTick();
+    expect(dirty.at(-1)).toBe(true);
+    await button(wrapper, 'Schema').trigger('click');
+    const kept = wrapper.findComponent({ name: 'DdlView' });
+    expect(kept.exists()).toBe(true);
+    expect(instance(kept)).toBe(instance(ddl));
+    // Hidden through the wrapper the frame keeps it in, and shown again with the section.
+    const hidden = (): boolean => (wrapper.findComponent({ name: 'DdlView' }).element.parentElement as HTMLElement).style.display === 'none';
+    expect(hidden()).toBe(true);
+    expect(input(wrapper, 'Name').exists()).toBe(true);
+    await button(wrapper, 'DDL').trigger('click');
+    expect(hidden()).toBe(false);
+    reportDdlDirty(ddl, false);
+    await button(wrapper, 'Schema').trigger('click');
+    expect(wrapper.findComponent({ name: 'DdlView' }).exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('keeps an edit of a field that also changed on the server, names the field and offers the value of the server', async () => {
+    details['schema:sales'] = { engine: 'postgres', object: { kind: 'schema', name: 'sales', owner: 'app', extension: null, comment: 'first', system: false } };
+    const wrapper = mountSales();
+    await settle();
+    await input(wrapper, 'Comment').setValue('mine');
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    // A change of a field the user did not edit is taken without a word.
+    details['schema:sales'] = { engine: 'postgres', object: { kind: 'schema', name: 'sales', owner: 'bob', extension: null, comment: 'first', system: false } };
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).not.toContain('changed on the server');
+    // The comment changed on the server too: the edit stays and the notice says so.
+    details['schema:sales'] = { engine: 'postgres', object: { kind: 'schema', name: 'sales', owner: 'bob', extension: null, comment: 'theirs', system: false } };
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).toContain("Comment changed on the server since you edited it. Your value is kept: saving overwrites the server's.");
+    await button(wrapper, 'Schema').trigger('click');
+    expect((input(wrapper, 'Comment').element as HTMLTextAreaElement).value).toBe('mine');
+    // The notice stays through a reload that finds nothing new, until the user decides.
+    await button(wrapper, 'DDL').trigger('click');
+    wrapper.findComponent({ name: 'DdlView' }).vm.$emit('changed');
+    await settle();
+    expect(wrapper.text()).toContain('Comment changed on the server');
+    await button(wrapper, "Take the server's value").trigger('click');
+    await settle();
+    expect(wrapper.text()).not.toContain('changed on the server');
+    expect(wrapper.text()).not.toContain('Unsaved changes');
+    await button(wrapper, 'Schema').trigger('click');
+    expect((input(wrapper, 'Comment').element as HTMLTextAreaElement).value).toBe('theirs');
+    wrapper.unmount();
+  });
+
+  it('keeps the drop in progress when the object is read again', async () => {
+    details['schema:sales'] = sales('app');
+    const wrapper = mount(SchemaEditor, { props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales'), intent: 'drop' }, global: { stubs } });
+    await settle();
+    await wrapper.find('.drop input[type="checkbox"]').setValue(true);
+    await settle();
+    const ddl = await ddlTab(wrapper);
+    ddl.vm.$emit('changed');
+    await settle();
+    expect(lastChange()).toEqual({ object: 'schema', action: 'drop', name: 'sales', behavior: 'cascade' });
+    wrapper.unmount();
+  });
+
+  it('does not count a stored CRLF text that comes back with LF line breaks as an edit', async () => {
+    details['schema:sales'] = { engine: 'postgres', object: { kind: 'schema', name: 'sales', owner: 'app', extension: null, comment: 'first\r\nsecond', system: false } };
+    const wrapper = mount(SchemaEditor, { props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales') }, global: { stubs } });
+    await settle();
+    await input(wrapper, 'Comment').setValue('first\nsecond');
+    await settle();
+    expect(wrapper.text()).not.toContain('Unsaved changes');
+    wrapper.unmount();
+  });
+
+  it('says when edits change nothing on the server', async () => {
+    details['schema:sales'] = sales('app');
+    const wrapper = mount(SchemaEditor, { props: { session: session('postgres', { database: 'shop' }), connectionName: 'Shop', object: ref('schema', 'sales') }, global: { stubs } });
+    await settle();
+    await input(wrapper, 'Name').setValue(' sales ');
+    await settle();
+    expect(wrapper.text()).toContain('These edits change nothing on the server.');
+    wrapper.unmount();
   });
 });
 

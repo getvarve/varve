@@ -1,22 +1,23 @@
 <script setup lang="ts">
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
 import { presentError } from '../../api/errors';
 import { KEY_TYPE_FILTERS, keyTypeName, keyTypeOfFilter, moduleTypeFilters, redisModules, redisScan } from '../../api/redis';
 import type { BulkFilter, DbKeyspace, KeyEntry, RedisEditRequest } from '../../api/redis';
-import { scanBinding, useTabs } from '../../composables/useTabs';
+import { useDialogs } from '../../composables/useDialogs';
+import { scanBinding, useLastSession, useTabs, useTabVisible } from '../../composables/useTabs';
 import type { KeysTab } from '../../composables/useTabs';
 import { useToasts } from '../../composables/useToasts';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { isLostSession } from '../../lib/connectFlow';
-import { scanFormSchema, SCAN_COUNTS } from '../../lib/forms';
+import { scanFormSchema, SCAN_BATCH_BUDGET_MS, SCAN_COUNTS } from '../../lib/forms';
 import { domId } from '../../lib/domId';
 import { KeyIndex, MAX_SCANNED_KEYS } from '../../lib/keyIndex';
 import type { KeyRow } from '../../lib/keyIndex';
 import { redisErrorView } from '../../lib/redisErrors';
 import { createdKeyType } from '../../lib/redisEdit';
-import { entryForKey } from '../../lib/redisKeys';
+import { entryForKey, scanBatch } from '../../lib/redisKeys';
 import type { RedisErrorView } from '../../lib/redisErrors';
 import { initCommandProblem } from '../../lib/redisInit';
 import { requiredFields } from '../../lib/schemaRequired';
@@ -81,10 +82,17 @@ const ui = reactive<{ scanning: boolean; error: RedisErrorView | null; retryFrom
 });
 
 const sessionId = computed(() => props.tab.session?.id ?? null);
+// The key viewer stays mounted on the last session while the tab has none, so staged edits survive a lost connection.
+const lastSession = useLastSession(() => props.tab);
 const currentDb = computed(() => props.tab.db ?? profile.value?.options.redisDb ?? 0);
 const dbInfo = computed(() => ui.keyspace.find((d) => d.db === currentDb.value) ?? null);
 
-/** One SCAN step with the submitted pattern, type and COUNT of the tab. */
+/**
+ * SCAN with the submitted pattern, type and COUNT of the tab, step after step
+ * until `tab.count` more keys were found, the scan is complete or capped, or
+ * the time budget is used (MATCH and TYPE filter after sampling, so one step
+ * of a selective pattern often finds nothing). "Stop" ends it early.
+ */
 async function scan(fromStart: boolean): Promise<void> {
   const tab = state();
   const session = sessionId.value;
@@ -98,6 +106,8 @@ async function scan(fromStart: boolean): Promise<void> {
   tab.scanToken += 1;
   const token = tab.scanToken;
   const isCurrent = (): boolean => state()?.scanToken === token;
+  scanRuns += 1;
+  const run = scanRuns;
   ui.scanning = true;
   ui.error = null;
   if (restart) {
@@ -108,37 +118,85 @@ async function scan(fromStart: boolean): Promise<void> {
     tab.selected = null;
     tab.scanned = false;
     tab.scanFor = binding;
+    // The first scan of a new session: the key that was open stays open.
+    restoreHeld();
   }
+  const { pattern, typeFilter, count } = tab;
   try {
-    const page = await redisScan(session, tab.cursor ?? '0', tab.pattern, keyTypeOfFilter(tab.typeFilter), tab.count);
-    if (!isCurrent()) return;
-    const current = state();
-    if (!current || current.scanFor !== binding || scanBinding(current) !== binding) return;
-    const { capped } = current.index.add(page.keys);
-    current.keysVersion += 1;
-    current.capped = capped;
-    // A page can hold fewer keys than COUNT (even none) while the cursor is not 0; keep going on "load more".
-    // At the cap the scan stops: the user narrows the pattern instead.
-    current.cursor = capped ? '0' : page.cursor;
-    current.scanned = true;
+    await scanBatch({
+      cursor: tab.cursor ?? '0',
+      target: count,
+      budgetMs: SCAN_BATCH_BUDGET_MS,
+      step: async (cursor) => {
+        const page = await redisScan(session, cursor, pattern, keyTypeOfFilter(typeFilter), count);
+        // A newer scan, Stop, an unmount or a database switch wins over this answer.
+        if (!isCurrent()) return null;
+        const current = state();
+        if (!current || current.scanFor !== binding || scanBinding(current) !== binding) return null;
+        const { added, capped } = current.index.add(page.keys);
+        current.keysVersion += 1;
+        current.capped = capped;
+        // A page can hold fewer keys than COUNT (even none) while the cursor is not 0; the batch goes on.
+        // At the cap the scan stops: the user narrows the pattern instead.
+        const next = capped ? '0' : page.cursor;
+        current.cursor = next;
+        current.scanned = true;
+        return { added, cursor: next, capped };
+      },
+    });
   } catch (e: unknown) {
     if (!isCurrent()) return;
-    const cmd = tabs.reportTabError(props.tab.id, e);
+    const cmd = tabs.reportTabError(props.tab.id, e, session);
     if (!isLostSession(cmd)) {
       // MULTI_OPEN (a console MULTI block), a profile edited to another
       // server, and other refusals each say what to do next.
       ui.error = redisErrorView(cmd);
-      ui.retryFromStart = restart;
+      // Steps that succeeded saved their cursor and keys: the retry goes on from there.
+      // Only a scan whose first step failed has nothing to continue.
+      ui.retryFromStart = state()?.cursor == null;
     }
   } finally {
-    if (isCurrent()) ui.scanning = false;
+    // Also when the answer is stale because the tab's scan was reset from outside (a reconnect,
+    // a database switch) and nothing scans now; a newer scan of this browser keeps its own state.
+    if (run === scanRuns) ui.scanning = false;
   }
 }
 
-const submitScan = handleSubmit((form) => {
+/** Counts the scans this browser started; only the newest one may say that scanning ended. */
+let scanRuns = 0;
+
+/** Ends the running scan batch; the keys found so far stay, and "Load more" continues from the last cursor. */
+function stopScan(): void {
+  const tab = state();
+  if (!tab || !ui.scanning) return;
+  tab.scanToken += 1;
+  ui.scanning = false;
+  // A first page that never arrived leaves the tab unscanned, so Scan starts again from the start.
+  if (tab.cursor === null) tab.scanned = false;
+}
+
+/**
+ * Staged edits of the selected key are dropped by what is about to happen
+ * (another key, a new scan, another database): ask first, like other editors do.
+ */
+async function confirmDropEdits(what: string): Promise<boolean> {
+  if (!state()?.unsaved) return true;
+  return useDialogs().askConfirm({
+    title: 'Discard unsaved changes?',
+    message: `The changes to ${viewerEntry.value?.display ?? 'the selected key'} have not been saved. ${what} discards them.`,
+    confirmLabel: 'Discard',
+    danger: true,
+  });
+}
+
+const submitScan = handleSubmit(async (form) => {
+  // Enter in a field submits also while the Scan button is off (no session): nothing to scan on then.
+  if (!state() || !sessionId.value) return;
+  if (!(await confirmDropEdits('Scanning again'))) return;
   const tab = state();
   if (!tab) return;
-  tab.pattern = form.pattern.trim();
+  // The pattern is sent as typed: keys with leading or trailing spaces are matched too.
+  tab.pattern = form.pattern;
   tab.typeFilter = form.typeFilter;
   tab.count = form.count;
   tab.delimiter = form.delimiter;
@@ -162,14 +220,19 @@ onMounted(start);
  * offers the core types only.
  */
 const moduleTypes = ref<string[]>([]);
+/** RedisJSON is available, so "New key" offers JSON documents (from the same module report). */
+const jsonAvailable = ref(false);
 watch(
   sessionId,
   async (session) => {
     moduleTypes.value = [];
+    jsonAvailable.value = false;
     if (!session) return;
     try {
       const report = await redisModules(session);
-      if (sessionId.value === session) moduleTypes.value = report.keyTypes;
+      if (sessionId.value !== session) return;
+      moduleTypes.value = report.keyTypes;
+      jsonAvailable.value = report.features.some((f) => f.feature === 'json' && f.available);
     } catch {
       // Core types only; the scan itself reports a lost session.
     }
@@ -209,6 +272,56 @@ const selectedEntry = computed(() => {
   return item?.openable ? item.entry : null;
 });
 
+/**
+ * The open key while its session is gone or was just replaced. Every new
+ * session clears the tab's keys and selection (`resetKeys`: cursors and keys
+ * belong to one session), but the key viewer and its staged edits must
+ * survive a lost connection: the key stays shown here and is selected again
+ * once the new session is on the same database. The viewer then reads the
+ * key again and says when it changed meanwhile.
+ */
+const held = shallowRef<{ entry: KeyEntry; db: number } | null>(null);
+/** The key the viewer shows: the selected one, or the one held across a reconnect. */
+const viewerEntry = computed(() => selectedEntry.value ?? held.value?.entry ?? null);
+
+/** Puts the held key back into the (new) scan and selects it. */
+function restoreHeld(): void {
+  const tab = state();
+  const kept = held.value;
+  if (!tab || !kept || kept.db !== currentDb.value) return;
+  // Only once the tab's keys belong to the current session; until then the first scan does it.
+  if (tab.scanFor === null || tab.scanFor !== scanBinding(tab)) return;
+  tab.index.add([kept.entry]);
+  tab.keysVersion += 1;
+  const id = `key:${kept.entry.name}`;
+  if (tab.index.get(id)?.openable) tab.selected = id;
+}
+
+watch([selectedEntry, sessionId, currentDb], ([entry, session, db], [oldEntry, oldSession, oldDb]) => {
+  if (entry) {
+    held.value = null;
+    return;
+  }
+  // The selection went because its session did (lost, or replaced by a reconnect), not because the user chose so.
+  if (oldEntry && session !== oldSession) held.value = { entry: oldEntry, db: oldDb };
+  const kept = held.value;
+  if (!kept) return;
+  if (db !== kept.db) {
+    // The tab is on another database now: the same name there is another key.
+    if (state()?.unsaved) {
+      useToasts().push(
+        'warning',
+        'Unsaved changes discarded',
+        `The changes to ${kept.entry.display} were made on db${kept.db}. This tab is now on db${db}, so they could not be kept.`,
+        12_000,
+      );
+    }
+    held.value = null;
+    return;
+  }
+  if (session !== null) restoreHeld();
+});
+
 const list = ref<HTMLElement | null>(null);
 const scrollTop = ref(0);
 const viewport = ref(480);
@@ -229,10 +342,27 @@ const windowRows = computed(() => {
 });
 const totalHeight = computed(() => rows.value.length * rowHeight.value);
 
+// While the tab is hidden the list is `display: none`: its scroll offset reads 0 and is lost. The last offset
+// seen while shown is kept and put back when the tab is shown again.
+const tabVisible = useTabVisible();
+
 function onScroll(): void {
-  if (!list.value) return;
+  if (!list.value || !tabVisible.value) return;
   scrollTop.value = list.value.scrollTop;
 }
+
+watch(
+  tabVisible,
+  (shown) => {
+    const el = list.value;
+    if (!shown || !el) return;
+    el.scrollTop = scrollTop.value;
+    // The browser clamps the offset to the list's current height.
+    scrollTop.value = el.scrollTop;
+    if (el.clientHeight > 0) viewport.value = el.clientHeight;
+  },
+  { flush: 'post' },
+);
 
 // The pane's real height, kept up to date, so tall panes have no blank rows
 // and PageUp/PageDown move by what is visible.
@@ -280,16 +410,19 @@ async function focusRow(key: string | null | undefined): Promise<void> {
   document.getElementById(rowId(key))?.focus();
 }
 
-function activate(row: KeyRow): void {
+async function activate(row: KeyRow): Promise<void> {
   if (row.node.kind === 'prefix') {
     if (expanded.has(row.node.key)) expanded.delete(row.node.key);
     else expanded.add(row.node.key);
     return;
   }
-  // Keys whose name was too large to read cannot be opened.
-  if (!row.node.item.openable) return;
+  // Keys whose name was too large to read cannot be opened, and no key can while the tab is not connected.
+  if (!row.node.item.openable || !sessionId.value) return;
+  const id = row.node.item.id;
+  if (state()?.selected === id) return;
+  if (!(await confirmDropEdits('Opening another key'))) return;
   const tab = state();
-  if (tab) tab.selected = row.node.item.id;
+  if (tab) tab.selected = id;
 }
 
 function onKeydown(event: KeyboardEvent, row: KeyRow): void {
@@ -325,7 +458,7 @@ function onKeydown(event: KeyboardEvent, row: KeyRow): void {
       break;
     case 'Enter':
     case ' ':
-      activate(row);
+      void activate(row);
       break;
     default:
       return;
@@ -355,13 +488,17 @@ const TYPE_LABELS: Record<string, string> = {
 
 // Key changes made here: follow them in the scanned keys without a new SCAN.
 
-/** Replaces scanned keys: drops `removeName` (hex) and adds `entry`, then selects `entry`. */
-function replaceKey(removeName: string | null, entry: KeyEntry | null): void {
+/**
+ * Replaces scanned keys: drops `removeName` (hex) and adds `entry`, then
+ * selects `entry` (unless `select` is false: the selection then stays).
+ */
+function replaceKey(removeName: string | null, entry: KeyEntry | null, select = true): void {
   const tab = state();
   if (!tab) return;
   const kept = tab.index.entries().filter((e) => e.name !== removeName && e.name !== entry?.name);
   tab.index = markRaw(new KeyIndex(tab.delimiter, entry ? [...kept, entry] : kept));
   tab.keysVersion += 1;
+  if (!select) return;
   tab.selected = null;
   if (entry) {
     const id = `key:${entry.name}`;
@@ -395,10 +532,10 @@ const bulkFilter = computed<BulkFilter>(() => ({
   keyType: keyTypeOfFilter(props.tab.typeFilter),
 }));
 
-function onBulkClosed(changed: boolean): void {
+async function onBulkClosed(changed: boolean): Promise<void> {
   bulkTtl.value = false;
-  // TTLs changed: scan again so the list shows them.
-  if (changed) void scan(true);
+  // TTLs changed: scan again so the list shows them (unless that would drop unsaved edits the user keeps).
+  if (changed && (await confirmDropEdits('Scanning again to show the new TTLs'))) void scan(true);
 }
 /** The request of the new key being planned, to add it to the list once applied. */
 let newKeyRequest: RedisEditRequest | null = null;
@@ -411,7 +548,8 @@ const createEdit = useKeyEdit({
     newKeyRequest = null;
     if (view.tone === 'success' && request) {
       const ttl = request.edits.find((e) => e.op === 'expire');
-      replaceKey(null, entryForKey(request.key, createdKeyType(request.edits), ttl?.op === 'expire' ? ttl.ttlMs : null));
+      // The new key is selected, unless the selected key has unsaved edits: those stay open.
+      replaceKey(null, entryForKey(request.key, createdKeyType(request.edits), ttl?.op === 'expire' ? ttl.ttlMs : null), !state()?.unsaved);
       useToasts().push('success', 'Key created', request.key, 3000);
     } else useToasts().push(view.tone === 'danger' ? 'danger' : 'warning', view.title, view.message);
   },
@@ -435,11 +573,16 @@ const connectError = computed(() => (props.tab.connectError ? presentError(props
 /** A refused init command of the profile gets its own explanation and an "Edit connection" button. */
 const initProblem = computed(() => (props.tab.connectError ? initCommandProblem(props.tab.connectError) : null));
 
-function retryAfterError(): void {
+async function retryAfterError(): Promise<void> {
   const view = ui.error;
   if (!view) return;
-  if (view.action === 'reconnect') void tabs.reconnect(props.tab.id);
-  else void scan(ui.retryFromStart);
+  if (view.action === 'reconnect') {
+    void tabs.reconnect(props.tab.id);
+    return;
+  }
+  // Nothing to continue from: the scan starts again, which closes the open key.
+  if (ui.retryFromStart && !(await confirmDropEdits('Scanning again'))) return;
+  void scan(ui.retryFromStart);
 }
 </script>
 
@@ -452,6 +595,7 @@ function retryAfterError(): void {
       <div class="db">
         <RedisDbSelect
           :tab="tab"
+          :before-switch="() => confirmDropEdits('Switching the database')"
           @keyspace="ui.keyspace = $event"
         />
         <span
@@ -708,13 +852,21 @@ function retryAfterError(): void {
 
       <div class="more">
         <button
-          v-if="tab.scanned && !done"
+          v-if="ui.scanning"
           type="button"
           class="btn compact"
-          :disabled="ui.scanning"
+          @click="stopScan"
+        >
+          Stop
+        </button>
+        <button
+          v-else-if="tab.scanned && !done"
+          type="button"
+          class="btn compact"
+          :title="`Scans on until ${formatCount(tab.count)} more keys are found, the scan ends, or ${SCAN_BATCH_BUDGET_MS / 1000} seconds pass`"
           @click="scan(false)"
         >
-          Load more (next {{ formatCount(tab.count) }})
+          Load more ({{ formatCount(tab.count) }} keys)
         </button>
         <span
           v-if="tab.scanned"
@@ -723,18 +875,23 @@ function retryAfterError(): void {
       </div>
     </section>
 
-    <div class="detail">
+    <!-- Without a session the open key stays as it is (its edits are kept) but cannot be used until the tab connects again. -->
+    <div
+      class="detail"
+      :class="{ waiting: !sessionId && !!viewerEntry }"
+      :inert="sessionId ? undefined : true"
+    >
       <ValueViewer
-        v-if="selectedEntry && sessionId"
+        v-if="viewerEntry && lastSession"
         :tab-id="tab.id"
-        :session-id="sessionId"
-        :entry="selectedEntry"
-        :read-only="readOnly"
+        :session-id="lastSession.id"
+        :entry="viewerEntry"
+        :read-only="lastSession.readOnly"
         :connection-name="profile?.name ?? tab.title"
         :can-open-tab="!!profile"
         @renamed="onRenamed"
         @deleted="onDeleted"
-        @open-tab="profile && tabs.openRedisKeyTab(profile, selectedEntry.display, currentDb)"
+        @open-tab="profile && tabs.openRedisKeyTab(profile, viewerEntry.display, currentDb)"
       />
       <p
         v-else
@@ -753,7 +910,7 @@ function retryAfterError(): void {
     <RedisNewKeyDialog
       v-if="creating"
       :prefix="newKeyPrefix"
-      :json-available="true"
+      :json-available="jsonAvailable"
       @done="onNewKey"
     />
     <RedisPlanDialog
@@ -776,8 +933,9 @@ function retryAfterError(): void {
 
 .keys {
   display: flex;
+  flex: 0 1 400px;
   flex-direction: column;
-  width: 400px;
+  min-width: 280px;
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--surface);
@@ -943,10 +1101,15 @@ function retryAfterError(): void {
   outline: none;
 }
 
-.row:focus-visible,
+/* Selection is the tint and left bar; keyboard focus is its own ring, so the two never look alike. */
 .row[aria-selected='true'] {
   background: var(--accent-tint);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .name {
@@ -987,6 +1150,10 @@ function retryAfterError(): void {
 .detail {
   flex: 1;
   min-width: 0;
+}
+
+.detail.waiting {
+  opacity: 0.6;
 }
 
 .empty {

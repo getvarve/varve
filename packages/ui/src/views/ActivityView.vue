@@ -8,6 +8,7 @@ import { CATEGORIES, clearActivity, exportActivity, fetchActivity, OUTCOMES, sta
 import type { ActivityEvent, ActivityExportFormat, ActivityFilter, Category, Outcome } from '../api/activity';
 import { presentError, toCmdError } from '../api/errors';
 import Icon from '../components/common/Icon.vue';
+import { showWorkspace } from '../components/tree/showWorkspace';
 import { useDialogs } from '../composables/useDialogs';
 import { useToasts } from '../composables/useToasts';
 import { useWorkspace } from '../composables/useWorkspace';
@@ -207,7 +208,7 @@ function openConnection(id: string | null): void {
   const profile = workspace.connection(id);
   if (!profile) return;
   actions.openConnection(profile);
-  void router.push({ name: 'home' });
+  showWorkspace(router);
 }
 
 // Export and clear
@@ -606,7 +607,7 @@ async function clearLog(): Promise<void> {
 
 h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--text-title);
   font-weight: 600;
 }
 
@@ -715,6 +716,7 @@ h1 {
   flex: 1;
   min-width: 0;
   overflow: auto;
+  container-type: inline-size;
 }
 
 .day {
@@ -754,6 +756,23 @@ h1 {
 
 .event:hover {
   background: var(--zebra);
+}
+
+/* The row touches the edges of the scrolling list: draw the ring inside it. */
+.event:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Narrow list (details open in a small window): category and duration stay in the details panel. */
+@container (max-width: 520px) {
+  .event {
+    grid-template-columns: 72px 1fr auto;
+  }
+
+  .event .cat,
+  .event .dur {
+    display: none;
+  }
 }
 
 .event[aria-pressed='true'] {
@@ -821,7 +840,8 @@ h1 {
 .side {
   display: flex;
   flex-direction: column;
-  width: 400px;
+  flex-shrink: 0;
+  width: min(400px, 45%);
   min-height: 0;
   border-left: 1px solid var(--border);
   background: var(--surface);
@@ -865,7 +885,7 @@ h1 {
   padding: 12px;
   border: 1px solid var(--border-inner);
   border-radius: var(--radius-panel);
-  background: var(--ground);
+  background: var(--inset);
   font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

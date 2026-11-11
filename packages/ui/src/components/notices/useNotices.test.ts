@@ -1,7 +1,9 @@
-import { flushPromises } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
+import { defineComponent, onMounted } from 'vue';
 import type * as NoticesModule from '../../api/notices';
 import type { PendingRestore } from '../../api/notices';
 import { useDialogs } from '../../composables/useDialogs';
+import { useWorkspace } from '../../composables/useWorkspace';
 import { restoreKey, useNotices } from './useNotices';
 
 const entry: PendingRestore = {
@@ -125,5 +127,37 @@ describe('useNotices keychain', () => {
     keychain = [];
     await notices.refreshKeychain();
     expect(notices.state.keychainMessages).toEqual([]);
+  });
+});
+
+describe('useNotices start', () => {
+  it('keeps watching the connections after the component that started it unmounted, and reloads on every mount', async () => {
+    const { pendingKeychainDeletions, ddlPendingRestores } = await import('../../api/notices');
+    const reads = vi.mocked(pendingKeychainDeletions);
+    const restoreReads = vi.mocked(ddlPendingRestores);
+    keychain = [];
+    const Host = defineComponent({
+      setup() {
+        onMounted(() => useNotices().start());
+        return () => null;
+      },
+    });
+    const first = mount(Host);
+    await flushPromises();
+    first.unmount();
+    reads.mockClear();
+    restoreReads.mockClear();
+
+    // The records change while no host is mounted (another page is shown): the list is still reloaded.
+    useWorkspace().records.value = { folders: [], connections: [], queries: [] };
+    await flushPromises();
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    // Coming back reloads both lists.
+    const second = mount(Host);
+    await flushPromises();
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(restoreReads).toHaveBeenCalledTimes(1);
+    second.unmount();
   });
 });

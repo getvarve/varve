@@ -320,7 +320,12 @@ impl Driver for RedisDriver {
                 format!("The Redis driver cannot connect to {:?}", params.engine),
             ));
         }
-        Ok(Box::new(RedisSession::connect(params).await?))
+        // After a TLS failure the next connect reads the OS trust store
+        // again: the user may add the missing CA and retry.
+        let session = RedisSession::connect(params)
+            .await
+            .inspect_err(varve_driver::refresh_native_roots_after)?;
+        Ok(Box::new(session))
     }
 }
 

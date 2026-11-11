@@ -192,6 +192,22 @@ describe('object menus', () => {
     expect(opened.at(-1)).toEqual({ fn: 'openOverviewTab', args: [profile, { database: 'shop' }] });
   });
 
+  it('opens "New query" on a database node on that database, for every SQL engine', () => {
+    const database = (connectionId: string): ObjNode => ({
+      type: 'database',
+      key: 'd',
+      connectionId,
+      name: 'shop',
+      current: false,
+      summary: { ...objectNode('table', 'x').summary, object: { kind: 'database', database: null, schema: null, parent: null, name: 'shop', signature: null } },
+    });
+    const mysql = { id: 'my', engine: 'mysql', name: 'Store' } as unknown as ConnectionProfile;
+    runObjectAction('new-query', database('my'), mysql);
+    expect(opened.at(-1)).toEqual({ fn: 'openQueryTab', args: [mysql, null, '', 'shop'] });
+    runObjectAction('new-query', database('pg'), profile);
+    expect(opened.at(-1)).toEqual({ fn: 'openQueryTab', args: [profile, null, '', 'shop'] });
+  });
+
   it('opens table-like objects as data and other objects as details', () => {
     expect(defaultAction(objectNode('materializedView', 'mv'))).toBe('data');
     expect(defaultAction(objectNode('function', 'f'))).toBe('open');

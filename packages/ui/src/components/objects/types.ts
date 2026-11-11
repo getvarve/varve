@@ -1,3 +1,4 @@
+import type { InjectionKey, Ref } from 'vue';
 import type { ObjectKind, ObjectRef } from '../../api/ddl';
 import type { SessionInfo } from '../../api/sessions';
 import type { ServerTarget } from '../../lib/ddlPlan';
@@ -18,13 +19,46 @@ export interface ObjectEditorProps {
   container?: NewObjectContainer | null;
   /** Kind to create when `object` is `null` (for editors that handle several kinds). */
   createKind?: ObjectKind | null;
-  /** Called with every failed backend call (the tab view passes `useTabs().reportTabError`). */
-  reportError?: ((error: unknown) => void) | null;
+  /** Called with every failed backend call and the id of the session it was sent on, read before the await (the tab view passes `useTabs().reportTabError`). */
+  reportError?: ((error: unknown, sessionId: string) => void) | null;
   /** Called when the editor starts or stops holding changes that are not applied (the tab view passes `setUnsaved`). */
   reportDirty?: ((dirty: boolean) => void) | null;
   /** `drop` opens the editor with the drop of the object planned (tree "Drop"); other values open it normally. */
   intent?: 'view' | 'edit' | 'create' | 'drop' | null;
 }
+
+/** A message an editor shows above its sections (the object vanished, a reload failed). */
+export interface EditorNotice {
+  text: string;
+  tone: 'warning' | 'danger';
+  /** Offer Retry (reload the object). */
+  retry: boolean;
+  /** Another thing the notice offers (take the server's values, plan the remaining steps). */
+  action?: { label: string; run: () => void };
+}
+
+/**
+ * What `useObjectEditor` shares with the parts of an editor it does not
+ * render itself (`EditorFrame`, an embedded `DdlView`, `SqlCode`).
+ */
+export interface ObjectEditorContext {
+  /** A plan is being applied: the form and actions wait. */
+  busy: Readonly<Ref<boolean>>;
+  /** The loaded object is being read again; the sections stay as they are meanwhile. */
+  refreshing: Readonly<Ref<boolean>>;
+  notice: Readonly<Ref<EditorNotice | null>>;
+  /** Edited DDL in the editor's DDL section that has not run counts as unsaved, like the form. */
+  reportDdlDirty: (dirty: boolean) => void;
+  /** The DDL section holds edited DDL that has not run: the frame keeps that section mounted while another one shows. */
+  ddlDirty: Readonly<Ref<boolean>>;
+  /** The tab's session, the object shown (`null` while creating) and the CASCADE choice: what `ChangePanel` lists a drop's impact with. */
+  session: Readonly<Ref<SessionInfo>>;
+  current: Readonly<Ref<ObjectRef | null>>;
+  cascade: Readonly<Ref<boolean>>;
+  reportError: (error: unknown, sessionId: string) => void;
+}
+
+export const OBJECT_EDITOR_CONTEXT: InjectionKey<ObjectEditorContext> = Symbol('objectEditor');
 
 /** Props of `DdlView.vue`. */
 export interface DdlViewProps {
@@ -34,8 +68,8 @@ export interface DdlViewProps {
   connectionName: string;
   /** The object whose DDL is shown. */
   object: ObjectRef;
-  /** Called with every failed backend call (the tab view passes `useTabs().reportTabError`). */
-  reportError?: ((error: unknown) => void) | null;
+  /** Called with every failed backend call and the id of the session it was sent on, read before the await (the tab view passes `useTabs().reportTabError`). */
+  reportError?: ((error: unknown, sessionId: string) => void) | null;
   /** Called when edited DDL that has not run starts or stops existing (the tab view passes `setUnsaved`). */
   reportDirty?: ((dirty: boolean) => void) | null;
 }

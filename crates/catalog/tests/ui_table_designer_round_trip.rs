@@ -725,7 +725,7 @@ async fn my_run(session: &dyn Session, mariadb: bool) -> TestResult {
                     Some(if mariadb { "page" } else { "compact" }),
                     "{server}"
                 );
-                assert_eq!(t["autoIncrement"], 100, "{server}");
+                assert_eq!(t["autoIncrement"], "100", "{server}");
                 assert_eq!(t["collation"], "utf8mb4_bin");
                 assert_eq!(t["comment"], "made by the designer");
             }
@@ -742,7 +742,7 @@ async fn my_run(session: &dyn Session, mariadb: bool) -> TestResult {
                         Some("page")
                     );
                 }
-                assert_eq!(t["autoIncrement"], 500, "{server}");
+                assert_eq!(t["autoIncrement"], "500", "{server}");
                 assert_eq!(t["comment"], "orders, converted");
             }
             "orders charset and rename" => {

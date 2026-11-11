@@ -11,15 +11,17 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode, header};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -29,6 +31,17 @@ use crate::commands::Services;
 
 /// Largest request body accepted (a saved query with a long script fits).
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
+
+/// How long a client may take to send a request's headers, and how long an
+/// idle kept-alive connection stays open. A connection that sends nothing
+/// is closed after it, so it cannot hold a file descriptor for ever.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Connections served at once. One more is closed as soon as it is
+/// accepted, so no local process can use up Varve's file descriptors
+/// (which its database connections, tunnels and `app.db` need too). MCP
+/// clients use one or two each.
+pub const MAX_CONNECTIONS: usize = 64;
 
 type Mcp = StreamableHttpService<VarveTools, LocalSessionManager>;
 
@@ -138,6 +151,7 @@ async fn accept_loop(
     token: Arc<TokenCell>,
     cancel: CancellationToken,
 ) {
+    let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
         let accepted = tokio::select! {
             () = cancel.cancelled() => break,
@@ -150,13 +164,27 @@ async fn accept_loop(
                 continue;
             }
         };
+        let Ok(slot) = Arc::clone(&slots).try_acquire_owned() else {
+            tracing::warn!(
+                limit = MAX_CONNECTIONS,
+                "MCP connection refused: too many open connections"
+            );
+            drop(stream);
+            continue;
+        };
         let (mcp, token, cancel) = (mcp.clone(), Arc::clone(&token), cancel.clone());
         tokio::spawn(async move {
+            // Held while the connection is served.
+            let _slot = slot;
             let service = hyper::service::service_fn(move |request| {
                 let (mcp, token) = (mcp.clone(), Arc::clone(&token));
                 async move { Ok::<_, Infallible>(handle(request, addr, &mcp, &token).await) }
             });
+            // The header timeout only works with a timer; without one
+            // hyper silently waits for ever.
             let connection = hyper::server::conn::http1::Builder::new()
+                .timer(TokioTimer::new())
+                .header_read_timeout(HEADER_READ_TIMEOUT)
                 .serve_connection(TokioIo::new(stream), service);
             tokio::pin!(connection);
             let served = tokio::select! {

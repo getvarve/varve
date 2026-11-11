@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue';
 import type { NotifyTab } from '../../composables/useTabs';
-import { useTabs } from '../../composables/useTabs';
+import { useLastSession, useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import NotifyPanel from './NotifyPanel.vue';
 import { useNotify } from './useNotify';
@@ -15,6 +15,8 @@ const props = defineProps<{ tab: NotifyTab }>();
 
 const workspace = useWorkspace();
 const tabs = useTabs();
+// Kept while the session is lost, so the received messages stay until the tab connects again.
+const session = useLastSession(() => props.tab);
 const name = computed(() => workspace.connection(props.tab.connectionId)?.name ?? props.tab.title);
 
 onBeforeUnmount(() => {
@@ -25,10 +27,10 @@ onBeforeUnmount(() => {
 
 <template>
   <NotifyPanel
-    v-if="tab.session"
+    v-if="session"
     :tab-id="tab.id"
-    :session-id="tab.session.id"
+    :session-id="session.id"
     :connection-name="name"
-    :read-only="tab.session.readOnly"
+    :read-only="session.readOnly"
   />
 </template>

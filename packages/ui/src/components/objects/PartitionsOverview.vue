@@ -38,7 +38,7 @@ const plan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 
 async function load(): Promise<void> {
@@ -49,8 +49,9 @@ async function load(): Promise<void> {
   }
   loading.value = true;
   loadError.value = null;
+  const sessionId = props.session.id;
   try {
-    const d = await catalogDescribe(props.session.id, object);
+    const d = await catalogDescribe(sessionId, object);
     if (d.engine === 'postgres' && 'partitioning' in d.object) {
       pg.value = d.object;
       if (!d.object.partitioning) loadError.value = 'This table is not partitioned.';
@@ -61,7 +62,7 @@ async function load(): Promise<void> {
       loadError.value = 'This object has no partitions.';
     }
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
     loadError.value = presentError(toCmdError(error)).message;
   } finally {
     loading.value = false;
@@ -97,6 +98,16 @@ function openPartition(schema: string, name: string): void {
 watch(
   () => props.object,
   () => void load(),
+);
+// A preview runs what was planned at the click: other partitions ticked or another count need a new preview.
+watch(
+  [selected, count],
+  () => {
+    if (plan.state.applying || action.value === null) return;
+    plan.clear();
+    action.value = null;
+  },
+  { deep: true },
 );
 onMounted(load);
 </script>

@@ -68,3 +68,36 @@ export function entryForKey(display: string, keyType: KeyType, ttlMs: string | n
   if (name === null) return null;
   return { name, display: keyDisplayFromHex(name), keyType, ttlMs, placeholder: false };
 }
+
+/** What one SCAN step did: keys it added to the list, the next cursor, and whether the key cap was reached. */
+export interface ScanStepResult {
+  added: number;
+  cursor: string;
+  capped: boolean;
+}
+
+/**
+ * Runs SCAN steps from `cursor` until `target` keys were added, the cursor is
+ * `'0'` (complete), the key cap is hit, or `budgetMs` has passed. `step`
+ * returns `null` when its answer is stale (a newer scan, Stop, a database
+ * switch): the batch then ends without another step.
+ */
+export async function scanBatch(options: {
+  cursor: string;
+  target: number;
+  budgetMs: number;
+  step: (cursor: string) => Promise<ScanStepResult | null>;
+  now?: () => number;
+}): Promise<void> {
+  const now = options.now ?? (() => Date.now());
+  const started = now();
+  let cursor = options.cursor;
+  let added = 0;
+  for (;;) {
+    const result = await options.step(cursor);
+    if (result === null) return;
+    added += result.added;
+    cursor = result.cursor;
+    if (result.capped || cursor === '0' || added >= options.target || now() - started >= options.budgetMs) return;
+  }
+}

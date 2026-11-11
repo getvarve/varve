@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use varve_core::Engine;
 use varve_driver::{ConnectParams, TlsMode, TlsParams};
-use varve_secrets::{Secret, SecretKey, SecretKind, SecretStore};
+use varve_secrets::{Secret, SecretError, SecretKey, SecretKind, SecretStore};
 
 use crate::model::{ConnectionProfile, SecretKindName};
 use crate::repo::RecordError;
@@ -30,7 +30,9 @@ pub struct TunnelEndpoint {
 /// and port and the original host is kept for TLS host name checks.
 ///
 /// # Errors
-/// Keychain errors, or a profile id that cannot address the keychain.
+/// [`RecordError::KeychainUnavailable`] when a saved secret is needed and
+/// the keychain cannot be reached; other keychain errors, or a profile id
+/// that cannot address the keychain, as [`RecordError::Invalid`].
 pub fn connect_params(
     profile: &ConnectionProfile,
     secrets: &dyn SecretStore,
@@ -102,7 +104,8 @@ fn saved(
 ) -> Result<Option<Secret>, RecordError> {
     let key = SecretKey::new(profile.id.clone(), kind)
         .map_err(|e| RecordError::Invalid(e.to_string()))?;
-    secrets
-        .get(&key)
-        .map_err(|e| RecordError::Invalid(e.to_string()))
+    secrets.get(&key).map_err(|e| match e {
+        SecretError::Unavailable(_) => RecordError::KeychainUnavailable(e.to_string()),
+        other => RecordError::Invalid(other.to_string()),
+    })
 }

@@ -31,16 +31,17 @@ const info = shallowRef<RedisInfo | null>(null);
 const error = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const result = await redisInfo(props.session.id);
+  async (sessionId) => {
+    const result = await redisInfo(sessionId);
     if (!refresh.alive()) return;
     info.value = result;
     error.value = null;
   },
   5000,
-  (e) => {
-    error.value = report(e);
+  (e, sessionId) => {
+    error.value = report(e, sessionId);
   },
+  () => props.session.id,
 );
 
 const version = computed(() => {

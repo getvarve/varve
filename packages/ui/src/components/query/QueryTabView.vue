@@ -23,6 +23,8 @@ const workspace = useWorkspace();
 const profile = computed(() => workspace.connection(props.tab.connectionId));
 const engine = computed(() => profile.value?.engine ?? props.tab.session?.engine ?? 'postgres');
 const isRedis = computed(() => engine.value === 'redis');
+/** The database the tab runs on: its session's, the one it was opened on ("run from another database"), else the profile's. */
+const database = computed(() => props.tab.session?.database ?? props.tab.database ?? profile.value?.database ?? null);
 const editor = ref<InstanceType<typeof SqlEditor> | null>(null);
 const showHistory = ref(false);
 
@@ -217,9 +219,9 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         :size="11"
       />Read only</span>
       <span
-        v-if="profile?.database && !isRedis"
+        v-if="database && !isRedis"
         class="subtle mono"
-      >{{ profile.database }}</span>
+      >{{ database }}</span>
       <RedisDbSelect
         v-if="isRedis"
         :tab="tab"

@@ -118,6 +118,9 @@ export const s5 = subsetOf<ddl.ObjectDetails>()({
 // EditPlan
 export const s6 = {
   "destructive": true,
+  "shown": [
+    "DROP TABLE t"
+  ],
   "statements": [
     "DROP TABLE t"
   ],
@@ -3349,7 +3352,7 @@ export const s130 = {
     "indexes": [],
     "name": "made",
     "options": {
-      "autoIncrement": 100,
+      "autoIncrement": "9007199254740993",
       "charset": "utf8mb4",
       "collation": "utf8mb4_bin",
       "comment": "made",
@@ -6701,7 +6704,7 @@ export const s217 = subsetOf<grid.TableDetails>()({
 export const s218 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
-    "autoIncrement": 1,
+    "autoIncrement": "1",
     "avgRowLength": null,
     "charset": "utf8mb4",
     "collation": "utf8mb4_0900_ai_ci",
@@ -6818,7 +6821,7 @@ export const s218 = subsetOf<grid.TableDetails>()({
 export const s219 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
-    "autoIncrement": 1,
+    "autoIncrement": "1",
     "avgRowLength": null,
     "charset": "utf8mb4",
     "collation": "utf8mb4_0900_ai_ci",
@@ -9245,10 +9248,13 @@ export const s227 = {
   "planId": "p4"
 } satisfies live.Planned<live.RedisPlanView>;
 
-// Planned<EditPlan>
+// Planned<EditPlanView>
 export const s228 = {
   "plan": {
     "destructive": true,
+    "shown": [
+      "DROP INDEX \"s\".\"i\""
+    ],
     "statements": [
       "DROP INDEX \"s\".\"i\""
     ],
@@ -9258,8 +9264,30 @@ export const s228 = {
   "planId": "p5"
 } satisfies ddl.Planned<ddl.EditPlan>;
 
-// EditApplied
+// Planned<EditPlanView>.runTime
 export const s229 = {
+  "plan": {
+    "destructive": false,
+    "shown": [
+      "ALTER TABLE `t` COMMENT='a\\\\b'"
+    ],
+    "statements": [
+      "SET @varve_ddl = CONCAT(X'414C544552')",
+      "PREPARE varve_ddl FROM @varve_ddl",
+      "SET @varve_ddl = NULL",
+      "EXECUTE varve_ddl /* ALTER TABLE `t` COMMENT='a\\\\b' */",
+      "DEALLOCATE PREPARE varve_ddl"
+    ],
+    "transactional": false,
+    "warnings": [
+      "a comment holds a backslash"
+    ]
+  },
+  "planId": "p6"
+} satisfies ddl.Planned<ddl.EditPlan>;
+
+// EditApplied
+export const s230 = {
   "durationMs": 4,
   "outputs": [
     {
@@ -9279,7 +9307,7 @@ export const s229 = {
 } satisfies ddl.EditApplied;
 
 // DdlApplied
-export const s230 = {
+export const s231 = {
   "collationDatabase": "shop",
   "durationMs": 9,
   "output": {
@@ -9300,7 +9328,7 @@ export const s230 = {
 } satisfies ddl.DdlApplied;
 
 // SessionInfo
-export const s231 = {
+export const s232 = {
   "confirmDestructive": false,
   "connectionId": "c1",
   "database": null,
@@ -9325,7 +9353,7 @@ export const s231 = {
 } satisfies sessions.SessionInfo;
 
 // NotifyState
-export const s232 = {
+export const s233 = {
   "attempt": 2,
   "backendPid": 77,
   "channels": [
@@ -9350,7 +9378,7 @@ export const s232 = {
 } satisfies notify.NotifyState;
 
 // NotifyBatch
-export const s233 = {
+export const s234 = {
   "dropped": 0,
   "listenerId": 2,
   "messages": [
@@ -9368,7 +9396,7 @@ export const s233 = {
 } satisfies notify.NotifyBatch;
 
 // PubSubSubscriptionInfo[]
-export const s234 = [
+export const s235 = [
   {
     "channels": [
       "orders"
@@ -9385,7 +9413,7 @@ export const s234 = [
 ] satisfies redis.PubSubSubscriptionInfo[];
 
 // EditOutcome.applied
-export const s235 = {
+export const s236 = {
   "replies": [
     {
       "t": "text",
@@ -9400,7 +9428,7 @@ export const s235 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.conflict
-export const s236 = {
+export const s237 = {
   "edit": 0,
   "message": "changed",
   "reason": "valueChanged",
@@ -9408,7 +9436,7 @@ export const s236 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.failed
-export const s237 = {
+export const s238 = {
   "command": 1,
   "error": {
     "code": "OOM",
@@ -9423,7 +9451,7 @@ export const s237 = {
 } satisfies redis.RedisEditOutcome;
 
 // PubSubEvent.batch
-export const s238 = {
+export const s239 = {
   "dropped": 0,
   "kind": "batch",
   "messages": [
@@ -9444,7 +9472,7 @@ export const s238 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.subscribed
-export const s239 = {
+export const s240 = {
   "count": 1,
   "kind": "subscribed",
   "name": "orders",
@@ -9453,7 +9481,7 @@ export const s239 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.error
-export const s240 = {
+export const s241 = {
   "code": "NOPERM",
   "kind": "error",
   "message": "NOPERM",
@@ -9463,7 +9491,7 @@ export const s240 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.reconnecting
-export const s241 = {
+export const s242 = {
   "attempt": 1,
   "kind": "reconnecting",
   "reason": "lost",
@@ -9471,7 +9499,7 @@ export const s241 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.gap
-export const s242 = {
+export const s243 = {
   "kind": "gap",
   "lostAt": 1,
   "reason": "lost",
@@ -9480,26 +9508,26 @@ export const s242 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.closed
-export const s243 = {
+export const s244 = {
   "kind": "closed",
   "reason": "unsubscribed",
   "subscriptionId": "sub1"
 } satisfies redis.PubSubEvent;
 
 // CmdError.invalid.0
-export const s244 = {
+export const s245 = {
   "kind": "invalid",
   "message": "bad"
 } satisfies errors.CmdError;
 
 // CmdError.notFound.1
-export const s245 = {
+export const s246 = {
   "kind": "notFound",
   "message": "This plan is no longer available."
 } satisfies errors.CmdError;
 
 // CmdError.session.2
-export const s246 = {
+export const s247 = {
   "error": {
     "error": {
       "code": "23505",
@@ -9516,7 +9544,7 @@ export const s246 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.3
-export const s247 = {
+export const s248 = {
   "error": {
     "kind": "notFound",
     "sessionId": "s1"
@@ -9525,7 +9553,7 @@ export const s247 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.4
-export const s248 = {
+export const s249 = {
   "error": {
     "environment": "production",
     "kind": "confirmationRequired",
@@ -9537,7 +9565,7 @@ export const s248 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.5
-export const s249 = {
+export const s250 = {
   "error": {
     "kind": "openTransaction",
     "message": "open"
@@ -9546,19 +9574,19 @@ export const s249 = {
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.6
-export const s250 = {
+export const s251 = {
   "kind": "secretRequired",
   "secret": "db_password"
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.7
-export const s251 = {
+export const s252 = {
   "kind": "secretRequired",
   "secret": "tls_key_passphrase"
 } satisfies errors.CmdError;
 
 // CmdError.session.8
-export const s252 = {
+export const s253 = {
   "error": {
     "error": {
       "code": "tls_key_passphrase_wrong",
@@ -9575,19 +9603,19 @@ export const s252 = {
 } satisfies errors.CmdError;
 
 // CmdError.reconnectRequired.9
-export const s253 = {
+export const s254 = {
   "kind": "reconnectRequired",
   "message": "reconnect"
 } satisfies errors.CmdError;
 
 // CmdError.readOnly.10
-export const s254 = {
+export const s255 = {
   "kind": "readOnly",
   "message": "read only"
 } satisfies errors.CmdError;
 
 // CmdError.catalog.11
-export const s255 = {
+export const s256 = {
   "error": {
     "kind": "unsupported",
     "message": "no"
@@ -9596,7 +9624,7 @@ export const s255 = {
 } satisfies errors.CmdError;
 
 // CmdError.live.12
-export const s256 = {
+export const s257 = {
   "error": {
     "kind": "unsupported",
     "message": "This node is not part of a Galera cluster."
@@ -9605,7 +9633,7 @@ export const s256 = {
 } satisfies errors.CmdError;
 
 // CmdError.internal.13
-export const s257 = {
+export const s258 = {
   "kind": "internal",
   "message": "x"
 } satisfies errors.CmdError;
@@ -9840,7 +9868,8 @@ export const CONTRACT_IDS: readonly string[] = [
   "TableDetails.parted_p1.pg18",
   "Planned<RedisEditPlan>",
   "Planned<RedisPlanView>",
-  "Planned<EditPlan>",
+  "Planned<EditPlanView>",
+  "Planned<EditPlanView>.runTime",
   "EditApplied",
   "DdlApplied",
   "SessionInfo",

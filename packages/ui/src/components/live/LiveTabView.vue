@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { LiveTab } from '../../composables/useTabs';
-import { useTabs } from '../../composables/useTabs';
+import { useLastSession, useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import GaleraPanel from './GaleraPanel.vue';
 import ProcessListPanel from './ProcessListPanel.vue';
@@ -25,7 +25,8 @@ const props = defineProps<{ tab: LiveTab }>();
 const tabs = useTabs();
 const workspace = useWorkspace();
 const connectionName = computed(() => workspace.connection(props.tab.connectionId)?.name ?? props.tab.title);
-const session = computed(() => props.tab.session);
+// Kept while the session is lost (the panel's filters and sort survive); panels poll only while the tab is shown.
+const session = useLastSession(() => props.tab);
 
 function reconnect(): void {
   void tabs.reconnect(props.tab.id);

@@ -46,7 +46,7 @@ use varve_driver_postgres::{
 use varve_records::{ConnectionProfile, connect_params};
 
 use super::{elapsed_ms, environment_label, error_details};
-use crate::commands::{CmdError, Services};
+use crate::commands::{CmdError, ReadAlready, Services};
 use crate::sessions::{SessionError, SessionInfo, TunnelEnd, TunnelRoute, connection_identity};
 
 type CmdResult<T> = Result<T, CmdError>;
@@ -384,15 +384,19 @@ async fn listen_target(
     // The tab's own database, never the profile's current one.
     connect.database.clone_from(&info.database);
     let typed = services.metadata.typed_for(&profile);
+    let ssh = services.tunnel_secret(&connect, typed.ssh).await?;
     let lease = services
         .tunnels
-        .lease_for(&connect, services.secrets.as_ref(), typed.ssh)
+        .lease_for(&connect, &ReadAlready, ssh)
+        .await?;
+    let (password, tls) = services
+        .server_secrets(&connect, typed.password, typed.tls)
         .await?;
     let mut params = connect_params(
         &connect,
-        services.secrets.as_ref(),
-        typed.password,
-        typed.tls,
+        &ReadAlready,
+        password,
+        tls,
         lease.as_ref().map(|l| l.endpoint()),
     )?;
     params.read_only = info.read_only;

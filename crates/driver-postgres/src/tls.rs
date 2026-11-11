@@ -21,7 +21,7 @@ use tokio_postgres::config::SslMode;
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres_rustls::MakeRustlsConnect;
 use varve_driver::tls_key::{self, ClientIdentity};
-use varve_driver::{DriverError, ErrorKind, TlsMode, TlsParams};
+use varve_driver::{DriverError, ErrorKind, NativeRoots, TlsMode, TlsParams, native_roots};
 
 use crate::tap::{Shared, TapStream};
 
@@ -75,7 +75,16 @@ impl TlsSetup {
             "localhost".to_owned()
         };
         let identity = tls_key::load_client_identity(params, timeout).await?;
-        let config = client_config(params, identity.as_ref())?;
+        // Verifying against the OS trust store: loaded once and shared,
+        // off the async worker threads.
+        let native = if matches!(params.mode, TlsMode::VerifyCa | TlsMode::VerifyFull)
+            && params.ca_path.is_none()
+        {
+            Some(native_roots().await)
+        } else {
+            None
+        };
+        let config = client_config(params, identity.as_ref(), native.as_deref())?;
         Ok(Self {
             ssl_mode,
             connector: Some(MakeRustlsConnect::new(config)),
@@ -134,9 +143,12 @@ fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
+/// `native` is the OS trust store, needed for `VerifyCa` and `VerifyFull`
+/// without a CA file.
 fn client_config(
     params: &TlsParams,
     identity: Option<&ClientIdentity>,
+    native: Option<&NativeRoots>,
 ) -> Result<ClientConfig, DriverError> {
     let provider = provider();
     let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
@@ -147,13 +159,13 @@ fn client_config(
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoCertificateCheck { provider })),
         TlsMode::VerifyCa => {
-            let roots = Arc::new(root_store(params.ca_path.as_deref())?);
+            let roots = Arc::new(root_store(params.ca_path.as_deref(), native)?);
             builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(ChainOnlyVerifier { roots, provider }))
         }
         TlsMode::VerifyFull => {
-            let roots = Arc::new(root_store(params.ca_path.as_deref())?);
+            let roots = Arc::new(root_store(params.ca_path.as_deref(), native)?);
             let verifier = WebPkiServerVerifier::builder_with_provider(roots, provider)
                 .build()
                 .map_err(|e| tls_error(format!("TLS setup failed: {e}")))?;
@@ -192,8 +204,12 @@ fn load_certificates(path: &str, what: &str) -> Result<Vec<CertificateDer<'stati
     Ok(certs)
 }
 
-/// Trust anchors: the PEM file at `ca_path`, or the OS trust store.
-fn root_store(ca_path: Option<&str>) -> Result<RootCertStore, DriverError> {
+/// Trust anchors: the PEM file at `ca_path`, or the OS trust store
+/// (`native`, see [`native_roots`]).
+fn root_store(
+    ca_path: Option<&str>,
+    native: Option<&NativeRoots>,
+) -> Result<RootCertStore, DriverError> {
     let mut roots = RootCertStore::empty();
     if let Some(path) = ca_path {
         for cert in load_certificates(path, "CA certificate")? {
@@ -203,14 +219,21 @@ fn root_store(ca_path: Option<&str>) -> Result<RootCertStore, DriverError> {
         }
         return Ok(roots);
     }
-    let native = rustls_native_certs::load_native_certs();
-    let (added, _ignored) = roots.add_parsable_certificates(native.certs);
+    let native = native.ok_or_else(|| tls_error("the OS trust store was not loaded"))?;
+    let (added, _ignored) = roots.add_parsable_certificates(
+        native
+            .certs
+            .iter()
+            .map(|der| CertificateDer::from(der.clone())),
+    );
     if added == 0 {
-        let reasons: Vec<String> = native.errors.iter().map(ToString::to_string).collect();
-        return Err(tls_error(if reasons.is_empty() {
+        return Err(tls_error(if native.errors.is_empty() {
             "the OS trust store holds no CA certificates".to_owned()
         } else {
-            format!("could not load the OS trust store: {}", reasons.join("; "))
+            format!(
+                "could not load the OS trust store: {}",
+                native.errors.join("; ")
+            )
         }));
     }
     Ok(roots)

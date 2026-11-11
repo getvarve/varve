@@ -66,7 +66,9 @@ import type {
   FiringState,
 } from '../api/ddl';
 import type { Engine } from '../api/records';
+import type { StepSpec } from './ddlApply';
 import { parseConfigEntry, parseQualified, splitStatements, triggerArguments } from './ddlText';
+import { checkExpression as checkSqlCondition } from './gridSql';
 import { commentChanged, normalizeComment, sameLineEndings } from './objectComment';
 
 // ---------------------------------------------------------------------------
@@ -110,8 +112,10 @@ export function textOrNull(value: string): string | null {
   return t === '' ? null : t;
 }
 
+/** Equal text, ignoring surrounding blanks and line endings (a body stored with `\r\n` comes back from the editor with `\n`). */
 function same(a: string | null | undefined, b: string | null | undefined): boolean {
-  return (a ?? '').trim() === (b ?? '').trim();
+  const norm = (v: string | null | undefined): string => (v ?? '').replace(/\r\n?/g, '\n').trim();
+  return norm(a) === norm(b);
 }
 
 /** Whole numbers the editors accept: JavaScript sends exact integers only up to +-(2^53 - 1). */
@@ -355,9 +359,19 @@ export function definerFormFrom(definer: string | null): MyDefinerForm {
     : { definer: 'currentUser', definerUser: '', definerHost: '%' };
 }
 
-/** The definer clause to send: the described definer is sent back unchanged so recreating keeps it. */
-export function definerOf(form: MyDefinerForm): MyDefiner | null {
+/**
+ * The definer clause to send: `keep` sends the described definer (`original`)
+ * back unchanged so recreating keeps it, whatever the account fields hold.
+ * Without a described definer, `keep` sends the account fields.
+ */
+export function definerOf(form: MyDefinerForm, original: string | null): MyDefiner | null {
   if (form.definer === 'currentUser') return { kind: 'currentUser' };
+  if (form.definer === 'keep') {
+    const kept = parseDefiner(original);
+    if (kept) return { kind: 'account', user: kept.user, host: kept.host };
+    // Nothing described to keep (the object is gone and the editor became a create form): the account fields
+    // still hold the definer it had.
+  }
   if (form.definerUser.trim() === '') return null;
   return { kind: 'account', user: form.definerUser.trim(), host: form.definerHost.trim() === '' ? '%' : form.definerHost.trim() };
 }
@@ -422,7 +436,7 @@ export function buildMyView(form: MyViewForm, original: MyView | null, database:
     name,
     replace: original !== null && original.name === name,
     algorithm: form.algorithm === '' ? null : form.algorithm,
-    definer: definerOf(form),
+    definer: definerOf(form, original?.definer ?? null),
     security: form.security === '' ? null : form.security,
     query: form.query.trim().replace(/;\s*$/, ''),
     checkOption: form.checkOption === '' ? null : form.checkOption,
@@ -461,73 +475,235 @@ export const pgMatViewSchema = z.object({
   tablespace: z.string(),
 });
 
-/** What saving a materialized view does: an in-place change, or a drop and create (definition changed). */
+/** One index a recreate carries over to the new view. */
+export interface PgMatViewRecreatedIndex {
+  /** The index's name on the old view, and on the new one once the save finished. */
+  name: string;
+  /** The name it is created under while the old view still holds `name` (same schema); `null` when it is created under `name` at once. */
+  tempName: string | null;
+}
+
+/** A materialized view recreated under a temporary name: the names its steps use. */
+export interface PgMatViewRecreate {
+  /** The temporary name the new definition is created under before the old view is dropped. */
+  tempName: string;
+  indexes: PgMatViewRecreatedIndex[];
+}
+
+/** What saving a materialized view does: an in-place change, or a recreate (definition changed). */
 export interface PgMatViewBuild {
-  changes: EngineChange[];
-  /** True when the view is dropped and created again. */
-  recreates: boolean;
-  /** `CREATE INDEX` statements of the dropped view, to run again afterwards (catalog text, not user input). */
-  indexes: string[];
+  /** The steps of the save, in the order they run. */
+  steps: StepSpec[];
+  /** Set when the view is created again under a temporary name and the old one dropped. */
+  recreate: PgMatViewRecreate | null;
+  /** Reasons the save cannot be planned (shown instead of the SQL); empty when it can. */
+  problems: string[];
+}
+
+/** PostgreSQL truncates identifiers to 63 bytes (NAMEDATALEN - 1). */
+const PG_IDENTIFIER_BYTES = 63;
+const PG_TEMP_SUFFIX = '_varve_new';
+
+/** `name` with the temporary suffix, cut to PostgreSQL's identifier length; numbered when that name is in `taken`. */
+function pgTempName(name: string, taken: ReadonlySet<string>): string {
+  const encoder = new TextEncoder();
+  for (let n = 1; ; n += 1) {
+    const suffix = n === 1 ? PG_TEMP_SUFFIX : `${PG_TEMP_SUFFIX}${n}`;
+    const room = PG_IDENTIFIER_BYTES - encoder.encode(suffix).length;
+    let base = '';
+    for (const char of name.trim()) {
+      if (encoder.encode(base + char).length > room) break;
+      base += char;
+    }
+    const candidate = `${base}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** The name a recreated materialized view is created under before the old one is dropped: the name with a suffix, cut to PostgreSQL's identifier length. */
+export function matViewTempName(name: string): string {
+  return pgTempName(name, new Set());
 }
 
 export function buildPgMatView(form: PgMatViewForm, original: PgMaterializedView | null, database: string | null): PgMatViewBuild {
-  const create = (name: QualifiedName, comment: string | null): EngineChange =>
-    pg({
-      object: 'materializedView',
-      action: 'create',
-      name,
-      query: form.query.trim().replace(/;\s*$/, ''),
-      withData: form.withData,
-      tablespace: textOrNull(form.tablespace),
-      comment,
-    });
+  const edit = (change: EngineChange): StepSpec => ({ kind: 'edit', change });
+  const create = (name: QualifiedName, comment: string | null): StepSpec =>
+    edit(
+      pg({
+        object: 'materializedView',
+        action: 'create',
+        name,
+        query: form.query.trim().replace(/;\s*$/, ''),
+        withData: form.withData,
+        tablespace: textOrNull(form.tablespace),
+        comment,
+      }),
+    );
   if (!original) {
-    const changes = [create(qn(form.schema, form.name), textOrNull(form.comment))];
+    const steps = [create(qn(form.schema, form.name), textOrNull(form.comment))];
     if (textOrNull(form.owner)) {
-      changes.push(
-        pg({ object: 'materializedView', action: 'alter', name: qn(form.schema, form.name), operations: [{ op: 'owner', owner: roleSpec(form.owner) }] }),
+      steps.push(
+        edit(pg({ object: 'materializedView', action: 'alter', name: qn(form.schema, form.name), operations: [{ op: 'owner', owner: roleSpec(form.owner) }] })),
       );
     }
-    return { changes, recreates: false, indexes: [] };
+    return { steps, recreate: null, problems: [] };
   }
   const before = pgMatViewFormFrom(original, original.schema);
   if (!same(form.query, before.query)) {
-    // A materialized view has no OR REPLACE: drop it, create it under its new identity, restore owner and indexes.
-    const target = qn(form.schema, form.name);
-    const changes: EngineChange[] = [
-      pg({ object: 'materializedView', action: 'drop', name: qn(original.schema, original.name), behavior: 'restrict' }),
-      create(target, textOrNull(form.comment)),
-    ];
+    // A materialized view has no OR REPLACE, and the steps commit one by one. Everything that can fail because of
+    // the new definition runs before the old view is dropped: the new view is created under a temporary name, gets
+    // its owner and its indexes there, and only then the old view is dropped and the new one (and its indexes)
+    // take the real names. Index names are per schema, so in the old view's schema the indexes are created under
+    // temporary names as well.
+    const tempName = matViewTempName(form.name);
+    const temp = qn(form.schema, tempName);
+    const steps: StepSpec[] = [create(temp, textOrNull(form.comment))];
     const owner = textOrNull(form.owner);
-    if (owner) changes.push(pg({ object: 'materializedView', action: 'alter', name: target, operations: [{ op: 'owner', owner: roleSpec(owner) }] }));
-    const indexes = original.indexes.map((i) => retargetIndex(i.definition, original, form));
-    return { changes, recreates: true, indexes };
+    if (owner) steps.push(edit(pg({ object: 'materializedView', action: 'alter', name: temp, operations: [{ op: 'owner', owner: roleSpec(owner) }] })));
+    const sameSchema = same(form.schema, original.schema);
+    const taken = new Set<string>([tempName, form.name.trim(), original.name, ...original.indexes.map((i) => i.name)]);
+    const indexes: PgMatViewRecreatedIndex[] = [];
+    const renames: StepSpec[] = [];
+    const problems: string[] = [];
+    for (const index of original.indexes) {
+      const indexTemp = sameSchema ? pgTempName(index.name, taken) : null;
+      if (indexTemp !== null) taken.add(indexTemp);
+      const definition = retargetIndex(index.definition, original, { schema: form.schema, name: tempName }, indexTemp ?? undefined);
+      if (definition === null) {
+        problems.push(
+          `The definition of index ${index.name} could not be read, so it cannot be created on the recreated view and would be lost. Drop the index, save, and create it again afterwards.`,
+        );
+        continue;
+      }
+      indexes.push({ name: index.name, tempName: indexTemp });
+      steps.push({ kind: 'ddl', ddl: `${definition};`, database: null, label: `Create index ${index.name}` });
+      if (indexTemp !== null) {
+        renames.push({
+          kind: 'ddl',
+          ddl: `ALTER INDEX ${quotePgIdent(form.schema.trim())}.${quotePgIdent(indexTemp)} RENAME TO ${quotePgIdent(index.name)};`,
+          database: null,
+          label: `Rename index ${index.name}`,
+        });
+      }
+    }
+    steps.push(
+      edit(pg({ object: 'materializedView', action: 'drop', name: qn(original.schema, original.name), behavior: 'restrict' })),
+      edit(pg({ object: 'materializedView', action: 'alter', name: temp, operations: [{ op: 'rename', newName: form.name.trim() }] })),
+      ...renames,
+    );
+    return { steps, recreate: { tempName, indexes }, problems };
   }
-  const changes: EngineChange[] = [];
+  const steps: StepSpec[] = [];
+  const problems: string[] = [];
   const name = qn(original.schema, original.name);
-  if (!same(form.tablespace, before.tablespace) && textOrNull(form.tablespace)) {
-    changes.push(pg({ object: 'materializedView', action: 'alter', name, operations: [{ op: 'setTablespace', tablespace: form.tablespace.trim() }] }));
+  if (!same(form.tablespace, before.tablespace)) {
+    if (textOrNull(form.tablespace)) {
+      steps.push(edit(pg({ object: 'materializedView', action: 'alter', name, operations: [{ op: 'setTablespace', tablespace: form.tablespace.trim() }] })));
+    } else {
+      problems.push('The tablespace cannot be cleared: enter the tablespace to move the view to.');
+    }
   }
-  if (!same(form.comment, before.comment)) changes.push(commentChange(objectRef('materializedView', database, original.schema, original.name), form.comment));
+  if (!same(form.comment, before.comment)) steps.push(edit(commentChange(objectRef('materializedView', database, original.schema, original.name), form.comment)));
   const ops = identityOps<PgMaterializedViewOperation & { op: 'owner' | 'setSchema' | 'rename' }>(form, original);
-  if (ops.length > 0) changes.push(pg({ object: 'materializedView', action: 'alter', name, operations: ops }));
+  if (ops.length > 0) steps.push(edit(pg({ object: 'materializedView', action: 'alter', name, operations: ops })));
   if (form.withData !== before.withData) {
-    changes.push(pg({ object: 'materializedView', action: 'refresh', name: qn(form.schema, form.name), withData: form.withData }));
+    steps.push(edit(pg({ object: 'materializedView', action: 'refresh', name: qn(form.schema, form.name), withData: form.withData })));
   }
-  return { changes, recreates: false, indexes: [] };
+  return { steps, recreate: null, problems };
 }
 
 /**
- * An index definition of the old view pointed at the recreated one. Only
- * the `ON <schema>.<name>` target changes; `pg_get_indexdef` always prints
- * it schema-qualified with quoted identifiers where needed.
+ * Why a recreate cannot start, from a look at the server before it is
+ * planned, or `null` when it can: objects that depend on the view make its
+ * drop fail (after the whole new view was built), the temporary name must
+ * be free, and so must a new name. The names are display names.
  */
-function retargetIndex(definition: string, original: PgMaterializedView, form: PgMatViewForm): string {
-  if (same(form.schema, original.schema) && same(form.name, original.name)) return definition;
-  const quote = (v: string): string => (/^[a-z_][a-z0-9_$]*$/.test(v) ? v : `"${v.replace(/"/g, '""')}"`);
-  const from = ` ON ${quote(original.schema)}.${quote(original.name)} `;
-  const to = ` ON ${quote(form.schema.trim())}.${quote(form.name.trim())} `;
-  return definition.replace(from, to);
+export function pgMatViewRecreateProblem(
+  found: { dependents: readonly string[]; dependentsTruncated: boolean; temporaryTaken: boolean; nameTaken: boolean },
+  names: { temporary: string; final: string },
+): string | null {
+  const count = found.dependents.length;
+  if (count > 0) {
+    const shown = found.dependents.slice(0, 3).join(', ');
+    const rest = count > 3 || found.dependentsTruncated ? ' and more' : '';
+    return count === 1 && !found.dependentsTruncated
+      ? `1 object depends on this view (${shown}), so it cannot be dropped and recreated. Drop it first.`
+      : `${found.dependentsTruncated ? 'More than ' : ''}${count} objects depend on this view (${shown}${rest}), so it cannot be dropped and recreated. Drop them first.`;
+  }
+  if (found.temporaryTaken) {
+    return `${names.temporary} already exists (a save that stopped part way leaves it behind). The new definition is created under that name first: drop ${names.temporary}, then save again.`;
+  }
+  if (found.nameTaken) return `A materialized view named ${names.final} already exists. Choose another name.`;
+  return null;
+}
+
+/** What a recreate that stopped part way left on the server. */
+export type PgMatViewStanding =
+  /** The old view and the new one under its temporary name: nothing was dropped yet. */
+  | 'both'
+  /** Only the new view, still under its temporary name: the old one was dropped. */
+  | 'temporary'
+  /** The new view under its real name, with indexes that still have temporary names. */
+  | 'indexes';
+
+/**
+ * Where a recreate stands, from what a look at the server found: whether
+ * the old view and the temporary one exist, and the index names of the
+ * view under its final name (empty when there is none). `null` when
+ * nothing of the recreate is left half done.
+ */
+export function pgMatViewStanding(recreate: PgMatViewRecreate, found: { old: boolean; temporary: boolean; finalIndexes: readonly string[] }): PgMatViewStanding | null {
+  if (found.temporary) return found.old ? 'both' : 'temporary';
+  return recreate.indexes.some((i) => i.tempName !== null && found.finalIndexes.includes(i.tempName)) ? 'indexes' : null;
+}
+
+/** The sentence that says where a recreate stands; the names are display names (`schema.name`). */
+export function pgMatViewStandingText(standing: PgMatViewStanding, names: { old: string; temporary: string; final: string }): string {
+  if (standing === 'both') {
+    return `The save stopped part way. Nothing was dropped: ${names.old} still exists, and the new definition exists as ${names.temporary}. Plan the remaining steps to finish, or revert and drop ${names.temporary} yourself.`;
+  }
+  if (standing === 'temporary') {
+    return `The save stopped part way. ${names.old} was dropped, and the new view exists as ${names.temporary} until it is renamed. Plan the remaining steps to finish.`;
+  }
+  return `The save stopped part way. The view was recreated as ${names.final}, but some of its indexes still have temporary names. Plan the remaining steps to rename them.`;
+}
+
+/** A double-quoted PostgreSQL identifier (always quoted, so reserved words and case survive). */
+function quotePgIdent(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+/** One identifier as `pg_get_indexdef` prints it: double-quoted (with `""` inside) or bare. */
+const PG_IDENT = '(?:"(?:[^"]|"")*"|[^\\s."(]+)';
+/** `CREATE [UNIQUE] INDEX <name> ON [ONLY] <schema>.<relation> USING`, with the name and the target captured. */
+const INDEX_TARGET = new RegExp(`^(CREATE (?:UNIQUE )?INDEX )(${PG_IDENT})( ON (?:ONLY )?)(${PG_IDENT})\\.(${PG_IDENT})( USING )`);
+
+function unquotePgIdent(text: string): string {
+  return text.startsWith('"') ? text.slice(1, -1).replace(/""/g, '"') : text;
+}
+
+/**
+ * An index definition of the old view pointed at another relation (and,
+ * with `indexName`, given another name), or `null` when its target cannot
+ * be read or is not the old view. Only the index name and the
+ * `ON <schema>.<name>` target change; they are found by parsing the
+ * statement (`pg_get_indexdef` prints the target schema-qualified, quoting
+ * names with upper case, special characters and reserved words) and
+ * replaced by position, so nothing else in the definition is touched.
+ */
+export function retargetIndex(
+  definition: string,
+  original: { schema: string; name: string },
+  form: { schema: string; name: string },
+  indexName?: string,
+): string | null {
+  if (indexName === undefined && same(form.schema, original.schema) && same(form.name, original.name)) return definition;
+  const m = INDEX_TARGET.exec(definition);
+  if (!m) return null;
+  const [whole, head, name, on, schema, relation, using] = m as unknown as [string, string, string, string, string, string, string];
+  if (unquotePgIdent(schema) !== original.schema || unquotePgIdent(relation) !== original.name) return null;
+  const newName = indexName === undefined ? name : quotePgIdent(indexName);
+  return `${head}${newName}${on}${quotePgIdent(form.schema.trim())}.${quotePgIdent(form.name.trim())}${using}${definition.slice(whole.length)}`;
 }
 
 /** `REFRESH MATERIALIZED VIEW` with the options the user picked. */
@@ -1157,7 +1333,7 @@ export function buildMyRoutine(form: MyRoutineForm, original: MyRoutine | null, 
     name,
     routine: form.routine,
     replace: original !== null && original.name === name,
-    definer: definerOf(form),
+    definer: definerOf(form, original?.definer ?? null),
     parameters: form.params.map((p) => ({
       // Function parameters take no IN/OUT/INOUT.
       mode: isFunction ? null : p.mode,
@@ -1578,7 +1754,7 @@ export function buildMyTrigger(form: MyTriggerForm, original: MyTrigger | null, 
     table,
     name,
     replace: original !== null && original.name === name,
-    definer: definerOf(form),
+    definer: definerOf(form, original?.definer ?? null),
     timing: form.timing,
     events,
     order: form.orderKind === '' ? null : { kind: form.orderKind, trigger: form.orderTrigger.trim() },
@@ -1761,6 +1937,14 @@ export function buildPgSequence(form: PgSequenceForm, original: PgSequence | nul
   // The comment goes first: the alter may rename the sequence.
   if (operations.length > 0) out.push(pg({ object: 'sequence', action: 'alter', name, operations }));
   return out;
+}
+
+/** Edits of an existing sequence that cannot be saved, or `null`: a start value cannot be cleared (ALTER SEQUENCE has no "no start"). */
+export function pgSequenceProblem(form: PgSequenceForm, original: PgSequence | null): string | null {
+  if (!original) return null;
+  const before = pgSequenceFormFrom(original, original.schema);
+  if (!same(form.start, before.start) && !textOrNull(form.start)) return 'The start value cannot be cleared: enter one.';
+  return null;
 }
 
 /** `setval` for a PostgreSQL sequence: `isCalled` false makes the next `nextval` return `value` itself. `value` is exact decimal text. */
@@ -2031,7 +2215,7 @@ export function buildMyEvent(form: MyEventForm, original: MyEvent | null, databa
         change: 'createEvent',
         database,
         name: form.name.trim(),
-        definer: definerOf(form),
+        definer: definerOf(form, null),
         schedule: scheduleOf(form),
         onCompletionPreserve: form.preserve,
         status: form.status,
@@ -2043,8 +2227,9 @@ export function buildMyEvent(form: MyEventForm, original: MyEvent | null, databa
   const before = myEventFormFrom(original);
   const change: Extract<MyChange, { change: 'alterEvent' }> = { change: 'alterEvent', database, name: original.name };
   let any = false;
-  if (form.definer !== before.definer || !same(form.definerUser, before.definerUser) || !same(form.definerHost, before.definerHost)) {
-    change.definer = definerOf(form);
+  const definer = definerOf(form, original.definer);
+  if (JSON.stringify(definer) !== JSON.stringify(definerOf(before, original.definer))) {
+    change.definer = definer;
     any = true;
   }
   if (form.kind !== before.kind || scheduleKey(form) !== scheduleKey(before)) {
@@ -2075,64 +2260,94 @@ export function buildMyEvent(form: MyEventForm, original: MyEvent | null, databa
   return any ? [my(change)] : [];
 }
 
+/** Wall clock fields of `YYYY-MM-DD[ HH:MM[:SS[.ffffff]]]` as milliseconds of a UTC date (no time zone or DST applies), or `null`. */
+function wallClockMs(text: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?)?$/.exec(text.trim());
+  if (!m) return null;
+  const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6]].map((v) => Number(v ?? 0)) as [number, number, number, number, number, number];
+  const ms = Math.floor(Number(`0.${m[7] ?? '0'}`) * 1000);
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second, ms));
+  // Out-of-range fields (month 13, 31 February) are refused rather than rolled over.
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day || hour > 23 || minute > 59 || second > 59) return null;
+  return date.getTime();
+}
+
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+/** `start + INTERVAL months MONTH` as the server computes it: the day of month is clamped to the target month's length. */
+function addMonthsClamped(start: number, months: number): number {
+  const d = new Date(start);
+  const total = d.getUTCFullYear() * 12 + d.getUTCMonth() + months;
+  const year = Math.floor(total / 12);
+  const monthIndex = total - year * 12;
+  const day = Math.min(d.getUTCDate(), daysInMonth(year, monthIndex));
+  return Date.UTC(year, monthIndex, day, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
+}
+
+const FIXED_UNIT_MS: Partial<Record<MyIntervalUnit, number>> = {
+  second: 1000,
+  minute: 60_000,
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 7 * 86_400_000,
+};
+const MONTH_UNITS: Partial<Record<MyIntervalUnit, number>> = { month: 1, quarter: 3, year: 12 };
+
 /**
- * The next run times of a recurring schedule after `from` (local wall
- * clock of the server time zone is not known here; times are shown as
- * the server prints them). Only simple units are projected.
+ * The next run times of a recurring schedule after `from`. The server's
+ * time zone is not known here: `STARTS` and `ENDS` are read as wall clock
+ * times and compared with this computer's wall clock, and every run is
+ * `STARTS + n * interval` computed on the wall clock (no DST shifts; month
+ * steps clamp the day like the server does, 31 January + 1 month is 28 or
+ * 29 February). Only simple units are projected. The dates carry the run's
+ * wall clock fields in this computer's time zone, for display.
  */
 export function nextRuns(form: MyEventForm, from: Date, count: number): Date[] | null {
   if (form.kind !== 'every') return null;
   const quantity = Number(form.everyQuantity.trim());
   if (!Number.isInteger(quantity) || quantity < 1) return null;
   const startText = form.starts.trim();
-  const start = startText === '' ? null : new Date(startText.replace(' ', 'T'));
-  if (start && Number.isNaN(start.getTime())) return null;
-  const step = (d: Date, n: number): Date => {
-    const out = new Date(d.getTime());
-    switch (form.everyUnit) {
-      case 'second':
-        out.setSeconds(out.getSeconds() + n * quantity);
-        return out;
-      case 'minute':
-        out.setMinutes(out.getMinutes() + n * quantity);
-        return out;
-      case 'hour':
-        out.setHours(out.getHours() + n * quantity);
-        return out;
-      case 'day':
-        out.setDate(out.getDate() + n * quantity);
-        return out;
-      case 'week':
-        out.setDate(out.getDate() + 7 * n * quantity);
-        return out;
-      case 'month':
-        out.setMonth(out.getMonth() + n * quantity);
-        return out;
-      case 'quarter':
-        out.setMonth(out.getMonth() + 3 * n * quantity);
-        return out;
-      case 'year':
-        out.setFullYear(out.getFullYear() + n * quantity);
-        return out;
-      default:
-        return new Date(Number.NaN);
-    }
-  };
-  if (!start || Number.isNaN(step(start, 1).getTime())) return null;
-  const ends = form.ends.trim() === '' ? null : new Date(form.ends.trim().replace(' ', 'T'));
-  const out: Date[] = [];
-  let n = 0;
-  let t = start;
-  // Skip ahead in big steps when the start is far in the past.
-  while (t.getTime() <= from.getTime() && n < 1_000_000) {
-    n += 1;
-    t = step(start, n);
+  if (startText === '') return null;
+  const start = wallClockMs(startText);
+  if (start === null) return null;
+  const fixed = FIXED_UNIT_MS[form.everyUnit];
+  const months = MONTH_UNITS[form.everyUnit];
+  let at: (n: number) => number;
+  let firstAfter: (wall: number) => number;
+  if (fixed !== undefined) {
+    const stepMs = fixed * quantity;
+    at = (n) => start + n * stepMs;
+    firstAfter = (wall) => (wall < start ? 0 : Math.floor((wall - start) / stepMs) + 1);
+  } else if (months !== undefined) {
+    const stepMonths = months * quantity;
+    at = (n) => addMonthsClamped(start, n * stepMonths);
+    firstAfter = (wall) => {
+      if (wall < start) return 0;
+      const s = new Date(start);
+      const w = new Date(wall);
+      const monthsBetween = (w.getUTCFullYear() - s.getUTCFullYear()) * 12 + (w.getUTCMonth() - s.getUTCMonth());
+      // The estimate is at most one step off either way: settle it on the computed run times.
+      let n = Math.max(0, Math.floor(monthsBetween / stepMonths) - 1);
+      while (at(n) <= wall) n += 1;
+      return n;
+    };
+  } else {
+    return null;
   }
-  while (out.length < count) {
-    if (ends && t.getTime() > ends.getTime()) break;
-    out.push(t);
-    n += 1;
-    t = step(start, n);
+  const now = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate(), from.getHours(), from.getMinutes(), from.getSeconds(), from.getMilliseconds());
+  const endsText = form.ends.trim();
+  const ends = endsText === '' ? null : wallClockMs(endsText);
+  const toLocal = (wall: number): Date => {
+    const d = new Date(wall);
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds());
+  };
+  const out: Date[] = [];
+  for (let n = firstAfter(now); out.length < count; n += 1) {
+    const wall = at(n);
+    if (!Number.isFinite(wall) || (ends !== null && wall > ends)) break;
+    out.push(toLocal(wall));
   }
   return out;
 }
@@ -2741,7 +2956,11 @@ export const historyQuerySchema = z
         custom(ctx, ['to'], 'The end must not be before the start.');
       }
     }
-    if (/;/.test(v.where)) custom(ctx, ['where'], 'Write one condition without a semicolon.');
+    // The condition is spliced into the statement: strings, quoted names and parentheses must close, and a comment or `;` would cut off ORDER BY and LIMIT.
+    if (v.where.trim() !== '') {
+      const problem = checkSqlCondition('mysql', v.where);
+      if (problem) custom(ctx, ['where'], problem);
+    }
     if (!Number.isInteger(v.limit) || v.limit < 1) custom(ctx, ['limit'], 'Enter a positive number of rows.');
   });
 
@@ -2764,7 +2983,8 @@ export function historySelect(database: string, table: string, rowStart: string,
       break;
   }
   const order = [...keyColumns.map(quoteMyIdent), quoteMyIdent(rowStart)].join(', ');
-  const where = q.where.trim() === '' ? '' : ` WHERE ${q.where.trim()}`;
+  // Parenthesized so the condition cannot change what the period clause, ORDER BY and LIMIT apply to.
+  const where = q.where.trim() === '' ? '' : ` WHERE (${q.where.trim()})`;
   return `SELECT *, ${quoteMyIdent(rowStart)}, ${quoteMyIdent(rowEnd)} FROM ${target} ${period}${where} ORDER BY ${order} LIMIT ${q.limit}`;
 }
 

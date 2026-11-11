@@ -38,6 +38,12 @@ const ACCEPT_WARN_EVERY: Duration = Duration::from_secs(30);
 /// Unanswered keepalives after which the session counts as dropped.
 const KEEPALIVE_MAX: usize = 3;
 
+/// Least time allowed for one signature by the agent. An agent may ask
+/// the user to confirm each signature or touch a hardware key (1Password,
+/// Secretive, a YubiKey, `ssh-add -c`), which can take longer than the
+/// connect timeout.
+const AGENT_AUTH_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// How to authenticate to the SSH server (design doc 3.1). Secrets come
 /// from the keychain (`ssh_password`, `ssh_key_passphrase`).
 #[derive(Debug, Clone)]
@@ -369,17 +375,10 @@ impl Tunnel {
         let shared = Arc::new(Shared::new());
         let mut handle = connect(&params, shared.clone()).await?;
 
-        match tokio::time::timeout(params.connect_timeout, authenticate(&mut handle, &params)).await
-        {
-            Err(_) => {
-                return Err(TunnelError::Timeout {
-                    stage: TimeoutStage::Authentication,
-                    after: params.connect_timeout,
-                });
-            }
-            Ok(Err(e)) => return Err(e),
-            Ok(Ok(())) => {}
-        }
+        // A key file is decrypted before the limit starts: its KDF is
+        // deliberately slow and involves no round trip to the server.
+        let key = load_key(&params).await?;
+        authenticate(&mut handle, &params, key).await?;
 
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await
@@ -642,9 +641,75 @@ impl Drop for AbandonUnlessFinished {
     }
 }
 
+/// The private key of [`SshAuth::KeyFile`], decrypted off the async worker
+/// threads; `None` for the other methods.
+async fn load_key(params: &TunnelParams) -> Result<Option<russh::keys::PrivateKey>, TunnelError> {
+    let SshAuth::KeyFile { path, passphrase } = &params.auth else {
+        return Ok(None);
+    };
+    let (path, passphrase) = (path.clone(), passphrase.clone());
+    // Decrypting a key runs a deliberately slow KDF.
+    tokio::task::spawn_blocking(move || load_private_key(&path, passphrase.as_ref()))
+        .await
+        .map_err(|e| {
+            TunnelError::io(
+                "loading the key file failed",
+                std::io::Error::other(e.to_string()),
+            )
+        })?
+        .map(Some)
+}
+
+/// The limit for the request that has the agent sign: the connect timeout,
+/// and at least [`AGENT_AUTH_TIMEOUT`], since signing may wait for the
+/// user. Nothing else waits that long.
+fn agent_signature_timeout(params: &TunnelParams) -> Duration {
+    params.connect_timeout.max(AGENT_AUTH_TIMEOUT)
+}
+
+/// Runs one step of authenticating within `limit`.
+async fn within<T>(limit: Duration, step: impl Future<Output = T>) -> Result<T, TunnelError> {
+    tokio::time::timeout(limit, step)
+        .await
+        .map_err(|_| TunnelError::Timeout {
+            stage: TimeoutStage::Authentication,
+            after: limit,
+        })
+}
+
+/// Authenticates with `params.auth` within the connect timeout; `key` is
+/// the decrypted key of a key file ([`load_key`]). The agent has limits of
+/// its own ([`authenticate_agent`]).
 async fn authenticate(
     handle: &mut Handle<ClientHandler>,
     params: &TunnelParams,
+    key: Option<russh::keys::PrivateKey>,
+) -> Result<(), TunnelError> {
+    if matches!(params.auth, SshAuth::Agent) {
+        return authenticate_agent(handle, params).await;
+    }
+    within(
+        params.connect_timeout,
+        authenticate_with_secret(handle, params, key),
+    )
+    .await?
+}
+
+/// True when a password that the `password` method did not get through
+/// with should be tried through keyboard-interactive authentication: the
+/// server offers that and no `password` method (`PasswordAuthentication
+/// no` with PAM). Where it offers both, it has judged the password itself:
+/// sending it again would only count as a second failed login.
+fn password_goes_through_prompts(remaining_methods: &[MethodKind]) -> bool {
+    remaining_methods.contains(&MethodKind::KeyboardInteractive)
+        && !remaining_methods.contains(&MethodKind::Password)
+}
+
+/// Password and key file authentication.
+async fn authenticate_with_secret(
+    handle: &mut Handle<ClientHandler>,
+    params: &TunnelParams,
+    key: Option<russh::keys::PrivateKey>,
 ) -> Result<(), TunnelError> {
     let lost = |e: russh::Error| TunnelError::Connect {
         host: params.ssh_host.clone(),
@@ -655,22 +720,47 @@ async fn authenticate(
         ),
     };
     let result = match &params.auth {
-        SshAuth::Password(password) => handle
-            .authenticate_password(params.username.clone(), password.expose())
-            .await
-            .map_err(lost)?,
-        SshAuth::KeyFile { path, passphrase } => {
-            let (path, passphrase) = (path.clone(), passphrase.clone());
-            // Decrypting a key runs a deliberately slow KDF.
-            let key =
-                tokio::task::spawn_blocking(move || load_private_key(&path, passphrase.as_ref()))
-                    .await
-                    .map_err(|e| {
-                        TunnelError::io(
-                            "loading the key file failed",
-                            std::io::Error::other(e.to_string()),
-                        )
-                    })??;
+        SshAuth::Password(password) => {
+            let result = handle
+                .authenticate_password(params.username.clone(), password.expose())
+                .await
+                .map_err(lost)?;
+            match result {
+                // `PasswordAuthentication no` with keyboard-interactive (PAM)
+                // on: `ssh` answers the server's password prompt, so do the
+                // same.
+                client::AuthResult::Failure {
+                    ref remaining_methods,
+                    partial_success: false,
+                } if password_goes_through_prompts(remaining_methods) => {
+                    match keyboard_interactive(handle, &params.username, password)
+                        .await
+                        .map_err(lost)?
+                    {
+                        Interactive::Done(outcome) => outcome,
+                        Interactive::Rejected => result,
+                        Interactive::Unanswerable(prompt) => {
+                            return Err(TunnelError::AuthPrompt {
+                                username: params.username.clone(),
+                                prompt,
+                            });
+                        }
+                        Interactive::MoreFactors => client::AuthResult::Failure {
+                            remaining_methods: remaining_methods.clone(),
+                            partial_success: true,
+                        },
+                    }
+                }
+                other => other,
+            }
+        }
+        SshAuth::KeyFile { path, .. } => {
+            let key = key.ok_or_else(|| {
+                TunnelError::io(
+                    "loading the key file failed",
+                    std::io::Error::other(format!("{} was not loaded", path.display())),
+                )
+            })?;
             let hash = if key.algorithm().is_rsa() {
                 rsa_hash(handle).await
             } else {
@@ -684,9 +774,133 @@ async fn authenticate(
                 .await
                 .map_err(lost)?
         }
+        // Handled by `authenticate`; kept so every method has its arm.
         SshAuth::Agent => return authenticate_agent(handle, params).await,
     };
     auth_outcome(result, params)
+}
+
+/// How keyboard-interactive authentication with the password ended.
+#[derive(Debug)]
+enum Interactive {
+    /// The server decided.
+    Done(client::AuthResult),
+    /// The server asked for something other than the password (a one-time
+    /// code, several prompts, one that echoes), in these words: nothing
+    /// was sent.
+    Unanswerable(String),
+    /// The server asked for the password again: it was wrong.
+    Rejected,
+    /// After the password the server asked for more (a one-time code),
+    /// which tunnels do not support.
+    MoreFactors,
+}
+
+/// Keyboard-interactive authentication with the password, for servers that
+/// take passwords only that way (`PasswordAuthentication no` with PAM).
+/// Answers one prompt that does not echo and asks for the password
+/// ([`asks_for_password`]) with the password, and an info request without
+/// prompts (PAM sends one after the password) with nothing. The
+/// conversation is abandoned at anything else (see [`Interactive`]); the
+/// tunnel then fails anyway.
+async fn keyboard_interactive(
+    handle: &mut Handle<ClientHandler>,
+    username: &str,
+    password: &Secret,
+) -> Result<Interactive, russh::Error> {
+    let mut response = handle
+        .authenticate_keyboard_interactive_start(username.to_owned(), None)
+        .await?;
+    let mut answered = false;
+    loop {
+        let prompts = match response {
+            client::KeyboardInteractiveAuthResponse::Success => {
+                return Ok(Interactive::Done(client::AuthResult::Success));
+            }
+            client::KeyboardInteractiveAuthResponse::Failure {
+                remaining_methods,
+                partial_success,
+            } => {
+                return Ok(Interactive::Done(client::AuthResult::Failure {
+                    remaining_methods,
+                    partial_success,
+                }));
+            }
+            client::KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => prompts,
+        };
+        let responses = match next_answer(&prompts, answered) {
+            Answer::Nothing => Vec::new(),
+            Answer::Password => {
+                answered = true;
+                vec![password.expose().to_owned()]
+            }
+            Answer::Stop(outcome) => return Ok(outcome),
+        };
+        response = handle
+            .authenticate_keyboard_interactive_respond(responses)
+            .await?;
+    }
+}
+
+/// The reply to a keyboard-interactive info request.
+#[derive(Debug)]
+enum Answer {
+    /// No responses (an info request without prompts).
+    Nothing,
+    /// The password, for the one password prompt.
+    Password,
+    /// Abandon the conversation.
+    Stop(Interactive),
+}
+
+/// True when the text of a prompt asks for the password: it names a
+/// password or passphrase and no one-time code. A hidden prompt alone does
+/// not tell: PAM can ask for the code first ("Verification code: "), and
+/// the password must not be sent as the answer to that.
+fn asks_for_password(prompt: &str) -> bool {
+    let prompt = prompt.to_lowercase();
+    ["password", "passphrase"]
+        .iter()
+        .any(|word| prompt.contains(word))
+        && !["code", "otp", "token", "verification"]
+            .iter()
+            .any(|word| prompt.contains(word))
+}
+
+/// The server's prompts as shown in an error: without control characters
+/// and the trailing colon, and not longer than a line.
+fn shown_prompts(prompts: &[client::Prompt]) -> String {
+    const MAX_CHARS: usize = 120;
+    let text = prompts
+        .iter()
+        .map(|prompt| {
+            let clean: String = prompt.prompt.chars().filter(|c| !c.is_control()).collect();
+            format!("\"{}\"", clean.trim().trim_end_matches(':').trim_end())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    if text.chars().count() > MAX_CHARS {
+        let cut: String = text.chars().take(MAX_CHARS).collect();
+        format!("{cut}...")
+    } else {
+        text
+    }
+}
+
+/// What to answer to `prompts`; `answered` says the password was already
+/// given in this conversation.
+fn next_answer(prompts: &[client::Prompt], answered: bool) -> Answer {
+    let password_prompt =
+        matches!(prompts, [prompt] if !prompt.echo && asks_for_password(&prompt.prompt));
+    match (prompts, answered) {
+        ([], _) => Answer::Nothing,
+        (_, false) if password_prompt => Answer::Password,
+        (_, false) => Answer::Stop(Interactive::Unanswerable(shown_prompts(prompts))),
+        // Asked for the password again (sshd may put a PAM message such as
+        // "Permission denied" before the prompt): it was wrong.
+        (_, true) if password_prompt => Answer::Stop(Interactive::Rejected),
+        (_, true) => Answer::Stop(Interactive::MoreFactors),
+    }
 }
 
 fn auth_outcome(result: client::AuthResult, params: &TunnelParams) -> Result<(), TunnelError> {
@@ -752,10 +966,9 @@ async fn connect_agent() -> Result<DynAgent, TunnelError> {
     })
 }
 
-async fn authenticate_agent(
-    handle: &mut Handle<ClientHandler>,
-    params: &TunnelParams,
-) -> Result<(), TunnelError> {
+/// Connects to the agent and lists its identities.
+async fn agent_identities()
+-> Result<(DynAgent, Vec<russh::keys::agent::AgentIdentity>), TunnelError> {
     let mut agent = connect_agent().await?;
     let identities = agent
         .request_identities()
@@ -763,6 +976,23 @@ async fn authenticate_agent(
         .map_err(|e| TunnelError::Agent {
             reason: format!("cannot list the agent's keys: {e}"),
         })?;
+    Ok((agent, identities))
+}
+
+/// Authenticates with the keys of the SSH agent. Reaching the agent,
+/// listing its keys and asking the server which signatures it takes each
+/// stay within the connect timeout; only the request that has the agent
+/// sign may take longer ([`agent_signature_timeout`]).
+async fn authenticate_agent(
+    handle: &mut Handle<ClientHandler>,
+    params: &TunnelParams,
+) -> Result<(), TunnelError> {
+    let limit = params.connect_timeout;
+    let (mut agent, identities) = tokio::time::timeout(limit, agent_identities())
+        .await
+        .map_err(|_| TunnelError::Agent {
+            reason: format!("the SSH agent did not answer within {limit:?}"),
+        })??;
     let keys: Vec<PublicKey> = identities
         .iter()
         .filter_map(|id| match id {
@@ -775,19 +1005,38 @@ async fn authenticate_agent(
             reason: "the SSH agent holds no keys".to_owned(),
         });
     }
+    let total = keys.len();
     let mut last = None;
-    for key in keys {
+    for (offered, key) in keys.into_iter().enumerate() {
         let hash = if key.algorithm().is_rsa() {
-            rsa_hash(handle).await
+            within(limit, rsa_hash(handle)).await?
         } else {
             None
         };
-        let result = handle
-            .authenticate_publickey_with(params.username.clone(), key, hash, &mut agent)
-            .await
-            .map_err(|e| TunnelError::Agent {
-                reason: format!("the agent could not sign: {e}"),
-            })?;
+        // The agent signs inside this request, and may ask the user first.
+        let signed = within(
+            agent_signature_timeout(params),
+            handle.authenticate_publickey_with(params.username.clone(), key, hash, &mut agent),
+        )
+        .await?;
+        let result = match signed {
+            Ok(result) => result,
+            // The request could not be sent: the server has closed the
+            // connection, not the agent failed.
+            Err(russh::AgentAuthError::Send(_)) => {
+                return Err(closed_during_agent_auth(params, offered, total));
+            }
+            Err(e @ russh::AgentAuthError::Key(_)) => {
+                return Err(TunnelError::Agent {
+                    reason: format!("the agent could not sign: {e}"),
+                });
+            }
+        };
+        // A server that disconnects ends the reply stream, which reads as
+        // a failure that accepts nothing.
+        if handle.is_closed() && !matches!(result, client::AuthResult::Success) {
+            return Err(closed_during_agent_auth(params, offered + 1, total));
+        }
         match result {
             client::AuthResult::Success => return Ok(()),
             client::AuthResult::Failure {
@@ -807,6 +1056,28 @@ async fn authenticate_agent(
         None => Err(TunnelError::Agent {
             reason: "the SSH agent holds no keys".to_owned(),
         }),
+    }
+}
+
+/// The server closed the connection while the agent's keys were offered,
+/// after `offered` of `total` keys were refused. sshd counts every refused
+/// key against `MaxAuthTries` (6 by default) and disconnects at the limit,
+/// so an agent with many keys can be cut off before it offers the right
+/// one.
+fn closed_during_agent_auth(params: &TunnelParams, offered: usize, total: usize) -> TunnelError {
+    let reason = if offered > 1 {
+        format!(
+            "the server closed the connection after {offered} of the agent's {total} keys were \
+             refused; servers stop after a few refused keys (MaxAuthTries), so remove the other \
+             keys from the agent or use the key file"
+        )
+    } else {
+        "the server closed the connection during authentication".to_owned()
+    };
+    TunnelError::Connect {
+        host: params.ssh_host.clone(),
+        port: params.ssh_port,
+        reason,
     }
 }
 
@@ -1167,6 +1438,156 @@ mod tests {
         );
         p.ssh_port = 2222;
         p
+    }
+
+    fn prompt(text: &str, echo: bool) -> client::Prompt {
+        client::Prompt {
+            prompt: text.to_owned(),
+            echo,
+        }
+    }
+
+    #[test]
+    fn keyboard_interactive_answers_only_the_password_prompt() {
+        let password = [prompt("Password: ", false)];
+        assert!(matches!(next_answer(&password, false), Answer::Password));
+        assert!(matches!(
+            next_answer(&[prompt("(deploy@bastion) PASSWORD:", false)], false),
+            Answer::Password
+        ));
+        assert!(matches!(
+            next_answer(&[prompt("Enter passphrase: ", false)], false),
+            Answer::Password
+        ));
+        // PAM's info request without prompts after the password.
+        assert!(matches!(next_answer(&[], true), Answer::Nothing));
+        assert!(matches!(next_answer(&[], false), Answer::Nothing));
+        // Asked again: the password was wrong, also when sshd put a PAM
+        // message before the prompt.
+        assert!(matches!(
+            next_answer(&password, true),
+            Answer::Stop(Interactive::Rejected)
+        ));
+        assert!(matches!(
+            next_answer(&[prompt("Permission denied\nPassword: ", false)], true),
+            Answer::Stop(Interactive::Rejected)
+        ));
+        // A one-time code after the password.
+        assert!(matches!(
+            next_answer(&[prompt("Verification code: ", false)], true),
+            Answer::Stop(Interactive::MoreFactors)
+        ));
+        // A hidden prompt that is not for the password gets no answer: the
+        // password is not sent as a one-time code.
+        for text in [
+            "Verification code: ",
+            "One-time password (OTP): ",
+            "Password or token: ",
+            "Duo passcode: ",
+            "PIN: ",
+            "",
+        ] {
+            assert!(
+                matches!(
+                    next_answer(&[prompt(text, false)], false),
+                    Answer::Stop(Interactive::Unanswerable(_))
+                ),
+                "{text}"
+            );
+        }
+        // Not a single hidden prompt: nothing is sent.
+        assert!(matches!(
+            next_answer(&[prompt("Username: ", true)], false),
+            Answer::Stop(Interactive::Unanswerable(_))
+        ));
+        assert!(matches!(
+            next_answer(&[prompt("Password: ", true)], false),
+            Answer::Stop(Interactive::Unanswerable(_))
+        ));
+        let Answer::Stop(Interactive::Unanswerable(shown)) = next_answer(
+            &[prompt("Password: ", false), prompt("Code:\u{7} ", false)],
+            false,
+        ) else {
+            panic!("two prompts were answered");
+        };
+        assert_eq!(shown, "\"Password\", \"Code\"");
+    }
+
+    #[test]
+    fn an_unanswerable_prompt_names_what_the_server_asked() {
+        let error = TunnelError::AuthPrompt {
+            username: "deploy".to_owned(),
+            prompt: shown_prompts(&[prompt("Verification code: ", false)]),
+        };
+        assert_eq!(error.kind(), crate::error::TunnelErrorKind::Auth);
+        let message = error.to_string();
+        assert!(message.contains("\"Verification code\""), "{message}");
+        assert!(message.contains("Varve cannot answer"), "{message}");
+        // A long prompt is cut.
+        let long = shown_prompts(&[prompt(&"x".repeat(500), false)]);
+        assert_eq!(long.chars().count(), 123);
+    }
+
+    #[test]
+    fn the_password_goes_through_prompts_only_without_a_password_method() {
+        use MethodKind::{KeyboardInteractive, Password, PublicKey};
+        // `PasswordAuthentication no` with PAM.
+        assert!(password_goes_through_prompts(&[KeyboardInteractive]));
+        assert!(password_goes_through_prompts(&[
+            PublicKey,
+            KeyboardInteractive
+        ]));
+        // The server judged the password itself: it is not sent again.
+        assert!(!password_goes_through_prompts(&[
+            Password,
+            KeyboardInteractive
+        ]));
+        assert!(!password_goes_through_prompts(&[
+            PublicKey,
+            KeyboardInteractive,
+            Password
+        ]));
+        assert!(!password_goes_through_prompts(&[Password]));
+        assert!(!password_goes_through_prompts(&[PublicKey]));
+        assert!(!password_goes_through_prompts(&[]));
+    }
+
+    #[test]
+    fn only_the_agents_signature_may_wait_for_the_user() {
+        let mut p = base();
+        p.auth = SshAuth::Agent;
+        assert!(p.connect_timeout < AGENT_AUTH_TIMEOUT);
+        assert_eq!(agent_signature_timeout(&p), AGENT_AUTH_TIMEOUT);
+        p.connect_timeout = Duration::from_secs(300);
+        assert_eq!(agent_signature_timeout(&p), Duration::from_secs(300));
+    }
+
+    #[tokio::test]
+    async fn a_step_that_hangs_ends_at_its_limit() {
+        let limit = Duration::from_millis(20);
+        let started = std::time::Instant::now();
+        let hung = within(limit, std::future::pending::<()>()).await;
+        assert!(matches!(
+            hung,
+            Err(TunnelError::Timeout {
+                stage: TimeoutStage::Authentication,
+                after,
+            }) if after == limit
+        ));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(within(limit, async { 7 }).await.ok(), Some(7));
+    }
+
+    #[test]
+    fn a_disconnect_while_offering_agent_keys_names_max_auth_tries() {
+        let p = base();
+        let many = closed_during_agent_auth(&p, 6, 9);
+        assert!(matches!(many, TunnelError::Connect { .. }));
+        let text = many.to_string();
+        assert!(text.contains("6 of the agent's 9 keys"), "{text}");
+        assert!(text.contains("MaxAuthTries"), "{text}");
+        let first = closed_during_agent_auth(&p, 1, 1).to_string();
+        assert!(!first.contains("MaxAuthTries"), "{first}");
     }
 
     #[test]

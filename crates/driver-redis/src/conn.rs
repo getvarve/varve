@@ -474,7 +474,12 @@ impl Endpoint {
                 .await
                 .map_err(|e| connect_error(&e, &self.display()))?;
             if let Resp::ServerError(e) = reply {
-                return Err(error::from_server_error(&e));
+                let error = error::from_server_error(&e);
+                // The name only labels the connection in `CLIENT LIST`.
+                if !error::refused(&error) {
+                    return Err(error);
+                }
+                tracing::debug!(code = ?error.code, "CLIENT SETNAME refused, connection unnamed");
             }
         }
         if db != 0 {
@@ -857,30 +862,225 @@ pub fn server_details(text: &str) -> Result<ServerDetails, DriverError> {
     })
 }
 
-/// Reads `CLIENT ID`.
+/// Reads `CLIENT ID`; `None` when the server refuses it (see
+/// [`error::refused`]): a cancel then cannot stop a command on the server.
 ///
 /// # Errors
 ///
 /// Driver errors, or Protocol when the reply is not an integer.
-pub async fn client_id(conn: &Connection) -> Result<i64, DriverError> {
-    let reply = conn.query(redis::cmd("CLIENT").arg("ID")).await?;
-    as_int(&reply).ok_or_else(|| error::protocol("CLIENT ID did not return an integer"))
+pub async fn client_id(conn: &Connection) -> Result<Option<i64>, DriverError> {
+    let reply = match conn.query(redis::cmd("CLIENT").arg("ID")).await {
+        Ok(reply) => reply,
+        Err(e) if error::refused(&e) => {
+            tracing::debug!(code = ?e.code, "CLIENT ID refused");
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    as_int(&reply)
+        .map(Some)
+        .ok_or_else(|| error::protocol("CLIENT ID did not return an integer"))
 }
 
-/// Reads and parses `INFO server`.
+/// What is known of the server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerRead {
+    /// From `INFO server`.
+    Info(ServerDetails),
+    /// `INFO` was refused; from the `HELLO` reply (Redis 6 and later),
+    /// which has no Redis compatible version for Valkey.
+    Hello(ServerDetails),
+    /// `INFO` and `HELLO` were refused: the version is not known, and
+    /// [`unknown_server`] stands in for it.
+    Unknown(ServerDetails),
+}
+
+impl ServerRead {
+    /// The details, however they were found.
+    #[must_use]
+    pub fn details(&self) -> &ServerDetails {
+        match self {
+            ServerRead::Info(details)
+            | ServerRead::Hello(details)
+            | ServerRead::Unknown(details) => details,
+        }
+    }
+
+    /// The notice for a session whose server was not read from `INFO`.
+    #[must_use]
+    pub fn notice(&self) -> Option<String> {
+        match self {
+            ServerRead::Info(_) => None,
+            ServerRead::Hello(_) => Some(
+                "The server refused INFO (an ACL without @dangerous, a renamed command or a \
+                 proxy), so its version was read from HELLO; the server statistics are not \
+                 available, and the database list shows only the open database."
+                    .to_owned(),
+            ),
+            ServerRead::Unknown(_) => Some(
+                "The server refused INFO and HELLO (an ACL, a renamed command or a proxy), so \
+                 its version is not known; Varve uses only commands every Redis version has, \
+                 the server statistics are not available, and the database list shows only \
+                 the open database."
+                    .to_owned(),
+            ),
+        }
+    }
+}
+
+/// Reads and parses `INFO server`. When the server refuses `INFO` (see
+/// [`error::refused`]) the version comes from `HELLO`, and when that is
+/// refused too it is not known.
 ///
 /// # Errors
 ///
 /// Driver errors, or Protocol for an unexpected reply.
-pub async fn read_server(conn: &Connection) -> Result<ServerDetails, DriverError> {
-    let reply = conn.query(redis::cmd("INFO").arg("server")).await?;
-    let text = as_text(&reply).ok_or_else(|| error::protocol("INFO did not return text"))?;
-    server_details(&text)
+pub async fn read_server(conn: &Connection) -> Result<ServerRead, DriverError> {
+    match conn.query(redis::cmd("INFO").arg("server")).await {
+        Ok(reply) => {
+            let text =
+                as_text(&reply).ok_or_else(|| error::protocol("INFO did not return text"))?;
+            return server_details(&text).map(ServerRead::Info);
+        }
+        Err(e) if error::refused(&e) => {
+            tracing::debug!(code = ?e.code, "INFO refused, reading the version from HELLO");
+        }
+        Err(e) => return Err(e),
+    }
+    // Without a protocol version HELLO only describes the connection.
+    match conn.query(&redis::cmd("HELLO")).await {
+        Ok(reply) => hello_details(&reply).map(ServerRead::Hello),
+        Err(e) if error::refused(&e) => {
+            tracing::debug!(code = ?e.code, "HELLO refused, the server version is unknown");
+            Ok(ServerRead::Unknown(unknown_server()))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Server identity from a `HELLO` reply (`server`, `version`, ... as a
+/// map in RESP3, as alternating names and values in RESP2).
+///
+/// # Errors
+///
+/// [`ErrorKind::Protocol`] when the reply carries no readable version.
+pub fn hello_details(reply: &Resp) -> Result<ServerDetails, DriverError> {
+    let pairs: Vec<(String, String)> = match reply {
+        Resp::Map(pairs) => pairs
+            .iter()
+            .filter_map(|(k, v)| Some((as_text(k)?, as_text(v)?)))
+            .collect(),
+        Resp::Array(items) => items
+            .chunks(2)
+            .filter_map(|pair| match pair {
+                [k, v] => Some((as_text(k)?, as_text(v)?)),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let field = |key: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(key))
+            .map(|(_, v)| v.as_str())
+    };
+    let version =
+        field("version").ok_or_else(|| error::protocol("HELLO did not report a version"))?;
+    let (major, minor, patch) = parse_version(version)
+        .ok_or_else(|| error::protocol(format!("unreadable server version {version}")))?;
+    let valkey = field("server").is_some_and(|s| s.eq_ignore_ascii_case("valkey"));
+    let (flavor, shown, compat) = if valkey {
+        // Every Valkey release reports the Redis 7.2 command set
+        // (`redis_version:7.2.4` in INFO), which HELLO does not say.
+        (ServerFlavor::Valkey, format!("{version}-valkey"), (7, 2))
+    } else {
+        (ServerFlavor::Redis, version.to_owned(), (major, minor))
+    };
+    Ok(ServerDetails {
+        info: ServerInfo {
+            engine: Engine::Redis,
+            version: shown,
+            major,
+            minor,
+            patch,
+        },
+        flavor,
+        compat,
+    })
+}
+
+/// Stands in for a server whose version is not known: compatible with
+/// version 0.0, so every feature gated on a version stays off and only
+/// commands every Redis version has are used.
+#[must_use]
+pub fn unknown_server() -> ServerDetails {
+    ServerDetails {
+        info: ServerInfo {
+            engine: Engine::Redis,
+            version: "unknown".to_owned(),
+            major: 0,
+            minor: 0,
+            patch: None,
+        },
+        flavor: ServerFlavor::Redis,
+        compat: (0, 0),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bulk(text: &str) -> Resp {
+        Resp::BulkString(text.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn hello_replies_describe_the_server() -> Result<(), DriverError> {
+        // RESP2: names and values alternate.
+        let redis = hello_details(&Resp::Array(vec![
+            bulk("server"),
+            bulk("redis"),
+            bulk("version"),
+            bulk("7.2.5"),
+            bulk("proto"),
+            Resp::Int(2),
+            bulk("id"),
+            Resp::Int(7),
+        ]))?;
+        assert_eq!(redis.flavor, ServerFlavor::Redis);
+        assert_eq!(redis.info.version, "7.2.5");
+        assert_eq!((redis.info.major, redis.info.minor), (7, 2));
+        assert_eq!(redis.compat, (7, 2));
+        // RESP3: a map. Valkey reports its own version only.
+        let valkey = hello_details(&Resp::Map(vec![
+            (bulk("server"), bulk("valkey")),
+            (bulk("version"), bulk("8.1.0")),
+        ]))?;
+        assert_eq!(valkey.flavor, ServerFlavor::Valkey);
+        assert_eq!(valkey.info.version, "8.1.0-valkey");
+        assert_eq!(valkey.compat, (7, 2));
+        assert!(hello_details(&Resp::Array(vec![bulk("server"), bulk("redis")])).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn an_unknown_server_turns_every_version_gate_off() {
+        let unknown = ServerRead::Unknown(unknown_server());
+        assert_eq!(unknown.details().compat, (0, 0));
+        assert_eq!(unknown.details().info.version, "unknown");
+        assert!(unknown.notice().is_some_and(|n| n.contains("HELLO")));
+        let hello = ServerRead::Hello(unknown_server());
+        assert!(hello.notice().is_some_and(|n| n.contains("refused INFO")));
+        for read in [&unknown, &hello] {
+            assert!(
+                read.notice()
+                    .is_some_and(|n| n.contains("shows only the open database"))
+            );
+        }
+        assert_eq!(ServerRead::Info(unknown_server()).notice(), None);
+    }
 
     #[test]
     fn probe_replies_tell_plain_redis_from_tls() {

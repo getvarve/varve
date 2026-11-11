@@ -35,7 +35,9 @@ import {
   createsOverload,
   deleteHistorySql,
   enumNeedsRecreate,
+  definerOf,
   errorsOf,
+  historyQuerySchema,
   historySelect,
   integerProblem,
   myEventFormFrom,
@@ -50,7 +52,13 @@ import {
   pgDomainFormFrom,
   pgDomainSchema,
   pgEnumFormFrom,
+  matViewTempName,
   pgMatViewFormFrom,
+  pgMatViewRecreateProblem,
+  pgMatViewStanding,
+  pgMatViewStandingText,
+  pgSequenceProblem,
+  retargetIndex,
   pgRoutineFormFrom,
   pgSequenceFormFrom,
   pgTriggerFormFrom,
@@ -60,6 +68,7 @@ import {
   roleSpec,
   sqlStandardBody,
 } from './ddlPlan';
+import type { StepSpec } from './ddlApply';
 import type { ServerTarget } from './ddlPlan';
 
 const pg17: ServerTarget = { engine: 'postgres', major: 17, minor: 2 };
@@ -204,17 +213,114 @@ describe('materialized views', () => {
     ],
   };
 
-  it('drops and recreates on a new query, carrying the indexes to the new name', () => {
+  const changesOf = (steps: StepSpec[]): unknown[] => steps.map((s) => (s.kind === 'edit' ? s.change.change : s.ddl));
+
+  it('recreates under a temporary name: owner and indexes go onto the new view before the old one is dropped, the real names come last', () => {
     const form = { ...pgMatViewFormFrom(mv, 'public'), query: 'SELECT 2 AS day', name: 'daily2' };
     const built = buildPgMatView(form, mv, 'shop');
-    expect(built.recreates).toBe(true);
-    expect(built.changes.map((c) => (c.change as { action: string }).action)).toEqual(['drop', 'create', 'alter']);
-    expect(built.indexes).toEqual(['CREATE UNIQUE INDEX daily_day_key ON public.daily2 USING btree (day)']);
+    expect(built.recreate).toEqual({ tempName: 'daily2_varve_new', indexes: [{ name: 'daily_day_key', tempName: 'daily_day_key_varve_new' }] });
+    expect(built.problems).toEqual([]);
+    const temp = { schema: 'public', name: 'daily2_varve_new' };
+    expect(changesOf(built.steps)).toEqual([
+      expect.objectContaining({ object: 'materializedView', action: 'create', name: temp, query: 'SELECT 2 AS day' }),
+      { object: 'materializedView', action: 'alter', name: temp, operations: [{ op: 'owner', owner: { kind: 'name', name: 'migrator' } }] },
+      // The old view still holds the index name in this schema: created under a temporary name, on the temporary view.
+      'CREATE UNIQUE INDEX "daily_day_key_varve_new" ON "public"."daily2_varve_new" USING btree (day);',
+      { object: 'materializedView', action: 'drop', name: { schema: 'public', name: 'daily' }, behavior: 'restrict' },
+      { object: 'materializedView', action: 'alter', name: temp, operations: [{ op: 'rename', newName: 'daily2' }] },
+      'ALTER INDEX "public"."daily_day_key_varve_new" RENAME TO "daily_day_key";',
+    ]);
+    // Nothing that depends on the new definition runs after the drop: only renames do.
+    const drop = built.steps.findIndex((s) => s.kind === 'edit' && JSON.stringify(s.change).includes('"action":"drop"'));
+    expect(drop).toBe(3);
+    expect(built.steps.slice(drop + 1).every((s) => (s.kind === 'edit' ? JSON.stringify(s.change).includes('"rename"') : s.ddl.startsWith('ALTER INDEX')))).toBe(true);
+  });
+
+  it('creates the indexes under their own names when the view moves to another schema', () => {
+    const built = buildPgMatView({ ...pgMatViewFormFrom(mv, 'public'), query: 'SELECT 2 AS day', schema: 'reports' }, mv, null);
+    expect(built.recreate).toEqual({ tempName: 'daily_varve_new', indexes: [{ name: 'daily_day_key', tempName: null }] });
+    expect(built.steps.filter((s) => s.kind === 'ddl').map((s) => (s.kind === 'ddl' ? s.ddl : ''))).toEqual([
+      'CREATE UNIQUE INDEX daily_day_key ON "reports"."daily_varve_new" USING btree (day);',
+    ]);
+  });
+
+  it('gives two indexes whose temporary names would be cut to the same text different ones', () => {
+    const long = 'x'.repeat(60);
+    const index = (name: string) => ({ ...mv.indexes[0], name, definition: `CREATE INDEX ${name} ON public.daily USING btree (day)` });
+    const two = { ...mv, indexes: [index(`${long}_a`), index(`${long}_b`)] } as PgMaterializedView;
+    const names = buildPgMatView({ ...pgMatViewFormFrom(two, 'public'), query: 'SELECT 2 AS day' }, two, null).recreate?.indexes.map((i) => i.tempName) ?? [];
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) expect(new TextEncoder().encode(name ?? '').length).toBeLessThanOrEqual(63);
+  });
+
+  it('says where a recreate that stopped part way stands, from what exists on the server', () => {
+    const recreate = { tempName: 'daily_varve_new', indexes: [{ name: 'daily_day_key', tempName: 'daily_day_key_varve_new' }] };
+    expect(pgMatViewStanding(recreate, { old: true, temporary: true, finalIndexes: [] })).toBe('both');
+    expect(pgMatViewStanding(recreate, { old: false, temporary: true, finalIndexes: [] })).toBe('temporary');
+    expect(pgMatViewStanding(recreate, { old: false, temporary: false, finalIndexes: ['daily_day_key_varve_new'] })).toBe('indexes');
+    // Nothing of it is left: the old view as it was, or the finished new one.
+    expect(pgMatViewStanding(recreate, { old: false, temporary: false, finalIndexes: ['daily_day_key'] })).toBeNull();
+    const names = { old: 'public.daily', temporary: 'public.daily_varve_new', final: 'public.daily' };
+    expect(pgMatViewStandingText('both', names)).toMatch(/Nothing was dropped: public\.daily still exists, and the new definition exists as public\.daily_varve_new/);
+    expect(pgMatViewStandingText('temporary', names)).toMatch(/public\.daily was dropped, and the new view exists as public\.daily_varve_new/);
+    expect(pgMatViewStandingText('indexes', names)).toMatch(/recreated as public\.daily, but some of its indexes still have temporary names/);
+  });
+
+  it('refuses a recreate up front when objects depend on the view or a name it needs is taken', () => {
+    const names = { temporary: 'public.daily_varve_new', final: 'public.daily2' };
+    const free = { dependents: [], dependentsTruncated: false, temporaryTaken: false, nameTaken: false };
+    expect(pgMatViewRecreateProblem(free, names)).toBeNull();
+    expect(pgMatViewRecreateProblem({ ...free, dependents: ['view public.totals'] }, names)).toBe(
+      '1 object depends on this view (view public.totals), so it cannot be dropped and recreated. Drop it first.',
+    );
+    expect(pgMatViewRecreateProblem({ ...free, dependents: ['a', 'b', 'c', 'd'] }, names)).toMatch(/^4 objects depend on this view \(a, b, c and more\)/);
+    expect(pgMatViewRecreateProblem({ ...free, temporaryTaken: true }, names)).toMatch(/^public\.daily_varve_new already exists .* drop public\.daily_varve_new, then save again\.$/);
+    expect(pgMatViewRecreateProblem({ ...free, nameTaken: true }, names)).toBe('A materialized view named public.daily2 already exists. Choose another name.');
+  });
+
+  it('retargets index definitions by parsing the target, also for quoted reserved words and names with $', () => {
+    const original = { schema: 'user', name: 'order' };
+    const definition = `CREATE UNIQUE INDEX "order_key" ON "user"."order" USING btree (id) WHERE (note <> ' ON user.order '::text)`;
+    expect(retargetIndex(definition, original, { schema: 'user', name: 'a$$b' })).toBe(
+      `CREATE UNIQUE INDEX "order_key" ON "user"."a$$b" USING btree (id) WHERE (note <> ' ON user.order '::text)`,
+    );
+    expect(retargetIndex('CREATE INDEX i ON ONLY s."Mixed ""q""" USING btree (a)', { schema: 's', name: 'Mixed "q"' }, { schema: 't', name: 'x' })).toBe(
+      'CREATE INDEX i ON ONLY "t"."x" USING btree (a)',
+    );
+    // Not the view it was read from, or not a definition it can read: refused, not returned stale.
+    expect(retargetIndex('CREATE INDEX i ON public.other USING btree (a)', { schema: 'public', name: 'daily' }, { schema: 'public', name: 'x' })).toBeNull();
+    expect(retargetIndex('something else', { schema: 'public', name: 'daily' }, { schema: 'public', name: 'x' })).toBeNull();
+    // With a new index name the name changes too, and a target that stays the same is still checked.
+    expect(retargetIndex('CREATE INDEX "i x" ON s.t USING btree (a)', { schema: 's', name: 't' }, { schema: 's', name: 't_new' }, 'i "tmp"')).toBe(
+      'CREATE INDEX "i ""tmp""" ON "s"."t_new" USING btree (a)',
+    );
+  });
+
+  it('refuses a recreate whose index cannot be retargeted, before anything is dropped', () => {
+    const broken = { ...mv, indexes: [{ ...mv.indexes[0], definition: 'CREATE INDEX odd ON other.thing USING btree (day)' }] } as PgMaterializedView;
+    const built = buildPgMatView({ ...pgMatViewFormFrom(broken, 'public'), query: 'SELECT 2 AS day', name: 'daily2' }, broken, null);
+    expect(built.problems).toHaveLength(1);
+    expect(built.problems[0]).toMatch(/index daily_day_key could not be read/);
+  });
+
+  it('cuts the temporary name to 63 bytes', () => {
+    const temp = matViewTempName('ä'.repeat(40));
+    expect(new TextEncoder().encode(temp).length).toBeLessThanOrEqual(63);
+    expect(temp.endsWith('_varve_new')).toBe(true);
+    expect(temp.startsWith('ää')).toBe(true);
+  });
+
+  it('says that a tablespace cannot be cleared instead of planning nothing', () => {
+    const moved = { ...mv, tablespace: 'fast' };
+    const built = buildPgMatView({ ...pgMatViewFormFrom(moved, 'public'), tablespace: '' }, moved, null);
+    expect(built.steps).toEqual([]);
+    expect(built.problems).toEqual(['The tablespace cannot be cleared: enter the tablespace to move the view to.']);
   });
 
   it('refreshes for a changed WITH DATA and checks concurrent refresh', () => {
     const built = buildPgMatView({ ...pgMatViewFormFrom(mv, 'public'), withData: false }, mv, null);
-    expect(built.changes[0]?.change).toMatchObject({ action: 'refresh', withData: false });
+    expect(changesOf(built.steps)[0]).toMatchObject({ action: 'refresh', withData: false });
     expect(concurrentRefreshProblem(mv, true)).toBeNull();
     expect(concurrentRefreshProblem(mv, false)).toMatch(/WITH NO DATA/);
     expect(concurrentRefreshProblem({ ...mv, indexes: [] }, true)).toMatch(/unique index/);
@@ -447,6 +553,12 @@ describe('sequences', () => {
     system: false,
   };
 
+  it('says that a sequence start cannot be cleared', () => {
+    expect(pgSequenceProblem({ ...pgSequenceFormFrom(seq, 'public'), start: '' }, seq)).toMatch(/cannot be cleared/);
+    expect(pgSequenceProblem(pgSequenceFormFrom(seq, 'public'), seq)).toBeNull();
+    expect(pgSequenceProblem({ ...pgSequenceFormFrom(null, 'public'), start: '' }, null)).toBeNull();
+  });
+
   it('shows type defaults as blank and sends only changed options', () => {
     const form = pgSequenceFormFrom(seq, 'public');
     expect(form.max).toBe('');
@@ -583,6 +695,47 @@ describe('events', () => {
     const runs = nextRuns({ ...myEventFormFrom(event), everyQuantity: '1' }, new Date('2026-01-12T05:30:00'), 3);
     expect(runs?.map((d) => d.getHours())).toEqual([6, 7, 8]);
   });
+
+  const wall = (d: Date): string =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+
+  it('clamps month steps to the end of shorter months, as STARTS + INTERVAL n MONTH does', () => {
+    const form = { ...myEventFormFrom(event), everyQuantity: '1', everyUnit: 'month' as const, starts: '2026-01-31 00:00:00' };
+    expect(nextRuns(form, new Date(2025, 11, 1), 4)?.map(wall)).toEqual(['2026-01-31 00:00:00', '2026-02-28 00:00:00', '2026-03-31 00:00:00', '2026-04-30 00:00:00']);
+    expect(nextRuns(form, new Date(2026, 2, 1), 2)?.map(wall)).toEqual(['2026-03-31 00:00:00', '2026-04-30 00:00:00']);
+    const leap = { ...form, everyUnit: 'year' as const, starts: '2024-02-29 12:00:00' };
+    expect(nextRuns(leap, new Date(2024, 5, 1), 2)?.map(wall)).toEqual(['2025-02-28 12:00:00', '2026-02-28 12:00:00']);
+    const quarter = { ...form, everyUnit: 'quarter' as const, starts: '2025-11-30 08:00:00' };
+    expect(nextRuns(quarter, new Date(2026, 0, 1), 2)?.map(wall)).toEqual(['2026-02-28 08:00:00', '2026-05-30 08:00:00']);
+  });
+
+  it('finds the next runs of a short interval that started long ago without walking every step', () => {
+    const form = { ...myEventFormFrom(event), everyQuantity: '1', everyUnit: 'second' as const, starts: '2025-01-01 00:00:00' };
+    expect(nextRuns(form, new Date(2026, 10, 11, 9, 30, 15, 500), 3)?.map(wall)).toEqual(['2026-11-11 09:30:16', '2026-11-11 09:30:17', '2026-11-11 09:30:18']);
+    expect(nextRuns({ ...form, ends: '2025-06-01 00:00:00' }, new Date(2026, 10, 11), 3)).toEqual([]);
+    expect(nextRuns({ ...form, starts: '2025-02-30 00:00:00' }, new Date(2026, 10, 11), 3)).toBeNull();
+  });
+
+  it('does not count line endings as a body change', () => {
+    const stored = { ...event, body: 'DELETE\r\nFROM s' };
+    expect(buildMyEvent({ ...myEventFormFrom(stored), body: 'DELETE\nFROM s' }, stored, 'cms')).toEqual([]);
+  });
+
+  it('keeps the account of a kept definer, whatever the account fields hold', () => {
+    const form = { ...myEventFormFrom(event), definerUser: 'other', definerHost: 'h' };
+    expect(form.definer).toBe('keep');
+    expect(definerOf(form, 'cms@%')).toEqual({ kind: 'account', user: 'cms', host: '%' });
+    expect(buildMyEvent(form, event, 'cms')).toEqual([]);
+    expect(definerOf({ ...form, definer: 'account' }, 'cms@%')).toEqual({ kind: 'account', user: 'other', host: 'h' });
+  });
+
+  it('keeps the definer through the account fields when nothing is described any more (the object is gone, the form creates it)', () => {
+    const form = myEventFormFrom(event);
+    expect(form).toMatchObject({ definer: 'keep', definerUser: 'cms', definerHost: '%' });
+    expect(definerOf(form, null)).toEqual({ kind: 'account', user: 'cms', host: '%' });
+    // Nothing to keep at all: no DEFINER clause, as for a new object.
+    expect(definerOf({ definer: 'keep', definerUser: '', definerHost: '%' }, null)).toBeNull();
+  });
 });
 
 describe('enums', () => {
@@ -618,9 +771,19 @@ describe('drops and history', () => {
   it('quotes names and literals in history queries', () => {
     const sql = historySelect('bill`ing', 'inv', 'row_start', 'row_end', ['id'], { mode: 'between', from: "2026-10-01 00:00:00", to: "2026-10-18 23:59:59", where: 'id = 1', limit: 50 });
     expect(sql).toBe(
-      "SELECT *, `row_start`, `row_end` FROM `bill``ing`.`inv` FOR SYSTEM_TIME BETWEEN TIMESTAMP '2026-10-01 00:00:00' AND TIMESTAMP '2026-10-18 23:59:59' WHERE id = 1 ORDER BY `id`, `row_start` LIMIT 50",
+      "SELECT *, `row_start`, `row_end` FROM `bill``ing`.`inv` FOR SYSTEM_TIME BETWEEN TIMESTAMP '2026-10-01 00:00:00' AND TIMESTAMP '2026-10-18 23:59:59' WHERE (id = 1) ORDER BY `id`, `row_start` LIMIT 50",
     );
     expect(deleteHistorySql('d', 't', "2026-01-01' x")).toBe("DELETE HISTORY FROM `d`.`t` BEFORE SYSTEM_TIME TIMESTAMP '2026-01-01'' x'");
+  });
+
+  it('checks a history condition like a grid filter: semicolons in strings pass, comments and loose parentheses do not', () => {
+    const q = { mode: 'all' as const, from: '', to: '', limit: 10 };
+    expect(errorsOf(historyQuerySchema, { ...q, where: "note = 'a;b'" })).toEqual({});
+    expect(errorsOf(historyQuerySchema, { ...q, where: '' })).toEqual({});
+    expect(errorsOf(historyQuerySchema, { ...q, where: 'id = 5 -- mine' })).toHaveProperty('where');
+    expect(errorsOf(historyQuerySchema, { ...q, where: 'id = 5 #x' })).toHaveProperty('where');
+    expect(errorsOf(historyQuerySchema, { ...q, where: 'id = 5) OR (1 = 1' })).toHaveProperty('where');
+    expect(errorsOf(historyQuerySchema, { ...q, where: 'id = 5; DELETE FROM t' })).toHaveProperty('where');
   });
 
   it('reads role names', () => {

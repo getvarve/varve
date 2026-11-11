@@ -60,8 +60,9 @@ async function load(cursor: string | null): Promise<void> {
   if (!query || rangeProblem.value) return;
   const token = requests.next();
   shown.loading = true;
+  const sessionId = props.sessionId;
   try {
-    const page = await redisTsRange(props.sessionId, props.keyName, query);
+    const page = await redisTsRange(sessionId, props.keyName, query);
     if (!requests.isCurrent(token)) return;
     shown.error = null;
     shown.query = query;
@@ -76,7 +77,7 @@ async function load(cursor: string | null): Promise<void> {
     shown.next = page.next;
   } catch (e: unknown) {
     if (!requests.isCurrent(token)) return;
-    const view = redisErrorView(useTabs().reportTabError(props.tabId, e));
+    const view = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId));
     shown.error = view.hint ? `${view.message} ${view.hint}` : view.message;
   } finally {
     if (requests.isCurrent(token)) shown.loading = false;
@@ -95,7 +96,8 @@ const command = computed(() => {
   if (!q) return '';
   const lo = q.from ?? '-';
   const hi = q.to ?? '+';
-  return q.reverse ? `TS.REVRANGE ${hi} ${lo} COUNT ${q.count}` : `TS.RANGE ${lo} ${hi} COUNT ${q.count}`;
+  // TS.REVRANGE takes its bounds in ascending order too (unlike ZRANGE ... REV).
+  return `${q.reverse ? 'TS.REVRANGE' : 'TS.RANGE'} ${props.keyName} ${lo} ${hi} COUNT ${q.count}`;
 });
 
 // Changes
@@ -209,6 +211,9 @@ function saveSettings(): void {
 
     <p class="subtle note">
       Reading the settings (TS.INFO) counts as a change of this key for Redis: it ends a WATCH on it, also one of another client.
+    </p>
+    <p class="subtle note">
+      Times are UTC. Type milliseconds, or a date and time such as 2026-10-21 13:45, which is read as UTC unless it names a zone.
     </p>
     <form
       class="range"

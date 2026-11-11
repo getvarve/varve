@@ -144,8 +144,16 @@ impl RawConn {
         // After the init commands, so an init `CLIENT SETNAME` cannot rename
         // the side connection: `CLIENT LIST` always shows its purpose.
         if !name.is_empty() {
-            raw.expect_ok(&[b"CLIENT", b"SETNAME", name.as_bytes()])
-                .await?;
+            match raw
+                .expect_ok(&[b"CLIENT", b"SETNAME", name.as_bytes()])
+                .await
+            {
+                // The name only labels the connection in `CLIENT LIST`.
+                Err(e) if crate::error::refused(&e) => {
+                    tracing::debug!(code = ?e.code, "CLIENT SETNAME refused, connection unnamed");
+                }
+                other => other?,
+            }
         }
         raw.expect_ok(&[b"SELECT", db.to_string().as_bytes()]).await
     }

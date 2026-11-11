@@ -63,17 +63,45 @@ export function messageTime(ms: number): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 }
 
+/** Messages received in one wall clock second (`second` is `ms / 1000`, rounded down). */
+export interface RateBucket {
+  second: number;
+  count: number;
+}
+
+/** The oldest second that still counts towards the rate at `now` (it may be partly older than the window). */
+function firstCountedSecond(now: number, windowMs: number): number {
+  return Math.floor((now - windowMs) / 1000);
+}
+
 /**
- * Messages per second over the last `windowMs`, from the receive times of
- * recent messages (`times` sorted ascending).
+ * Counts `count` messages received at `now` into per-second `buckets` (in
+ * place, oldest first) and drops the seconds the rate window no longer needs.
+ * One counter per second instead of one time per message, so the rate stays
+ * right at any message rate.
  */
-export function messageRate(times: readonly number[], now: number, windowMs = 5000): number {
+export function countReceived(buckets: RateBucket[], now: number, count: number, windowMs = 5000): void {
+  const second = Math.floor(now / 1000);
+  const last = buckets.at(-1);
+  if (last && last.second === second) last.count += count;
+  else buckets.push({ second, count });
+  const first = firstCountedSecond(now, windowMs);
+  let drop = 0;
+  while (drop < buckets.length && (buckets[drop]?.second ?? 0) < first) drop += 1;
+  if (drop > 0) buckets.splice(0, drop);
+}
+
+/**
+ * Messages per second over about the last `windowMs`, from the per-second
+ * `buckets` of `countReceived`: the whole seconds that overlap the window,
+ * divided by the time they span up to `now`.
+ */
+export function messageRate(buckets: readonly RateBucket[], now: number, windowMs = 5000): number {
+  const first = firstCountedSecond(now, windowMs);
   let count = 0;
-  for (let i = times.length - 1; i >= 0; i -= 1) {
-    if ((times[i] ?? 0) < now - windowMs) break;
-    count += 1;
-  }
-  return Math.round((count * 1000) / windowMs);
+  for (const bucket of buckets) if (bucket.second >= first) count += bucket.count;
+  const spanMs = now - first * 1000;
+  return spanMs > 0 ? Math.round((count * 1000) / spanMs) : 0;
 }
 
 /** True for a glob pattern (`*`, `?` or `[`), which is subscribed with PSUBSCRIBE. */
@@ -125,4 +153,93 @@ export function reasonParts(reason: string): { text: string; command: string | n
 export function gapText(gap: Pick<GapMarker, 'lostAt' | 'resumedAt'>): string {
   const seconds = Math.max(0, Math.round((gap.resumedAt - gap.lostAt) / 1000));
   return `Connection lost ${messageTime(gap.lostAt).slice(0, 8)} to ${messageTime(gap.resumedAt).slice(0, 8)} (${seconds} s): messages published then were missed.`;
+}
+
+/** What following the end needs of the scrolling message list (an element, or a stand-in in tests). */
+export interface ScrollBox {
+  scrollTop: number;
+  readonly scrollHeight: number;
+  readonly clientHeight: number;
+}
+
+/** How close to the end (px) still counts as "at the end". */
+export const FOLLOW_SLACK = 24;
+
+function nearEnd(el: ScrollBox): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= FOLLOW_SLACK;
+}
+
+/**
+ * Keeps a live message list at its end while batches arrive, and counts the
+ * messages that arrived while it was scrolled up. The list's tab can be
+ * hidden (`display: none`): its sizes and scroll offset then read 0 and the
+ * offset is lost, so nothing is measured while hidden. The last state seen
+ * while shown is kept and put back by `shown` when the tab is on screen again.
+ */
+export class EndFollower {
+  /** Messages that arrived while the list was scrolled up. */
+  unseen = 0;
+  /** The list is at its end, so new batches keep it there. */
+  following = true;
+  /** The scroll offset last seen while the list was on screen. */
+  private savedTop = 0;
+
+  /** The list was scrolled (by the user, or by a jump) while `visible`. */
+  scrolled(el: ScrollBox, visible: boolean): void {
+    if (!visible) return;
+    this.savedTop = el.scrollTop;
+    this.following = nearEnd(el);
+    if (this.following) this.unseen = 0;
+  }
+
+  /** Before a batch is rendered: notes whether the list is at its end. A hidden list keeps what it was. */
+  beforeBatch(el: ScrollBox | null, visible: boolean): void {
+    if (el === null) this.following = true;
+    else if (visible) this.following = nearEnd(el);
+  }
+
+  /**
+   * After a batch of `arrived` messages is rendered (`empty`: the list has no
+   * messages now). A following list goes to its end; otherwise the batch is
+   * counted. Returns true when the caller should hold the rows in view where
+   * they were (scrolled up and on screen).
+   */
+  afterBatch(el: ScrollBox | null, visible: boolean, arrived: number, empty: boolean): boolean {
+    if (el === null || empty) {
+      this.unseen = 0;
+      return false;
+    }
+    if (this.following) {
+      this.unseen = 0;
+      if (visible) this.toEnd(el);
+      return false;
+    }
+    this.unseen += arrived;
+    return visible;
+  }
+
+  /** The list is on screen again: back to its end when it was following, else to where it was. */
+  shown(el: ScrollBox): void {
+    if (this.following) this.jumpToEnd(el);
+    else el.scrollTop = this.savedTop;
+    // The browser clamps the offset to the list's current height.
+    this.savedTop = el.scrollTop;
+  }
+
+  /** Goes to the end and follows from there ("N new messages"). */
+  jumpToEnd(el: ScrollBox | null): void {
+    if (el !== null) this.toEnd(el);
+    this.following = true;
+    this.unseen = 0;
+  }
+
+  /** Another message list (a new subscription panel): nothing unseen yet. */
+  restart(): void {
+    this.unseen = 0;
+  }
+
+  private toEnd(el: ScrollBox): void {
+    el.scrollTop = el.scrollHeight;
+    this.savedTop = el.scrollTop;
+  }
 }

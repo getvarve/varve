@@ -18,8 +18,7 @@ use varve_catalog::data_edit::{
 };
 use varve_catalog::explain::{ExplainCapabilities, ExplainOptions, Plan};
 use varve_catalog::{
-    Capabilities, Container, EditPlan, KindCount, ObjectDetails, ObjectKind, ObjectRef,
-    ObjectSummary,
+    Capabilities, Container, KindCount, ObjectDetails, ObjectKind, ObjectRef, ObjectSummary,
 };
 use varve_driver::Value as DriverValue;
 use varve_live_stats::redis::{
@@ -33,7 +32,7 @@ use varve_live_stats::sql::{
 
 use crate::commands::{
     CmdError, ExportFormat, ExportRecord, SecretInput, Services, TestResult, TestTarget, Tree,
-    run_blocking,
+    TypedFor, run_blocking,
 };
 use crate::keychain_cleanup::PendingDeletion;
 use crate::m2::PendingRestore;
@@ -41,7 +40,7 @@ use crate::m2::ddl::DdlApplied;
 use crate::m2::editors::{EditApplied, EngineChange};
 use crate::m2::impact::DropImpact;
 use crate::m2::live_redis::{ConfigRequest, FunctionRequest, RedisPlanView, RedisTopology};
-use crate::m2::plans::Planned;
+use crate::m2::plans::{EditPlanView, Planned};
 use crate::sessions::SessionInfo;
 use crate::settings::{ActivitySettings, SecretSettings};
 
@@ -83,24 +82,31 @@ async fn ext_invoke(
         .await
 }
 
+// Every command that reads or writes `app.db` (one connection behind a
+// mutex) is async and runs on the blocking pool: a synchronous command runs
+// on the main thread, which would stop drawing the window while it waits.
+
 #[tauri::command]
-fn tree(svc: Svc<'_>) -> R<Tree> {
-    svc.tree()
+async fn tree(svc: Svc<'_>) -> R<Tree> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.tree()).await
 }
 
 #[tauri::command]
-fn create_folder(
+async fn create_folder(
     svc: Svc<'_>,
     parent_id: Option<String>,
     name: String,
     color: Option<String>,
 ) -> R<Folder> {
-    svc.create_folder(parent_id.as_deref(), &name, color.as_deref())
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.create_folder(parent_id.as_deref(), &name, color.as_deref())).await
 }
 
 #[tauri::command]
-fn update_folder(svc: Svc<'_>, id: String, name: String, color: Option<String>) -> R<Folder> {
-    svc.update_folder(&id, &name, color.as_deref())
+async fn update_folder(svc: Svc<'_>, id: String, name: String, color: Option<String>) -> R<Folder> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.update_folder(&id, &name, color.as_deref())).await
 }
 
 #[tauri::command]
@@ -110,8 +116,9 @@ async fn move_folder(svc: Svc<'_>, id: String, parent_id: Option<String>) -> R<F
 }
 
 #[tauri::command]
-fn folder_contents(svc: Svc<'_>, id: String) -> R<FolderContents> {
-    svc.folder_contents(&id)
+async fn folder_contents(svc: Svc<'_>, id: String) -> R<FolderContents> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.folder_contents(&id)).await
 }
 
 #[tauri::command]
@@ -128,13 +135,14 @@ enum ReorderTarget {
 }
 
 #[tauri::command]
-fn reorder(svc: Svc<'_>, kind: ReorderTarget, ids: Vec<String>) -> R<()> {
+async fn reorder(svc: Svc<'_>, kind: ReorderTarget, ids: Vec<String>) -> R<()> {
     let kind = match kind {
         ReorderTarget::Folders => ReorderKind::Folders,
         ReorderTarget::Connections => ReorderKind::Connections,
         ReorderTarget::Queries => ReorderKind::Queries,
     };
-    svc.reorder(kind, &ids)
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.reorder(kind, &ids)).await
 }
 
 #[tauri::command]
@@ -197,20 +205,27 @@ async fn trust_ssh_host_key(svc: Svc<'_>, host: String, port: u16, presented_key
 }
 
 #[tauri::command]
-fn create_query(svc: Svc<'_>, input: SavedQueryInput) -> R<SavedQuery> {
-    svc.create_query(&input)
+async fn create_query(svc: Svc<'_>, input: SavedQueryInput) -> R<SavedQuery> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.create_query(&input)).await
 }
 
 #[tauri::command]
-fn update_query(svc: Svc<'_>, id: String, input: SavedQueryInput) -> R<SavedQuery> {
-    svc.update_query(&id, &input)
+async fn update_query(svc: Svc<'_>, id: String, input: SavedQueryInput) -> R<SavedQuery> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.update_query(&id, &input)).await
 }
 
 #[tauri::command]
-fn delete_query(svc: Svc<'_>, id: String) -> R<()> {
-    svc.delete_query(&id)
+async fn delete_query(svc: Svc<'_>, id: String) -> R<()> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.delete_query(&id)).await
 }
 
+/// `typed_for`: for each typed secret, the profile version it was entered
+/// for (the UI sends one with every typed secret); a secret typed before
+/// an edit that made its kind unusable (another server, account or route)
+/// is refused, and the others are sent.
 #[tauri::command]
 async fn test_connection(
     svc: Svc<'_>,
@@ -218,11 +233,19 @@ async fn test_connection(
     password: Option<SecretInput>,
     ssh_secret: Option<SecretInput>,
     tls_passphrase: Option<SecretInput>,
+    typed_for: Option<TypedFor>,
 ) -> R<TestResult> {
-    svc.test_connection(target, password, ssh_secret, tls_passphrase)
-        .await
+    svc.test_connection_for(
+        target,
+        typed_for.unwrap_or_default(),
+        password,
+        ssh_secret,
+        tls_passphrase,
+    )
+    .await
 }
 
+/// `typed_for` as for [`test_connection`].
 #[tauri::command]
 async fn open_session(
     svc: Svc<'_>,
@@ -230,9 +253,16 @@ async fn open_session(
     password: Option<SecretInput>,
     ssh_secret: Option<SecretInput>,
     tls_passphrase: Option<SecretInput>,
+    typed_for: Option<TypedFor>,
 ) -> R<SessionInfo> {
-    svc.open_session(&id, password, ssh_secret, tls_passphrase)
-        .await
+    svc.open_session_for(
+        &id,
+        typed_for.unwrap_or_default(),
+        password,
+        ssh_secret,
+        tls_passphrase,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -274,33 +304,40 @@ async fn open_transactions(svc: Svc<'_>) -> R<Vec<String>> {
 }
 
 #[tauri::command]
-fn activity(svc: Svc<'_>, filter: ActivityFilter) -> R<Page> {
-    svc.activity(&filter)
+async fn activity(svc: Svc<'_>, filter: ActivityFilter) -> R<Page> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.activity(&filter)).await
 }
 
 #[tauri::command]
-fn query_history(svc: Svc<'_>, connection_id: String, limit: u32) -> R<Page> {
-    svc.query_history(&connection_id, limit)
+async fn query_history(svc: Svc<'_>, connection_id: String, limit: u32) -> R<Page> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.query_history(&connection_id, limit)).await
 }
 
 #[tauri::command]
-fn record_export(svc: Svc<'_>, record: ExportRecord) -> R<()> {
-    svc.record_export(&record)
+async fn record_export(svc: Svc<'_>, record: ExportRecord) -> R<()> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.record_export(&record)).await
 }
 
 #[tauri::command]
-fn clear_activity(svc: Svc<'_>, connection_id: Option<String>) -> R<u64> {
-    svc.clear_activity(connection_id.as_deref())
+async fn clear_activity(svc: Svc<'_>, connection_id: Option<String>) -> R<u64> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.clear_activity(connection_id.as_deref())).await
 }
 
 #[tauri::command]
-fn activity_settings(svc: Svc<'_>) -> R<ActivitySettings> {
-    svc.activity_settings()
+async fn activity_settings(svc: Svc<'_>) -> R<ActivitySettings> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.activity_settings()).await
 }
 
+/// Shortening the retention deletes older events at once.
 #[tauri::command]
-fn set_activity_settings(svc: Svc<'_>, settings: ActivitySettings) -> R<u64> {
-    svc.set_activity_settings(settings)
+async fn set_activity_settings(svc: Svc<'_>, settings: ActivitySettings) -> R<u64> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.set_activity_settings(settings)).await
 }
 
 #[tauri::command]
@@ -324,13 +361,15 @@ async fn rotate_mcp_token(
 }
 
 #[tauri::command]
-fn secret_settings(svc: Svc<'_>) -> R<SecretSettings> {
-    svc.secret_settings()
+async fn secret_settings(svc: Svc<'_>) -> R<SecretSettings> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.secret_settings()).await
 }
 
 #[tauri::command]
-fn set_secret_settings(svc: Svc<'_>, settings: SecretSettings) -> R<()> {
-    svc.set_secret_settings(settings)
+async fn set_secret_settings(svc: Svc<'_>, settings: SecretSettings) -> R<()> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.set_secret_settings(settings)).await
 }
 
 /// Drops the secrets cached since the last keychain read; resolves how
@@ -343,7 +382,7 @@ fn forget_cached_secrets(svc: Svc<'_>) -> usize {
 /// Exports only to a file the user picked in the save dialog: the dialog
 /// plugin adds that path to the fs scope, so any other path is refused.
 #[tauri::command]
-fn export_activity(
+async fn export_activity(
     app: tauri::AppHandle,
     svc: Svc<'_>,
     filter: ActivityFilter,
@@ -356,7 +395,8 @@ fn export_activity(
             message: "choose the export file in the save dialog".into(),
         });
     }
-    svc.export_activity(&filter, &path, format)
+    let svc = Arc::clone(&svc);
+    run_blocking(move || svc.export_activity(&filter, &path, format)).await
 }
 
 #[tauri::command]
@@ -487,6 +527,7 @@ async fn catalog_row_count(
     svc.catalog_row_count(&session_id, &database, &table).await
 }
 
+/// `typed_for` as for [`test_connection`].
 #[tauri::command]
 async fn open_database_session(
     svc: Svc<'_>,
@@ -495,15 +536,23 @@ async fn open_database_session(
     password: Option<SecretInput>,
     ssh_secret: Option<SecretInput>,
     tls_passphrase: Option<SecretInput>,
+    typed_for: Option<TypedFor>,
 ) -> R<SessionInfo> {
-    svc.open_database_session(&id, &database, password, ssh_secret, tls_passphrase)
-        .await
+    svc.open_database_session_for(
+        &id,
+        &database,
+        typed_for.unwrap_or_default(),
+        password,
+        ssh_secret,
+        tls_passphrase,
+    )
+    .await
 }
 
 // M2: editors, EXPLAIN, grid editing
 
 #[tauri::command]
-fn edit_plan(svc: Svc<'_>, session_id: String, change: EngineChange) -> R<Planned<EditPlan>> {
+fn edit_plan(svc: Svc<'_>, session_id: String, change: EngineChange) -> R<Planned<EditPlanView>> {
     svc.edit_plan(&session_id, &change)
 }
 
@@ -530,8 +579,9 @@ async fn ddl_apply(
 }
 
 #[tauri::command]
-fn pending_keychain_deletions(svc: Svc<'_>) -> Vec<PendingDeletion> {
-    svc.pending_keychain_deletions()
+async fn pending_keychain_deletions(svc: Svc<'_>) -> R<Vec<PendingDeletion>> {
+    let svc = Arc::clone(&svc);
+    run_blocking(move || Ok(svc.pending_keychain_deletions())).await
 }
 
 #[tauri::command]
@@ -636,7 +686,7 @@ async fn variable_change_plan(
     session_id: String,
     name: String,
     change: VariableChange,
-) -> R<Planned<EditPlan>> {
+) -> R<Planned<EditPlanView>> {
     svc.variable_change_plan(&session_id, &name, &change).await
 }
 

@@ -5,6 +5,7 @@ import {
   outline,
   parseConfigEntry,
   parseQualified,
+  refreshedMatView,
   sessionHeader,
   splitStatements,
   statementGroup,
@@ -118,6 +119,14 @@ describe('name parsers', () => {
     expect(triggerArguments("CREATE TRIGGER t AFTER INSERT ON s.x FOR EACH ROW EXECUTE FUNCTION s.f('a', 'it''s', '3')")).toEqual(['a', "it's", '3']);
     expect(triggerArguments('CREATE TRIGGER t AFTER INSERT ON x FOR EACH ROW EXECUTE PROCEDURE "q(x)"()')).toEqual([]);
     expect(triggerArguments('no call here')).toEqual([]);
+  });
+
+  it('reads the view a REFRESH MATERIALIZED VIEW statement refreshes', () => {
+    expect(refreshedMatView('REFRESH MATERIALIZED VIEW CONCURRENTLY "eu"."sales" WITH NO DATA')).toEqual({ schema: 'eu', name: 'sales' });
+    expect(refreshedMatView('refresh materialized view public.sales_daily')).toEqual({ schema: 'public', name: 'sales_daily' });
+    expect(refreshedMatView('REFRESH MATERIALIZED VIEW "a b"."x.y";')).toEqual({ schema: 'a b', name: 'x.y' });
+    expect(refreshedMatView('DROP MATERIALIZED VIEW public.sales')).toBeNull();
+    expect(refreshedMatView('REFRESH MATERIALIZED VIEW "open')).toBeNull();
   });
 
   it('splits proconfig entries', () => {

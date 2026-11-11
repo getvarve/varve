@@ -3,7 +3,7 @@
 use varve_core::Engine;
 use varve_driver::{Dialect, LexKind, ServerInfo, StatementKind};
 
-use super::{AnalyzeSafety, dialect, single_statement};
+use super::{AnalyzeSafety, dialect, is_copy, is_explain, single_statement};
 
 /// Decides whether `statement` may run under `ANALYZE` on `server`.
 ///
@@ -71,6 +71,16 @@ pub(super) fn text_check(server: &ServerInfo, statement: &str) -> TextCheck {
                 reason: error.to_string(),
             });
         }
+    };
+    // The splitter gives `EXPLAIN ANALYZE DELETE ...` the kind of the
+    // statement it runs; under ANALYZE it is still an EXPLAIN, refused.
+    // `COPY (DELETE ... RETURNING ...) TO ...` likewise stays a COPY.
+    let kind = if is_explain(dialect, &text, kind) {
+        StatementKind::Explain
+    } else if is_copy(dialect, &text) {
+        StatementKind::Copy
+    } else {
+        kind
     };
     let postgres = dialect == Dialect::Postgres;
     // MySQL text reads differently with NO_BACKSLASH_ESCAPES; whatever is
@@ -169,11 +179,17 @@ pub(super) fn text_check(server: &ServerInfo, statement: &str) -> TextCheck {
         | StatementKind::Delete
         | StatementKind::DeleteAll
         | StatementKind::Merge => {
-            warnings.push(
+            // The splitter classifies a `WITH` whose CTE changes data as
+            // that change (`WITH x AS (DELETE ...) SELECT ...` is a DELETE).
+            warnings.push(if postgres && changes_data_in_with(&readings[0]) {
+                "The statement changes data in its WITH clause; it runs, including its \
+                 triggers, and is rolled back afterwards, holding row locks until then."
+                    .to_owned()
+            } else {
                 "The statement runs, including its triggers, and is rolled back afterwards; \
                  the rows it touches stay locked until then."
-                    .to_owned(),
-            );
+                    .to_owned()
+            });
             warnings.push(undo.to_owned());
             if matches!(kind, StatementKind::UpdateAll | StatementKind::DeleteAll) {
                 warnings.push(
@@ -227,6 +243,24 @@ pub(super) fn text_check(server: &ServerInfo, statement: &str) -> TextCheck {
     } else {
         known(AnalyzeSafety::RolledBack { warnings })
     }
+}
+
+/// True when a statement that starts with `WITH` has a CTE whose body is
+/// `INSERT`, `UPDATE`, `DELETE` or `MERGE` (`name AS (DELETE ...)`, also
+/// `AS [NOT] MATERIALIZED (...)`), at any depth. The statement may be in
+/// parentheses (`(WITH x AS (DELETE ...) SELECT ...)`).
+fn changes_data_in_with(tokens: &[Token]) -> bool {
+    let word = |token: &Token, words: &[&str]| matches!(token, Token::Word { text, quoted: false } if words.contains(&text.as_str()));
+    let tokens = &tokens[tokens
+        .iter()
+        .take_while(|token| matches!(token, Token::Open))
+        .count()..];
+    tokens.first().is_some_and(|first| word(first, &["WITH"]))
+        && tokens.windows(3).any(|window| {
+            word(&window[0], &["AS", "MATERIALIZED"])
+                && matches!(window[1], Token::Open)
+                && word(&window[2], &["INSERT", "UPDATE", "DELETE", "MERGE"])
+        })
 }
 
 fn kind_name(kind: StatementKind) -> &'static str {

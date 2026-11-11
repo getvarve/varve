@@ -289,6 +289,11 @@
   border-right: 0;
 }
 
+/* The group clips its corners: draw the ring inside the button. */
+.segmented button:focus-visible {
+  outline-offset: -2px;
+}
+
 .segmented button[aria-checked='true'],
 .segmented button[aria-pressed='true'] {
   background: var(--accent-tint);

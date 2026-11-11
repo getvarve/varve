@@ -72,6 +72,8 @@
 
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* The title of a page (Workspace home, Activity, Settings). */
+  --text-title: 24px;
 
   --radius-control: 4px;
   --radius-panel: 6px;

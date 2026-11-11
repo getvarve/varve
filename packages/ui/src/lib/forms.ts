@@ -28,6 +28,9 @@ export function destructiveFormSchema(environment: Environment, connectionName: 
 
 export const SCAN_COUNTS = [500, 1000, 5000] as const;
 
+/** How long one Scan or "Load more" click keeps stepping through SCAN before it pauses (ms). */
+export const SCAN_BATCH_BUDGET_MS = 2000;
+
 /** The key browser's SCAN form. */
 export const scanFormSchema = z
   .object({

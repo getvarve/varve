@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick } from 'vue';
+import { computed, defineAsyncComponent, defineComponent, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, provide, reactive, ref, watch } from 'vue';
 import type { Component } from 'vue';
 import type { ObjectRef } from '../api/catalog';
 import { presentError } from '../api/errors';
@@ -10,11 +10,14 @@ import InitCommandNotice from '../components/notices/InitCommandNotice.vue';
 import NoticeHost from '../components/notices/NoticeHost.vue';
 import { useObjectBrowser } from '../components/tree/objectBrowser';
 import { useQuerySave } from '../composables/useQuerySave';
-import { useTabs } from '../composables/useTabs';
+import { showsView, TAB_VISIBLE_KEY, useTabs } from '../composables/useTabs';
 import type { TabKind, WorkspaceTab } from '../composables/useTabs';
 import { useWorkspace } from '../composables/useWorkspace';
 import { ENVIRONMENT_INFO } from '../lib/display';
 import HomeView from './HomeView.vue';
+
+// AppShell keeps this view alive (`<KeepAlive include="WorkspaceView">`) while Activity or Settings is shown.
+defineOptions({ name: 'WorkspaceView' });
 
 // The editor (CodeMirror) and the result grid (AG Grid) load on first use.
 const QueryTabView = defineAsyncComponent(() => import('../components/query/QueryTabView.vue'));
@@ -73,12 +76,106 @@ const TAB_ICONS: Partial<Record<TabKind, IconName>> = {
   pubsub: 'activity',
 };
 
-/** Editor and key browser tabs, one session each. Without tabs it shows the welcome screen. */
+/**
+ * Editor and key browser tabs, one session each. Without tabs it shows the
+ * welcome screen. Every open tab has its own panel: a tab's view is mounted
+ * the first time the tab is shown and stays mounted (hidden with `v-show`)
+ * until the tab closes, so typed text, staged edits, scroll positions and
+ * running work survive switching tabs and pages.
+ */
 const tabs = useTabs();
 const workspace = useWorkspace();
 const querySave = useQuerySave();
 
 const active = computed(() => tabs.active.value);
+
+/** True while this page is on screen: mounted and not cached away by AppShell's KeepAlive. */
+const shown = ref(false);
+function setShown(value: boolean): void {
+  shown.value = value;
+  tabs.setWorkspaceShown(value);
+}
+onMounted(() => setShown(true));
+onActivated(() => setShown(true));
+onDeactivated(() => setShown(false));
+onUnmounted(() => setShown(false));
+
+/**
+ * Tabs that were shown at least once: their panel content is mounted. A tab
+ * opened while Activity or Settings is shown mounts once the workspace is
+ * back, so its view never mounts detached from the document.
+ */
+const opened = reactive(new Set<string>());
+/** Tabs whose own view was mounted: it stays mounted while a reconnect hides it. */
+const viewMounted = reactive(new Set<string>());
+
+watch(
+  [() => tabs.activeId.value, shown],
+  ([id, isShown]) => {
+    if (id !== null && isShown) opened.add(id);
+  },
+  { immediate: true },
+);
+watch(
+  () => tabs.tabs.map((t) => t.id),
+  (ids) => {
+    const open = new Set(ids);
+    for (const id of [...opened]) if (!open.has(id)) opened.delete(id);
+    for (const id of [...viewMounted]) if (!open.has(id)) viewMounted.delete(id);
+  },
+);
+
+watch(
+  () => tabs.tabs.filter((t) => opened.has(t.id) && showsView(t)).map((t) => t.id),
+  (ids) => {
+    for (const id of ids) viewMounted.add(id);
+  },
+  { immediate: true },
+);
+
+/**
+ * The keyboard focus must not stay on something that is hidden: in the panel
+ * of a tab that is not the active one any more, or in a view that is hidden
+ * behind the connection state while its tab reconnects. Not every webview
+ * drops the focus of a `display: none` element by itself, and typing would
+ * then go on in the hidden editor. The element is blurred; when nothing in
+ * the tab now shown takes the focus (a view may focus itself when shown), it
+ * goes to the label of the active tab, from where the arrow keys switch tabs
+ * and Tab enters the panel.
+ */
+watch(
+  [() => tabs.activeId.value, () => (tabs.activeId.value !== null ? tabs.isTabVisible(tabs.activeId.value) : false), shown],
+  async ([id, viewShown]) => {
+    const focused = document.activeElement;
+    if (!(focused instanceof HTMLElement)) return;
+    const panel = focused.closest('[id^="wpanel-"]');
+    if (!panel) return;
+    const inActivePanel = id !== null && panel.id === `wpanel-${id}`;
+    const inHiddenView = inActivePanel && !viewShown && (document.getElementById(`wview-${id}`)?.contains(focused) ?? false);
+    if (inActivePanel && !inHiddenView) return;
+    focused.blur();
+    await nextTick();
+    const nowhere = document.activeElement === null || document.activeElement === document.body;
+    if (nowhere && shown.value && tabs.activeId.value !== null) document.getElementById(`wtab-${tabs.activeId.value}`)?.focus();
+  },
+  { flush: 'post' },
+);
+
+/**
+ * Provides `useTabVisible()` to the views of one tab: whether that tab is on
+ * screen (`useTabs().isTabVisible`).
+ */
+const TabScope = defineComponent({
+  name: 'TabScope',
+  props: { tabId: { type: String, required: true } },
+  setup(props, { slots }) {
+    provide(
+      TAB_VISIBLE_KEY,
+      computed(() => tabs.isTabVisible(props.tabId)),
+    );
+    return () => slots.default?.();
+  },
+});
 
 function envColor(tab: WorkspaceTab): string {
   const profile = workspace.connection(tab.connectionId);
@@ -89,25 +186,30 @@ function dirty(tab: WorkspaceTab): boolean {
   return tab.kind === 'query' ? querySave.hasUnsavedEdits(tab) : tab.unsaved;
 }
 
-const activeView = computed<Component | null>(() => {
-  const tab = active.value;
-  if (!tab || tab.kind === 'query' || tab.kind === 'keys' || tab.kind === 'overview') return null;
+function viewOf(tab: WorkspaceTab): Component | null {
+  if (tab.kind === 'query' || tab.kind === 'keys' || tab.kind === 'overview') return null;
   return views.get(tab.kind) ?? null;
-});
+}
 
-const missingView = computed(() => {
-  const tab = active.value;
-  if (!tab || tab.kind === 'query' || tab.kind === 'keys' || tab.kind === 'overview' || views.has(tab.kind)) return null;
+function missingView(tab: WorkspaceTab): string | null {
+  if (tab.kind === 'query' || tab.kind === 'keys' || tab.kind === 'overview' || views.has(tab.kind)) return null;
   return TAB_VIEWS[tab.kind].what;
-});
+}
 
-const connectError = computed(() => (active.value?.connectError ? presentError(active.value.connectError) : null));
-const reconnectMessage = computed(() => (active.value?.reconnectNeeded ? presentError(active.value.reconnectNeeded).message : null));
+function connectError(tab: WorkspaceTab): ReturnType<typeof presentError> | null {
+  return tab.connectError ? presentError(tab.connectError) : null;
+}
+
+function reconnectMessage(tab: WorkspaceTab): string | null {
+  return tab.reconnectNeeded ? presentError(tab.reconnectNeeded).message : null;
+}
+
 /**
  * Tab views report changes with three events (see the U1 contract): `changed`
  * (something was applied), `created` (an object tab or the table designer
  * created `object` and now shows it) and `dropped`. The object tree reloads
- * the container the tab works in.
+ * the container the tab works in. A view emits for its own tab, which need
+ * not be the active one (an apply that finishes after a tab switch).
  */
 function refreshTreeFor(tab: WorkspaceTab): void {
   const browser = useObjectBrowser();
@@ -116,19 +218,25 @@ function refreshTreeFor(tab: WorkspaceTab): void {
   else void browser.refresh(tab.connectionId);
 }
 
-function onViewChanged(): void {
-  if (active.value) refreshTreeFor(active.value);
+function onViewChanged(id: string): void {
+  const tab = tabs.tabs.find((t) => t.id === id);
+  if (tab) refreshTreeFor(tab);
 }
 
-function onViewCreated(object: ObjectRef): void {
-  const tab = active.value;
+function onViewCreated(id: string, object: ObjectRef): void {
+  const tab = tabs.tabs.find((t) => t.id === id);
   if (!tab) return;
   tabs.setTabObject(tab.id, object);
   void useObjectBrowser().refreshObject(tab.connectionId, object);
 }
 
-const isRedisTab = computed(() => (active.value ? workspace.connection(active.value.connectionId)?.engine === 'redis' : false));
-const activeProfileName = computed(() => (active.value ? (workspace.connection(active.value.connectionId)?.name ?? 'the server') : ''));
+function isRedisTab(tab: WorkspaceTab): boolean {
+  return workspace.connection(tab.connectionId)?.engine === 'redis';
+}
+
+function profileName(tab: WorkspaceTab): string {
+  return workspace.connection(tab.connectionId)?.name ?? 'the server';
+}
 
 async function select(id: string, focus = false): Promise<void> {
   tabs.activate(id);
@@ -230,107 +338,123 @@ function onAuxClick(event: MouseEvent, id: string): void {
       </div>
     </div>
 
+    <!-- One panel per open tab; inactive ones are hidden (display: none, so out of the accessibility tree). -->
     <div
-      v-if="active"
-      :id="`wpanel-${active.id}`"
-      :key="active.id"
+      v-for="tab in tabs.tabs"
+      v-show="tab.id === tabs.activeId.value"
+      :id="`wpanel-${tab.id}`"
+      :key="tab.id"
       class="panel"
       role="tabpanel"
-      :aria-labelledby="`wtab-${active.id}`"
+      :aria-labelledby="`wtab-${tab.id}`"
     >
-      <div
-        v-if="reconnectMessage"
-        class="notice tone-warning reconnect"
-        role="alert"
+      <TabScope
+        v-if="opened.has(tab.id)"
+        :tab-id="tab.id"
       >
-        <Icon name="warning" />
-        <span class="reconnect-text"><strong>Reconnect needed.</strong> {{ reconnectMessage }} Reconnecting opens a new session; an open
-          transaction in this tab is rolled back.</span>
-        <button
-          type="button"
-          class="btn compact"
-          @click="tabs.reconnect(active.id)"
-        >
-          <Icon name="refresh" />Reconnect
-        </button>
-      </div>
-      <div class="view">
-        <QueryTabView
-          v-if="active.kind === 'query'"
-          :tab="active"
-        />
-        <KeyBrowser
-          v-else-if="active.kind === 'keys'"
-          :tab="active"
-        />
         <div
-          v-else-if="active.status === 'connecting'"
-          class="state"
-          role="status"
+          v-if="reconnectMessage(tab)"
+          class="notice tone-warning reconnect"
+          role="alert"
         >
-          Connecting to {{ activeProfileName }}…
-        </div>
-        <div
-          v-else-if="active.status === 'error' || active.status === 'cancelled'"
-          class="state"
-        >
-          <div
-            v-if="connectError"
-            class="notice tone-danger"
-            role="alert"
-          >
-            <Icon name="warning" />
-            <span><strong>{{ connectError.title }}.</strong> {{ connectError.message }}<template v-if="connectError.code"> ({{ connectError.code }})</template></span>
-          </div>
-          <p
-            v-else
-            class="subtle"
-          >
-            Not connected.
-          </p>
-          <!-- A refused Redis init command explains itself and offers to edit the connection. -->
-          <InitCommandNotice
-            v-if="active.connectError && isRedisTab"
-            :error="active.connectError"
-            :connection-id="active.connectionId"
-            @edited="tabs.reconnect(active.id)"
-          />
+          <Icon name="warning" />
+          <span class="reconnect-text"><strong>Reconnect needed.</strong> {{ reconnectMessage(tab) }} Reconnecting opens a new session; an open
+            transaction in this tab is rolled back.</span>
           <button
             type="button"
-            class="btn"
-            @click="tabs.reconnect(active.id)"
+            class="btn compact"
+            @click="tabs.reconnect(tab.id)"
           >
-            <Icon name="refresh" />Connect again
+            <Icon name="refresh" />Reconnect
           </button>
         </div>
-        <OverviewTabView
-          v-else-if="active.kind === 'overview'"
-          :key="active.id"
-          :tab="active"
-        />
-        <component
-          :is="activeView"
-          v-else-if="activeView"
-          :tab="active"
-          @changed="onViewChanged"
-          @dropped="onViewChanged"
-          @created="onViewCreated"
-        />
-        <div
-          v-else
-          class="state"
-          role="status"
-        >
-          <p>
-            <strong>{{ active.title }}</strong>
-          </p>
-          <p class="subtle">
-            The {{ missingView }} is not part of this build yet. The tab is connected; close it or open another one.
-          </p>
+        <div class="view">
+          <QueryTabView
+            v-if="tab.kind === 'query'"
+            :tab="tab"
+          />
+          <KeyBrowser
+            v-else-if="tab.kind === 'keys'"
+            :tab="tab"
+          />
+          <template v-else>
+            <div
+              v-if="tab.status === 'connecting'"
+              class="state"
+              role="status"
+            >
+              Connecting to {{ profileName(tab) }}…
+            </div>
+            <div
+              v-else-if="tab.status === 'error' || tab.status === 'cancelled'"
+              class="state"
+            >
+              <div
+                v-if="connectError(tab)"
+                class="notice tone-danger"
+                role="alert"
+              >
+                <Icon name="warning" />
+                <span><strong>{{ connectError(tab)?.title }}.</strong> {{ connectError(tab)?.message }}<template v-if="connectError(tab)?.code"> ({{ connectError(tab)?.code }})</template></span>
+              </div>
+              <p
+                v-else
+                class="subtle"
+              >
+                Not connected.
+              </p>
+              <!-- A refused Redis init command explains itself and offers to edit the connection. -->
+              <InitCommandNotice
+                v-if="tab.connectError && isRedisTab(tab)"
+                :error="tab.connectError"
+                :connection-id="tab.connectionId"
+                @edited="tabs.reconnect(tab.id)"
+              />
+              <button
+                type="button"
+                class="btn"
+                @click="tabs.reconnect(tab.id)"
+              >
+                <Icon name="refresh" />Connect again
+              </button>
+            </div>
+            <!-- Once mounted, the view stays mounted while a reconnect hides it, so its state survives. -->
+            <div
+              v-if="viewMounted.has(tab.id)"
+              v-show="showsView(tab)"
+              :id="`wview-${tab.id}`"
+              class="view-body"
+            >
+              <OverviewTabView
+                v-if="tab.kind === 'overview'"
+                :tab="tab"
+              />
+              <component
+                :is="viewOf(tab)"
+                v-else-if="viewOf(tab)"
+                :tab="tab"
+                @changed="onViewChanged(tab.id)"
+                @dropped="onViewChanged(tab.id)"
+                @created="(object: ObjectRef) => onViewCreated(tab.id, object)"
+              />
+              <div
+                v-else
+                class="state"
+                role="status"
+              >
+                <p>
+                  <strong>{{ tab.title }}</strong>
+                </p>
+                <p class="subtle">
+                  The {{ missingView(tab) }} is not part of this build yet. The tab is connected; close it or open another one.
+                </p>
+              </div>
+            </div>
+          </template>
         </div>
-      </div>
+      </TabScope>
     </div>
-    <HomeView v-else />
+    <HomeView v-if="!active" />
   </div>
 </template>
 
@@ -382,6 +506,11 @@ function onAuxClick(event: MouseEvent, id: string): void {
   color: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* The tab strip clips overflow: draw the focus ring inside. */
+.tab-label:focus-visible {
+  outline-offset: -2px;
 }
 
 .tab-title {
@@ -440,6 +569,10 @@ function onAuxClick(event: MouseEvent, id: string): void {
 .view {
   flex: 1;
   min-height: 0;
+}
+
+.view-body {
+  height: 100%;
 }
 
 .reconnect {

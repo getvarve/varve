@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use varve_driver::ServerInfo;
 
 use super::common::{
-    ACCESS_EXCLUSIVE, DropBehavior, PlanBuilder, QualifiedName, RoleSpec, StorageParam, comment_on,
-    data_type, expr, ident, ident_list, invalid, lit, operator, opt_paren_expr, paren_expr,
-    require, storage_param_names, storage_params,
+    ACCESS_EXCLUSIVE, CollationName, DropBehavior, PlanBuilder, QualifiedName, RoleSpec,
+    StorageParam, comment_on, data_type, expr, ident, ident_list, invalid, lit, operator,
+    opt_paren_expr, paren_expr, require, storage_param_names, storage_params,
 };
 use super::index::{IndexElement, IndexKey, IndexMethod, include_sql};
 use super::sequence::{RESTART_WARNING, SequenceOptions};
@@ -162,7 +162,7 @@ pub struct ColumnDef {
     pub generated: Option<Generated>,
     /// `COLLATE`.
     #[serde(default)]
-    pub collation: Option<String>,
+    pub collation: Option<CollationName>,
     /// `COMPRESSION` (14+).
     #[serde(default)]
     pub compression: Option<Compression>,
@@ -214,7 +214,7 @@ impl ColumnDef {
         }
         if let Some(c) = &self.collation {
             s.push_str(" COLLATE ");
-            s.push_str(&ident(c)?);
+            s.push_str(&c.sql()?);
         }
         if self.not_null {
             s.push_str(" NOT NULL");
@@ -647,7 +647,7 @@ pub struct PartitionKey {
     pub key: IndexKey,
     /// `COLLATE`.
     #[serde(default)]
-    pub collation: Option<String>,
+    pub collation: Option<CollationName>,
     /// Operator class.
     #[serde(default)]
     pub opclass: Option<QualifiedName>,
@@ -680,7 +680,7 @@ impl PartitionBy {
             .map(|k| {
                 let mut s = k.key.sql()?;
                 if let Some(c) = &k.collation {
-                    s.push_str(&format!(" COLLATE {}", ident(c)?));
+                    s.push_str(&format!(" COLLATE {}", c.sql()?));
                 }
                 if let Some(o) = &k.opclass {
                     s.push_str(&format!(" {}", o.sql()?));
@@ -944,7 +944,7 @@ pub enum TableOperation {
         data_type: String,
         /// `COLLATE`.
         #[serde(default)]
-        collation: Option<String>,
+        collation: Option<CollationName>,
         /// `USING` expression converting the old values.
         #[serde(default)]
         using: Option<String>,
@@ -1372,7 +1372,7 @@ fn alter_table(
                     super::common::data_type(data_type, "a data type")?
                 );
                 if let Some(c) = collation {
-                    s.push_str(&format!(" COLLATE {}", ident(c)?));
+                    s.push_str(&format!(" COLLATE {}", c.sql()?));
                 }
                 if let Some(u) = opt_paren_expr(using.as_deref(), "a USING expression")? {
                     s.push_str(&format!(" USING {u}"));
@@ -1662,6 +1662,72 @@ mod tests {
 
     fn table() -> QualifiedName {
         QualifiedName::new("s", "t")
+    }
+
+    #[test]
+    fn collations_take_a_bare_or_a_qualified_name() -> CatalogResult<()> {
+        let parse = |json: serde_json::Value| {
+            serde_json::from_value::<ColumnDef>(json).map_err(|e| invalid(e.to_string()))
+        };
+        let bare = parse(serde_json::json!({"name": "a", "dataType": "text", "collation": "C"}))?;
+        assert_eq!(bare.collation, Some(CollationName::from("C")));
+        let qualified = parse(serde_json::json!({
+            "name": "a", "dataType": "text",
+            "collation": {"schema": "my app", "name": "de_phonebook"}
+        }))?;
+        assert_eq!(
+            qualified.collation,
+            Some(CollationName::from(QualifiedName::new(
+                "my app",
+                "de_phonebook"
+            )))
+        );
+        assert_eq!(
+            serde_json::to_value(&bare.collation).map_err(|e| invalid(e.to_string()))?,
+            serde_json::json!("C")
+        );
+        // A value of another shape says what a collation looks like.
+        for wrong in [
+            serde_json::json!(5),
+            serde_json::json!({"schema": "s", "name": "c", "extra": 1}),
+        ] {
+            let error =
+                parse(serde_json::json!({"name": "a", "dataType": "text", "collation": wrong}))
+                    .err()
+                    .map(|e| e.to_string())
+                    .unwrap_or_default();
+            assert!(
+                error.contains(
+                    "expected a collation as a name, or as an object with a name and an optional schema"
+                ),
+                "{error}"
+            );
+        }
+        let plan = alter(
+            &pg(17),
+            vec![
+                TableOperation::AddColumn {
+                    column: qualified,
+                    if_not_exists: false,
+                },
+                TableOperation::AlterColumnType {
+                    name: "b".into(),
+                    data_type: "text".into(),
+                    collation: Some(QualifiedName::new("pg_catalog", "en_US.utf8").into()),
+                    using: None,
+                },
+            ],
+        )?;
+        let sql = plan.statements.join(";\n");
+        assert!(
+            sql.contains("ADD COLUMN \"a\" text COLLATE \"my app\".\"de_phonebook\""),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("ALTER COLUMN \"b\" TYPE text COLLATE \"pg_catalog\".\"en_US.utf8\""),
+            "{sql}"
+        );
+        Ok(())
     }
 
     fn alter(server: &ServerInfo, operations: Vec<TableOperation>) -> CatalogResult<EditPlan> {

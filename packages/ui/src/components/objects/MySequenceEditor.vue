@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId } from 'vue';
+import { computed, onMounted, ref, useId, watch } from 'vue';
 import type { MySequence } from '../../api/ddl';
 import {
   buildMySequence,
@@ -53,7 +53,7 @@ const resetPlan = useChangePlan({
   session: () => props.session,
   connectionName: () => props.connectionName,
   onChanged: () => emit('changed'),
-  reportError: (error) => props.reportError?.(error),
+  reportError: (error, sessionId) => props.reportError?.(error, sessionId),
 });
 const resetKind = ref<'setval' | 'restart'>('setval');
 const resetValue = ref('');
@@ -68,6 +68,11 @@ async function planReset(): Promise<void> {
   const change = resetKind.value === 'restart' ? buildMySequenceRestart(s, v) : v === null ? null : buildMySequenceSetValue(s, v, isUsed.value);
   await resetPlan.plan(change ? [{ kind: 'edit', change }] : []);
 }
+
+// The preview runs what was planned: a changed value or kind needs a new preview.
+watch([resetKind, resetValue, isUsed], () => {
+  if (!resetPlan.state.applying) resetPlan.clear();
+});
 
 async function afterReset(): Promise<void> {
   resetPlan.clear();

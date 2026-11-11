@@ -1,7 +1,7 @@
 {
   "engine": "mysql",
   "object": {
-    "autoIncrement": 1,
+    "autoIncrement": "1",
     "avgRowLength": null,
     "charset": "utf8mb4",
     "collation": "utf8mb4_0900_ai_ci",

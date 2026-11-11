@@ -12,6 +12,7 @@ import LiveError from './LiveError.vue';
 import RefreshControls from './RefreshControls.vue';
 import { useAutoRefresh } from './useAutoRefresh';
 import { useReporter } from './report';
+import { primaryFill } from './topologyColors';
 
 /**
  * Redis topology, read only: cluster state, slot map and nodes (cluster
@@ -33,29 +34,29 @@ const info = shallowRef<RedisInfo | null>(null);
 const error = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const [t, i] = await Promise.all([redisTopology(props.session.id), redisInfo(props.session.id)]);
+  async (sessionId) => {
+    const [t, i] = await Promise.all([redisTopology(sessionId), redisInfo(sessionId)]);
     if (!refresh.alive()) return;
     topology.value = t;
     info.value = i;
     error.value = null;
   },
   10_000,
-  (e) => {
-    error.value = report(e);
+  (e, sessionId) => {
+    error.value = report(e, sessionId);
   },
+  () => props.session.id,
 );
 
 const cluster = computed(() => topology.value?.cluster ?? null);
 const sentinel = computed(() => topology.value?.sentinel ?? null);
 const replication = computed(() => info.value?.replication ?? null);
 
-/** A stable tag color per primary, from the shared tag palette. */
-const TAGS = ['violet', 'blue', 'green', 'amber', 'red', 'gray'] as const;
+/** A stable fill per primary, from the shared tag palette (lighter and striped variants beyond six). */
 const primaryColor = computed(() => {
   const map = new Map<string, string>();
   const primaries = (cluster.value?.nodes ?? []).filter((n) => n.role === 'primary');
-  primaries.forEach((n, i) => map.set(n.id, `var(--tag-${TAGS[i % TAGS.length] ?? 'gray'})`));
+  primaries.forEach((n, i) => map.set(n.id, primaryFill(i)));
   return map;
 });
 

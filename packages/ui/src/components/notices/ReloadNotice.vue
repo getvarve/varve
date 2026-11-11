@@ -1,25 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
-import { reloadReport } from '../../api/sessions';
-import { useWorkspace } from '../../composables/useWorkspace';
+import { onMounted } from 'vue';
 import Icon from '../common/Icon.vue';
-import { reloadNoticeText } from './notices';
+import { useReloadNotice } from './reloadNotice';
 
 /**
  * After a reload of the window: what the reload closed (the backend closes
  * every session of the previous page and rolls back its open transactions).
- * Read once at mount; dismissible.
+ * Read once per page load and kept until dismissed.
  */
-const text = ref<string | null>(null);
+const notice = useReloadNotice();
+const text = notice.text;
 
-onMounted(async () => {
-  try {
-    const report = await reloadReport();
-    text.value = reloadNoticeText(report, (id) => useWorkspace().connection(id)?.name ?? 'a removed connection');
-  } catch {
-    // Nothing to tell when the report cannot be read.
-  }
-});
+onMounted(() => notice.load());
 </script>
 
 <template>
@@ -33,7 +25,7 @@ onMounted(async () => {
       type="button"
       class="icon-btn"
       aria-label="Dismiss"
-      @click="text = null"
+      @click="notice.dismiss()"
     >
       <Icon name="close" />
     </button>

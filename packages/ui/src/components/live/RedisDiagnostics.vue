@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowRef } from 'vue';
+import { computed, nextTick, ref, shallowRef } from 'vue';
 import type { CmdError } from '../../api/errors';
 import {
   redisClientKill,
@@ -14,7 +14,7 @@ import {
 import type { ClientInfo, LatencyReport, LatencySample, RedisInfo, SlowLog } from '../../api/live';
 import type { SessionInfo, Value } from '../../api/sessions';
 import { useToasts } from '../../composables/useToasts';
-import { formatTime } from '../../lib/display';
+import { formatEntryTime, formatTime } from '../../lib/display';
 import { clientType, filterClients, formatSeconds } from '../../lib/live';
 import type { ClientType } from '../../lib/live';
 import { cellText, formatBytes, formatCount } from '../../lib/values';
@@ -63,36 +63,36 @@ const historyEvent = ref<string | null>(null);
 const history = shallowRef<LatencySample[]>([]);
 const historyError = shallowRef<CmdError | null>(null);
 
-function errorOf(result: PromiseSettledResult<unknown>): CmdError | null {
-  return result.status === 'rejected' ? report(result.reason) : null;
+function errorOf(result: PromiseSettledResult<unknown>, sessionId: string): CmdError | null {
+  return result.status === 'rejected' ? report(result.reason, sessionId) : null;
 }
 
-async function fetchAll(): Promise<void> {
-  const id = props.session.id;
+async function fetchAll(id: string): Promise<void> {
   const [s, l, c, i] = await Promise.allSettled([redisSlowlog(id), redisLatency(id), redisClients(id), redisInfo(id)]);
   if (!refresh.alive()) return;
   if (s.status === 'fulfilled') slowlog.value = s.value;
   if (l.status === 'fulfilled') latency.value = l.value;
   if (c.status === 'fulfilled') clients.value = c.value;
   if (i.status === 'fulfilled') info.value = i.value;
-  errors.value = { slowlog: errorOf(s), latency: errorOf(l), clients: errorOf(c) };
+  errors.value = { slowlog: errorOf(s, id), latency: errorOf(l, id), clients: errorOf(c, id) };
   // A refused session (closed, reconnect needed) fails every call alike: show it once at the top.
   const all = [s, l, c].every((r) => r.status === 'rejected');
-  loadError.value = all ? errorOf(s) : null;
+  loadError.value = all ? errorOf(s, id) : null;
   const event = historyEvent.value ?? latency.value?.events[0]?.event ?? null;
-  if (event) await loadHistory(event);
+  if (event) await loadHistory(event, id);
   else history.value = [];
+  if (!loadError.value) await scrollToFocus();
 }
 
-async function loadHistory(event: string): Promise<void> {
+async function loadHistory(event: string, sessionId: string = props.session.id): Promise<void> {
   historyEvent.value = event;
   try {
-    const samples = await redisLatencyHistory(props.session.id, event);
+    const samples = await redisLatencyHistory(sessionId, event);
     if (historyEvent.value !== event) return;
     history.value = samples;
     historyError.value = null;
   } catch (e: unknown) {
-    if (historyEvent.value === event) historyError.value = report(e);
+    if (historyEvent.value === event) historyError.value = report(e, sessionId);
   }
 }
 
@@ -100,14 +100,28 @@ const sections = { slowlog: ref<HTMLElement | null>(null), latency: ref<HTMLElem
 const slowlogSection = sections.slowlog;
 const latencySection = sections.latency;
 const clientsSection = sections.clients;
-onMounted(async () => {
-  await nextTick();
-  if (props.focus) sections[props.focus].value?.scrollIntoView({ block: 'start' });
-});
 
-const refresh = useAutoRefresh(fetchAll, 5000, (e) => {
-  loadError.value = report(e);
-});
+/**
+ * Scrolls to the section the panel was opened for, once: after the first
+ * load that brought data, since only then do the sections above it have
+ * their height (before that everything fits and nothing scrolls).
+ */
+let focused = false;
+async function scrollToFocus(): Promise<void> {
+  if (focused || !props.focus) return;
+  focused = true;
+  await nextTick();
+  if (refresh.alive()) sections[props.focus].value?.scrollIntoView({ block: 'start' });
+}
+
+const refresh = useAutoRefresh(
+  fetchAll,
+  5000,
+  (e, sessionId) => {
+    loadError.value = report(e, sessionId);
+  },
+  () => props.session.id,
+);
 
 const CHOICES = [
   { label: 'Off', ms: null },
@@ -135,11 +149,12 @@ async function resetSlowlog(): Promise<void> {
     statement: 'SLOWLOG RESET',
   });
   if (!yes) return;
+  const sessionId = props.session.id;
   try {
-    await redisSlowlogReset(props.session.id);
+    await redisSlowlogReset(sessionId);
     toasts.push('success', 'Slow log reset');
   } catch (e: unknown) {
-    toasts.pushError(report(e), 'Could not reset the slow log');
+    toasts.pushError(report(e, sessionId), 'Could not reset the slow log');
   }
   await refresh.refreshNow();
 }
@@ -154,11 +169,12 @@ async function resetLatency(): Promise<void> {
     statement: 'LATENCY RESET',
   });
   if (!yes) return;
+  const sessionId = props.session.id;
   try {
-    const n = await redisLatencyReset(props.session.id);
+    const n = await redisLatencyReset(sessionId);
     toasts.push('success', 'Latency monitor reset', `${n} ${n === 1 ? 'event' : 'events'} cleared.`);
   } catch (e: unknown) {
-    toasts.pushError(report(e), 'Could not reset the latency monitor');
+    toasts.pushError(report(e, sessionId), 'Could not reset the latency monitor');
   }
   historyEvent.value = null;
   await refresh.refreshNow();
@@ -201,11 +217,12 @@ async function killClient(c: ClientInfo): Promise<void> {
     typeToConfirm: props.session.environment === 'production' ? String(c.id) : '',
   });
   if (!yes) return;
+  const sessionId = props.session.id;
   try {
-    await redisClientKill(props.session.id, c.id);
+    await redisClientKill(sessionId, c.id);
     toasts.push('success', `Client ${c.id} killed`);
   } catch (e: unknown) {
-    toasts.pushError(report(e), `Could not kill client ${c.id}`);
+    toasts.pushError(report(e, sessionId), `Could not kill client ${c.id}`);
   }
   await refresh.refreshNow();
 }
@@ -287,7 +304,7 @@ function seconds(n: number | null): string {
                     {{ e.id }}
                   </td>
                   <td class="mono">
-                    {{ formatTime(e.time * 1000) }}
+                    {{ formatEntryTime(e.time * 1000) }}
                   </td>
                   <td class="mono num">
                     {{ micros(e.durationUs) }}
@@ -372,7 +389,7 @@ function seconds(n: number | null): string {
                   {{ l.event }}
                 </td>
                 <td class="mono">
-                  {{ formatTime(l.time * 1000) }}
+                  {{ formatEntryTime(l.time * 1000) }}
                 </td>
                 <td class="mono num">
                   {{ l.latestMs }} ms

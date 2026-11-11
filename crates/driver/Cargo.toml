@@ -19,6 +19,9 @@ thiserror.workspace = true
 zeroize.workspace = true
 # Decrypting client keys off the async worker threads (tls_key.rs).
 tokio = { workspace = true, features = ["rt", "time"] }
+# The OS trust store, loaded once per process for every driver
+# (native_roots.rs).
+rustls-native-certs = "0.8.5"
 # Keys the decrypted-key cache by file contents (tls_key.rs).
 sha2 = { version = "0.11.1", default-features = false }
 # Client key files: encrypted PKCS#8 (PBES2 with PBKDF2 or scrypt) and legacy

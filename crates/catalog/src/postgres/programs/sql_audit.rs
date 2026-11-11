@@ -349,6 +349,14 @@ const NOT_CATALOG_SQL: &[(&str, &str)] = &[
         "catalog/src/data_edit/apply.rs",
         "SELECT @@in_transaction AS open",
     ),
+    (
+        "catalog/src/data_edit/apply.rs",
+        "SELECT COUNT(*) > 0 AS open FROM performance_schema.events_transactions_current t JOIN performance_schema.threads th ON th.THREAD_ID = t.THREAD_ID WHERE th.PROCESSLIST_ID = CONNECTION_ID() AND t.STATE = 'ACTIVE' AND t.AUTOCOMMIT = 'NO'",
+    ),
+    (
+        "catalog/src/data_edit/apply.rs",
+        "SELECT COUNT(*) > 0 AS open FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = CONNECTION_ID()",
+    ),
     // catalog/src/data_edit/apply.rs: Messages and display text.
     (
         "catalog/src/data_edit/apply.rs",
@@ -386,9 +394,13 @@ const NOT_CATALOG_SQL: &[(&str, &str)] = &[
     ("catalog/src/data_edit/plan.rs", "="),
     (
         "catalog/src/data_edit/plan.rs",
-        "CONVERT({} USING utf8mb4) COLLATE {collation}",
+        "{ident} <=> CONVERT({literal} USING utf8mb4) COLLATE {collation}",
     ),
-    ("catalog/src/data_edit/plan.rs", "{ident} <=> {right}"),
+    (
+        "catalog/src/data_edit/plan.rs",
+        "{ident} <=> CONVERT({literal} USING utf8mb4) COLLATE {collation} AND CHAR_LENGTH({ident}) <=> CHAR_LENGTH({literal})",
+    ),
+    ("catalog/src/data_edit/plan.rs", "{ident} <=> {}"),
     ("catalog/src/data_edit/plan.rs", "CAST({literal} AS JSON)"),
     // catalog/src/data_edit/plan.rs: An operator named with its schema read from the catalog.
     ("catalog/src/data_edit/plan.rs", "OPERATOR({schema}.{name})"),
@@ -971,6 +983,15 @@ const NOT_CATALOG_SQL: &[(&str, &str)] = &[
     (
         "catalog/src/postgres/edit/int_text.rs",
         "{t} is outside the 64-bit integer range",
+    ),
+    // catalog/src/uint_text.rs: Messages and display text.
+    (
+        "catalog/src/uint_text.rs",
+        "{v} is outside the unsigned 64-bit integer range",
+    ),
+    (
+        "catalog/src/uint_text.rs",
+        "{t} is outside the unsigned 64-bit integer range",
     ),
     // catalog/src/postgres/edit/sequence.rs: Messages and display text.
     ("catalog/src/postgres/edit/sequence.rs", "super::int_text"),

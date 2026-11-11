@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 import type { Component } from 'vue';
 import { displayName, kindLabel } from '../../api/catalog';
 import type { ObjectKind, ObjectRef } from '../../api/catalog';
@@ -42,7 +42,17 @@ const props = defineProps<{ tab: ObjectTab }>();
 
 const tabs = useTabs();
 const kind = computed<ObjectKind | null>(() => props.tab.object?.kind ?? props.tab.createKind);
-const session = computed(() => props.tab.session);
+// A reconnect (or "run from another database") clears the tab's session while it connects again. The editor stays
+// mounted on the last session meanwhile (the workspace hides the tab), so the form, a drop in progress and edited DDL
+// survive; the editor reloads on the new session when it arrives.
+const lastSession = shallowRef(props.tab.session);
+watch(
+  () => props.tab.session,
+  (next) => {
+    if (next) lastSession.value = next;
+  },
+);
+const session = computed(() => lastSession.value);
 const profile = computed(() => useWorkspace().connection(props.tab.connectionId));
 const connectionName = computed(() => profile.value?.name ?? props.tab.title);
 const tableView = ref<'partitions' | 'versioning'>(props.tab.object?.kind === 'partitionedTable' ? 'partitions' : 'versioning');
@@ -120,8 +130,8 @@ const container = computed<NewObjectContainer>(() => ({
   parent: props.tab.container.parent?.name ?? props.tab.object?.parent ?? null,
 }));
 
-function report(error: unknown): void {
-  tabs.reportTabError(props.tab.id, error);
+function report(error: unknown, sessionId: string): void {
+  tabs.reportTabError(props.tab.id, error, sessionId);
 }
 
 function dirty(value: boolean): void {
@@ -141,7 +151,19 @@ function opened(object: ObjectRef): void {
   tab.title = displayName(object);
 }
 
-function dropped(): void {
+function dropped(object: ObjectRef): void {
+  if (object.kind === 'extension') {
+    // The extensions manager lists every extension of the database: it stays open for the others, and the tab
+    // no longer names the dropped one.
+    const tab = tabs.tabs.find((t) => t.id === props.tab.id);
+    if (!tab || tab.kind !== 'object') return;
+    tab.object = null;
+    tab.createKind = 'extension';
+    tab.container = { database: object.database, schema: null, parent: null };
+    tab.intent = 'create';
+    tab.title = 'Extensions';
+    return;
+  }
   tabs.setUnsaved(props.tab.id, false);
   void tabs.closeTab(props.tab.id);
 }

@@ -21,8 +21,8 @@ import { applyBatch, applyState, clearPanel, newPanel, setPaused } from './notif
 import type { NotifyPanel } from './notifyPanel';
 
 const panels = reactive(new Map<string, NotifyPanel>());
-let unlistens: UnlistenFn[] = [];
-let listening: Promise<void> | null = null;
+/** The shared pair of event listeners, while any panel exists; resolves to their unlisten functions. */
+let listening: Promise<UnlistenFn[]> | null = null;
 
 function panelOfSession(sessionId: string): NotifyPanel | null {
   for (const panel of panels.values()) if (panel.sessionId === sessionId) return panel;
@@ -43,19 +43,22 @@ function onState(state: NotifyState): void {
   if (panel) applyState(panel, state);
 }
 
-function ensureListening(): Promise<void> {
+async function ensureListening(): Promise<void> {
   listening ??= Promise.all([
     listen<NotifyBatch>(NOTIFY_MESSAGES_EVENT, (e) => onBatch(e.payload)),
     listen<NotifyState>(NOTIFY_STATUS_EVENT, (e) => onState(e.payload)),
-  ]).then((fns) => {
-    unlistens = fns;
-  });
-  return listening;
+  ]);
+  await listening;
 }
 
-/** The message of a failed call; a lost session or reconnect is reported to the tab `key`. */
-function describe(key: string, e: unknown): string {
-  const view = presentError(useTabs().reportTabError(key, e));
+/**
+ * The message of a failed call; a lost session or reconnect is reported to
+ * the tab `key`. `sessionId` is the session the call was sent on (the
+ * panel's, read before the await): a failure of a session the tab has
+ * replaced since leaves the tab alone.
+ */
+function describe(key: string, e: unknown, sessionId: string): string {
+  const view = presentError(useTabs().reportTabError(key, e, sessionId));
   return view.hint ? `${view.message} ${view.hint}` : view.message;
 }
 
@@ -72,12 +75,13 @@ function panel(key: string, sessionId: string): NotifyPanel {
 async function refresh(key: string): Promise<string | null> {
   const p = panels.get(key);
   if (!p) return null;
+  const sessionId = p.sessionId;
   try {
     await ensureListening();
-    applyState(p, await notifyState(p.sessionId));
+    applyState(p, await notifyState(sessionId));
     return null;
   } catch (e: unknown) {
-    return describe(key, e);
+    return describe(key, e, sessionId);
   }
 }
 
@@ -85,15 +89,16 @@ async function refresh(key: string): Promise<string | null> {
 async function listenTo(key: string, channel: string): Promise<string | null> {
   const p = panels.get(key);
   if (!p) return null;
+  const sessionId = p.sessionId;
   const problem = channelProblem(channel);
   if (problem) return problem;
   p.busy = true;
   try {
     await ensureListening();
-    applyState(p, await notifyListen(p.sessionId, channel));
+    applyState(p, await notifyListen(sessionId, channel));
     return null;
   } catch (e: unknown) {
-    return describe(key, e);
+    return describe(key, e, sessionId);
   } finally {
     p.busy = false;
   }
@@ -103,11 +108,12 @@ async function listenTo(key: string, channel: string): Promise<string | null> {
 async function unlistenFrom(key: string, channel: string): Promise<string | null> {
   const p = panels.get(key);
   if (!p) return null;
+  const sessionId = p.sessionId;
   try {
-    applyState(p, await notifyUnlisten(p.sessionId, channel));
+    applyState(p, await notifyUnlisten(sessionId, channel));
     return null;
   } catch (e: unknown) {
-    return describe(key, e);
+    return describe(key, e, sessionId);
   }
 }
 
@@ -137,7 +143,7 @@ async function send(key: string, channel: string, payload: string, connectionNam
     void refresh(key);
     return { sent };
   } catch (e: unknown) {
-    return { error: describe(key, e) };
+    return { error: describe(key, e, sessionId) };
   }
 }
 
@@ -145,12 +151,13 @@ async function send(key: string, channel: string, payload: string, connectionNam
 async function stop(key: string): Promise<string | null> {
   const p = panels.get(key);
   if (!p) return null;
+  const sessionId = p.sessionId;
   try {
-    await notifyStop(p.sessionId);
-    applyState(p, await notifyState(p.sessionId));
+    await notifyStop(sessionId);
+    applyState(p, await notifyState(sessionId));
     return null;
   } catch (e: unknown) {
-    return describe(key, e);
+    return describe(key, e, sessionId);
   }
 }
 
@@ -170,11 +177,11 @@ async function close(key: string): Promise<void> {
   panels.delete(key);
   if (p) await notifyStop(p.sessionId).catch(() => undefined);
   if (panels.size === 0 && listening) {
+    // Only this pair is removed: a panel opened meanwhile starts a pair of its own.
     const done = listening;
     listening = null;
-    await done.catch(() => undefined);
-    for (const fn of unlistens) fn();
-    unlistens = [];
+    const fns = await done.catch(() => [] as UnlistenFn[]);
+    for (const fn of fns) fn();
   }
 }
 

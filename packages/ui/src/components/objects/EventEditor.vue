@@ -323,6 +323,7 @@ onMounted(() => void editor.load());
               v-model:host="form.definerHost"
               :errors="errors"
               :existing="details !== null && details.definer !== null"
+              :original="details?.definer ?? null"
             />
           </section>
           <section

@@ -20,6 +20,10 @@ use varve_core::DottedId;
 /// The namespace owned by the app itself.
 pub const CORE_NAMESPACE: &str = "core";
 
+/// `PRAGMA auto_vacuum` values.
+const AUTO_VACUUM_NONE: i64 = 0;
+const AUTO_VACUUM_INCREMENTAL: i64 = 2;
+
 /// Errors from the store.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -335,6 +339,18 @@ pub struct Store {
     conn: Mutex<Connection>,
 }
 
+/// How far [`Store::reclaim_free_space`] may go to shrink the file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reclaim {
+    /// Only work that takes time in proportion to the freed pages. A file
+    /// from before incremental auto-vacuum keeps its free pages.
+    Quick,
+    /// Also rebuild a file from before incremental auto-vacuum with a
+    /// one-time `VACUUM`, which holds the store for as long as copying all
+    /// live data takes. For actions the user started and waits for.
+    Rebuild,
+}
+
 impl Store {
     /// Opens (or creates) the database file at `path`.
     ///
@@ -354,12 +370,81 @@ impl Store {
     }
 
     fn configure(conn: Connection) -> Result<Self, StoreError> {
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // rusqlite already opens with this timeout; stated first so every
+        // pragma below waits for a lock another process holds on the file
+        // instead of failing at once with "database is locked".
         conn.pragma_update(None, "busy_timeout", 5000)?;
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+        // Deleted rows are overwritten with zeros, so text the user removed
+        // (a cleared activity log) cannot be read back from free pages.
+        conn.pragma_update(None, "secure_delete", "ON")?;
+        // Free pages can be handed back to the file system without a full
+        // VACUUM. A new file gets this mode at once; an existing file keeps
+        // its mode until its next VACUUM (see [`Store::reclaim_free_space`]).
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Hands the pages freed by a large delete back to the file system and
+    /// empties the write-ahead log, so `app.db` shrinks and no old page
+    /// versions stay behind in `app.db-wal`. Call it with the connection
+    /// from [`Store::with_conn`], after the delete was committed and outside
+    /// any transaction.
+    ///
+    /// A file in incremental auto-vacuum mode releases its free pages at
+    /// once, in time that grows with the number of freed pages.
+    ///
+    /// A file created before that mode was set can only be shrunk by a
+    /// `VACUUM`, which copies all live data (and switches the file to that
+    /// mode, so it happens at most once per file). The store has one
+    /// connection behind one lock, so for as long as the copy takes (seconds
+    /// for a log of several hundred megabytes) every other store call waits:
+    /// recording events, loading profiles. That is why the caller chooses:
+    /// with [`Reclaim::Rebuild`] (an action the user started and waits for,
+    /// such as clearing the activity log) the file is rebuilt when at least
+    /// a quarter of its pages are free, so a small delete never pays for a
+    /// full rebuild; with [`Reclaim::Quick`] (background work such as the
+    /// retention prune) it is never rebuilt and its free pages, already
+    /// zeroed, stay in the file until a later call with
+    /// [`Reclaim::Rebuild`].
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Sqlite`] when a pragma or the `VACUUM` fails,
+    /// for example inside an open transaction or on a full disk. The delete
+    /// before it is committed either way: treat a failure as "space not
+    /// released yet", not as a failed delete.
+    pub fn reclaim_free_space(conn: &Connection, reclaim: Reclaim) -> Result<(), StoreError> {
+        let auto_vacuum: i64 = conn.pragma_query_value(None, "auto_vacuum", |r| r.get(0))?;
+        match auto_vacuum {
+            AUTO_VACUUM_INCREMENTAL => {
+                // Each step of the pragma frees one page: run it to the end.
+                let mut stmt = conn.prepare("PRAGMA incremental_vacuum")?;
+                let mut rows = stmt.query([])?;
+                while rows.next()?.is_some() {}
+            }
+            AUTO_VACUUM_NONE if reclaim == Reclaim::Rebuild => {
+                let free: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+                let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+                if free > 0 && free.saturating_mul(4) >= pages {
+                    conn.execute_batch("VACUUM")?;
+                }
+            }
+            // Full auto-vacuum already truncates the file at every commit;
+            // an older file is left as it is by a quick reclaim.
+            _ => {}
+        }
+        let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get(0))?;
+        if busy != 0 {
+            // Another process is reading an older snapshot; the log is
+            // emptied by a later checkpoint once that reader is done.
+            tracing::warn!(
+                "the write-ahead log could not be emptied while another reader is active"
+            );
+        }
+        Ok(())
     }
 
     /// Validates every set, then applies the core set first and the others in
@@ -533,6 +618,142 @@ mod tests {
             )?)
         })?;
         assert_eq!(tables, 0);
+        Ok(())
+    }
+
+    /// A directory of its own under the system temp dir, removed on drop.
+    struct TempDir(std::path::PathBuf);
+
+    impl TempDir {
+        fn new(label: &str) -> std::io::Result<Self> {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let path = std::env::temp_dir().join(format!(
+                "varve-store-{label}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path)?;
+            Ok(Self(path))
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn pragma(store: &Store, name: &str) -> Result<i64, StoreError> {
+        store.with_conn(|c| Ok(c.pragma_query_value(None, name, |r| r.get(0))?))
+    }
+
+    #[test]
+    fn new_files_delete_securely_and_vacuum_incrementally() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = TempDir::new("pragmas")?;
+        let store = Store::open(&dir.0.join("app.db"))?;
+        store.migrate(&[core_migrations()])?;
+        assert_eq!(pragma(&store, "busy_timeout")?, 5000);
+        assert_eq!(pragma(&store, "foreign_keys")?, 1);
+        assert_eq!(pragma(&store, "secure_delete")?, 1);
+        assert_eq!(pragma(&store, "auto_vacuum")?, AUTO_VACUUM_INCREMENTAL);
+        let mode: String =
+            store.with_conn(|c| Ok(c.pragma_query_value(None, "journal_mode", |r| r.get(0))?))?;
+        assert_eq!(mode, "wal");
+        Ok(())
+    }
+
+    /// Fills `t` with rows big enough to take many pages, then deletes
+    /// them all.
+    fn fill_and_empty(conn: &Connection) -> rusqlite::Result<()> {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS t (v TEXT);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+             INSERT INTO t SELECT 'reclaim-marker-' || hex(randomblob(256)) FROM n;",
+        )?;
+        conn.execute_batch("DELETE FROM t")
+    }
+
+    #[test]
+    fn reclaim_shrinks_new_files_incrementally() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = TempDir::new("incremental")?;
+        let path = dir.0.join("app.db");
+        let store = Store::open(&path)?;
+        store.with_conn(|c| Ok(fill_and_empty(c)?))?;
+        assert!(pragma(&store, "freelist_count")? > 100);
+        // Releasing the pages of a file in incremental mode is quick work.
+        store.with_conn(|c| Store::reclaim_free_space(c, Reclaim::Quick))?;
+        assert_eq!(pragma(&store, "freelist_count")?, 0);
+        assert!(pragma(&store, "page_count")? < 10);
+        assert_eq!(std::fs::metadata(dir.0.join("app.db-wal"))?.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn reclaim_converts_an_older_file_once_enough_is_free() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = TempDir::new("convert")?;
+        let path = dir.0.join("app.db");
+        {
+            // A file from before incremental auto-vacuum.
+            let old = Connection::open(&path)?;
+            old.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE keep (v TEXT);")?;
+        }
+        let store = Store::open(&path)?;
+        assert_eq!(pragma(&store, "auto_vacuum")?, AUTO_VACUUM_NONE);
+
+        // Little free space: no rebuild, the mode stays.
+        store.with_conn(|c| {
+            c.execute_batch(
+                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+                 INSERT INTO keep SELECT hex(randomblob(256)) FROM n;
+                 DELETE FROM keep WHERE rowid <= 10;",
+            )?;
+            Ok(())
+        })?;
+        store.with_conn(|c| Store::reclaim_free_space(c, Reclaim::Rebuild))?;
+        assert_eq!(pragma(&store, "auto_vacuum")?, AUTO_VACUUM_NONE);
+        assert!(pragma(&store, "freelist_count")? > 0);
+
+        // Most of the file free, but a quick reclaim never rebuilds: the
+        // free pages stay and only the write-ahead log is emptied.
+        store.with_conn(|c| Ok(c.execute_batch("DELETE FROM keep")?))?;
+        let free = pragma(&store, "freelist_count")?;
+        store.with_conn(|c| Store::reclaim_free_space(c, Reclaim::Quick))?;
+        assert_eq!(pragma(&store, "auto_vacuum")?, AUTO_VACUUM_NONE);
+        assert_eq!(pragma(&store, "freelist_count")?, free);
+        assert_eq!(std::fs::metadata(dir.0.join("app.db-wal"))?.len(), 0);
+
+        // With a rebuild allowed: one VACUUM, which also switches the mode.
+        store.with_conn(|c| Store::reclaim_free_space(c, Reclaim::Rebuild))?;
+        assert_eq!(pragma(&store, "auto_vacuum")?, AUTO_VACUUM_INCREMENTAL);
+        assert_eq!(pragma(&store, "freelist_count")?, 0);
+        assert_eq!(std::fs::metadata(dir.0.join("app.db-wal"))?.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn opening_waits_for_a_lock_held_by_another_process() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let dir = TempDir::new("busy")?;
+        let path = dir.0.join("app.db");
+        // Another instance holds an exclusive lock on a file that is not
+        // in WAL mode yet, so switching the journal mode has to wait.
+        let other = Connection::open(&path)?;
+        other.execute_batch(
+            "CREATE TABLE t (v INTEGER); BEGIN EXCLUSIVE; INSERT INTO t VALUES (1);",
+        )?;
+        let opener = std::thread::spawn({
+            let path = path.clone();
+            move || Store::open(&path)
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        other.execute_batch("COMMIT")?;
+        let store = opener.join().map_err(|_| "the opening thread panicked")??;
+        let mode: String =
+            store.with_conn(|c| Ok(c.pragma_query_value(None, "journal_mode", |r| r.get(0))?))?;
+        assert_eq!(mode, "wal");
         Ok(())
     }
 

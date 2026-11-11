@@ -67,6 +67,11 @@ impl Driver for PostgresDriver {
     }
 
     async fn connect(&self, params: &ConnectParams) -> Result<Box<dyn Session>, DriverError> {
-        Ok(Box::new(PostgresSession::connect(params).await?))
+        // After a TLS failure the next connect reads the OS trust store
+        // again: the user may add the missing CA and retry.
+        let session = PostgresSession::connect(params)
+            .await
+            .inspect_err(varve_driver::refresh_native_roots_after)?;
+        Ok(Box::new(session))
     }
 }

@@ -2,6 +2,7 @@ import type { ConnectionProfile } from '../api/records';
 import {
   connectionFormFromProfile,
   connectionFormSchema,
+  connectionTestKey,
   emptyConnectionForm,
   fieldForServerMessage,
   toConnectionSubmit,
@@ -41,8 +42,12 @@ describe('connection form schema', () => {
   it('rejects a database name for Redis and checks the Redis database number', () => {
     const redis = { ...emptyConnectionForm('redis'), name: 'Cache', host: 'cache' };
     expect(errorsOf({ ...redis, database: 'shop' }).database).toMatch(/Redis has no database name/);
-    expect(errorsOf({ ...redis, options: { ...redis.options, redisDb: '16' } })['options.redisDb']).toMatch(/0 to 15/);
-    expect(errorsOf({ ...redis, options: { ...redis.options, redisDb: '3' } })).toEqual({});
+    for (const redisDb of ['65536', '-1', '1.5', 'x', '']) {
+      expect(errorsOf({ ...redis, options: { ...redis.options, redisDb } })['options.redisDb']).toMatch(/0 to 65535/);
+    }
+    for (const redisDb of ['0', '3', '16', '63', '65535']) {
+      expect(errorsOf({ ...redis, options: { ...redis.options, redisDb } })).toEqual({});
+    }
     const pg = valid();
     expect(errorsOf({ ...pg, options: { ...pg.options, redisDb: '2' } })['options.redisDb']).toMatch(/only applies to Redis/);
   });
@@ -83,6 +88,27 @@ describe('connection form schema', () => {
     });
     expect(out.password).toBe('pw');
     expect(out.sshSecret).toBeNull();
+  });
+
+  it('submits a valid port of a switched off tunnel, and the default for junk', () => {
+    const base = valid();
+    expect(toConnectionSubmit({ ...base, ssh: { ...base.ssh, enabled: false, port: '2222' } }).input.ssh.port).toBe(2222);
+    for (const port of ['22a', '70000', '0', '', ' ']) {
+      const values = { ...base, ssh: { ...base.ssh, enabled: false, port } };
+      // The switched off tunnel is not validated, so the submit itself must stay a valid u16.
+      expect(errorsOf(values)).toEqual({});
+      expect(toConnectionSubmit(values).input.ssh.port).toBe(22);
+    }
+  });
+
+  it('keys a connection test by what decides the connection, not by name or color', () => {
+    const base = valid({ password: 'pw' });
+    const key = connectionTestKey(toConnectionSubmit(base));
+    expect(connectionTestKey(toConnectionSubmit({ ...base, name: 'Other', color: 'blue', environment: 'production' }))).toBe(key);
+    expect(connectionTestKey(toConnectionSubmit({ ...base, host: 'db2.internal' }))).not.toBe(key);
+    expect(connectionTestKey(toConnectionSubmit({ ...base, username: 'kim' }))).not.toBe(key);
+    expect(connectionTestKey(toConnectionSubmit({ ...base, password: 'other' }))).not.toBe(key);
+    expect(connectionTestKey(toConnectionSubmit({ ...base, ssh: { ...base.ssh, enabled: true } }))).not.toBe(key);
   });
 
   it('round trips a saved profile', () => {

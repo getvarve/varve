@@ -38,6 +38,11 @@ pub const MAX_REPLY_BYTES: u64 = 16 * 1024 * 1024;
 /// before it returns, so the result can say whether the server stopped.
 const KILL_REPORT_WAIT: Duration = Duration::from_secs(2);
 
+/// Why a cancel cannot stop the command on the server when the server
+/// refused `CLIENT ID`.
+const ID_REFUSED: &str = "The server refused CLIENT ID (an ACL, a renamed command, a proxy or a \
+                          server before Redis 5), so Varve does not know which connection to stop";
+
 /// Console commands that would leave the shared request/response connection
 /// in a state the session cannot use. The app offers dedicated panels
 /// (Pub/Sub, monitor) instead.
@@ -71,6 +76,9 @@ struct CallState {
     cancelled: bool,
     /// `CLIENT ID` of the live connection.
     client_id: Option<i64>,
+    /// The server refused `CLIENT ID` on the live connection: a cancel
+    /// cannot ask the server to stop the command.
+    id_refused: bool,
     /// Counts calls, so a late kill report never lands on a later call.
     generation: u64,
     /// Server-side kill of the running call.
@@ -169,6 +177,8 @@ pub struct RedisSession {
     read_only: bool,
     statement_timeout: Option<Duration>,
     init: Vec<ParsedCommand>,
+    /// What connecting could not learn (a refused `INFO`).
+    connect_notices: Vec<Notice>,
 }
 
 impl RedisSession {
@@ -213,6 +223,15 @@ impl RedisSession {
             })
             .await??;
         inner.conn = Some(conn);
+        let connect_notices = details
+            .notice()
+            .map(|message| Notice {
+                severity: "NOTICE".into(),
+                message,
+            })
+            .into_iter()
+            .collect();
+        let details = details.details().clone();
         Ok(Self {
             shared,
             inner: tokio::sync::Mutex::new(inner),
@@ -220,6 +239,7 @@ impl RedisSession {
             read_only: params.read_only,
             statement_timeout: params.statement_timeout,
             init,
+            connect_notices,
         })
     }
 
@@ -439,7 +459,11 @@ async fn open_session_conn(
     if !first && !init.is_empty() {
         conn.query(redis::cmd("SELECT").arg(inner.db)).await?;
     }
-    shared.state().client_id = Some(id);
+    {
+        let mut state = shared.state();
+        state.client_id = id;
+        state.id_refused = id.is_none();
+    }
     Ok(conn)
 }
 
@@ -892,6 +916,10 @@ impl Session for RedisSession {
 
     fn tls_in_use(&self) -> Option<bool> {
         Some(self.uses_tls())
+    }
+
+    fn connect_notices(&self) -> Vec<Notice> {
+        self.connect_notices.clone()
     }
 
     /// `AUTH` sends the password as is.
@@ -1452,6 +1480,8 @@ impl CancelHandle for RedisCancel {
             state.cancelled = true;
             state.kill = if state.client_id.is_some() {
                 Kill::Pending
+            } else if state.id_refused {
+                Kill::Failed(ID_REFUSED.to_owned())
             } else {
                 Kill::None
             };

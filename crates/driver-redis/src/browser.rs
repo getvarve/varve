@@ -509,13 +509,33 @@ impl RedisSession {
     /// Key counts per database from `INFO keyspace`. Databases without keys
     /// are not listed by the server.
     ///
+    /// When the server refuses `INFO` (see [`error::refused`]) only the
+    /// open database is known: it is listed alone, with its key count from
+    /// `DBSIZE` (0 when that is refused too) and without a count of keys
+    /// that expire. The session's connect notice says so.
+    ///
     /// # Errors
     ///
     /// Connection errors, Cancelled.
     pub async fn keyspace(&self) -> Result<Vec<DbKeyspace>, DriverError> {
         let mut call = self.begin().await?;
         call.no_open_transaction()?;
-        let reply = call.query(redis::cmd("INFO").arg("keyspace")).await?;
+        let reply = match call.query(redis::cmd("INFO").arg("keyspace")).await {
+            Ok(reply) => reply,
+            Err(e) if error::refused(&e) => {
+                tracing::debug!(code = ?e.code, "INFO refused, counting the open database with DBSIZE");
+                let keys = match call.query(&redis::cmd("DBSIZE")).await {
+                    Ok(reply) => total(&reply),
+                    Err(e) if error::refused(&e) => {
+                        tracing::debug!(code = ?e.code, "DBSIZE refused, the key count is unknown");
+                        None
+                    }
+                    Err(e) => return Err(e),
+                };
+                return Ok(keyspace_without_info(call.db(), keys));
+            }
+            Err(e) => return Err(e),
+        };
         let text = as_text(&reply).ok_or_else(|| error::protocol("INFO did not return text"))?;
         Ok(parse_keyspace(&text))
     }
@@ -1490,6 +1510,17 @@ async fn read_json(call: &mut Call<'_>, key: &[u8]) -> Result<Page, DriverError>
     Ok(Some((None, None, ValueData::Json { document })))
 }
 
+/// The keyspace of a server that refuses `INFO`: the open database alone,
+/// with the key count `DBSIZE` gave (`None` when the server refused that
+/// as well).
+fn keyspace_without_info(db: u16, keys: Option<u64>) -> Vec<DbKeyspace> {
+    vec![DbKeyspace {
+        db,
+        keys: keys.unwrap_or(0),
+        expires: 0,
+    }]
+}
+
 /// Parses `INFO keyspace` text (`db0:keys=1,expires=0,avg_ttl=0`).
 #[must_use]
 pub fn parse_keyspace(text: &str) -> Vec<DbKeyspace> {
@@ -1673,6 +1704,30 @@ mod tests {
             ]
         );
         assert!(parse_keyspace("# Keyspace\r\n").is_empty());
+    }
+
+    #[test]
+    fn keyspace_without_info_lists_the_open_database() {
+        assert_eq!(
+            keyspace_without_info(3, Some(42)),
+            vec![DbKeyspace {
+                db: 3,
+                keys: 42,
+                expires: 0
+            }]
+        );
+        // An empty database and an unknown count still give the tree and
+        // the database selector their node.
+        for keys in [Some(0), None] {
+            assert_eq!(
+                keyspace_without_info(0, keys),
+                vec![DbKeyspace {
+                    db: 0,
+                    keys: 0,
+                    expires: 0
+                }]
+            );
+        }
     }
 
     #[test]

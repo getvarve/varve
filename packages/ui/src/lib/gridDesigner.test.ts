@@ -1,5 +1,5 @@
 import type { DesignerDetails, MyColumnInfo, MyTableInfo, PgColumnInfo, PgIndexInfo, PgIndexKeyInfo, PgTableInfo, TableDetails } from '../api/grid';
-import type { IndexDraft } from './gridDesigner';
+import type { IndexDraft, SaveStep } from './gridDesigner';
 import {
   buildDraftChanges,
   changedProps,
@@ -34,6 +34,7 @@ import {
   pgCheckExpression,
   pgCreatePartition,
   pgDetachPartition,
+  rebaseDraft,
   splitList,
   summarize,
 } from './gridDesigner';
@@ -309,6 +310,53 @@ describe('PostgreSQL designer', () => {
       },
     ]);
     expect(summarize(original, draft)).toMatchObject({ total: 6, columns: { added: 1, modified: 2 } });
+  });
+
+  it('sends a column collation from outside pg_catalog with its schema, a pg_catalog or typed one as a bare name', () => {
+    const details = pgTable();
+    if (details.engine !== 'postgres') throw new Error('fixture');
+    details.object.columns = [
+      pgColumn('id', 1, { dataType: 'bigint', notNull: true }),
+      pgColumn('code', 2, { collation: { schema: 'my app', name: 'de_phonebook' } }),
+      pgColumn('note', 3, { collation: { schema: 'pg_catalog', name: 'C' } }),
+      pgColumn('label', 4, { collation: { schema: 'app', name: 'nocase' } }),
+    ];
+    const original = draftFromDetails(details);
+    const draft = cloneDraft(original);
+    const [, code, note, label] = draft.columns;
+    if (!code || !note || !label) throw new Error('fixture');
+    expect([code.collation, note.collation, label.collation]).toEqual(['de_phonebook', 'C', 'nocase']);
+    // A type change sends the collation as read: with its schema outside pg_catalog.
+    code.dataType = 'varchar(20)';
+    note.dataType = 'varchar(20)';
+    // A collation typed over the one read goes bare, through the search_path.
+    label.collation = 'und-x-icu';
+    const added = newColumn('postgres', 'extra');
+    added.collation = 'en_US';
+    draft.columns.push(added);
+
+    const { changes, errors } = buildDraftChanges(original, draft);
+    expect(errors).toEqual([]);
+    expect(changes[0]).toMatchObject({
+      change: {
+        operations: [
+          { op: 'alterColumnType', name: 'code', dataType: 'varchar(20)', collation: { schema: 'my app', name: 'de_phonebook' } },
+          { op: 'alterColumnType', name: 'note', dataType: 'varchar(20)', collation: 'C' },
+          { op: 'alterColumnType', name: 'label', dataType: 'text', collation: 'und-x-icu' },
+          { op: 'addColumn', column: { name: 'extra', dataType: 'text', collation: 'en_US' } },
+        ],
+      },
+    });
+
+    // A new table copied from the read columns keeps the schema too.
+    const fresh = newTableDraft('postgres', 'public', '');
+    fresh.table = 'copy';
+    const kept = cloneDraft(original).columns[1];
+    if (!kept) throw new Error('fixture');
+    fresh.columns.push({ ...kept, origName: null });
+    const created = buildDraftChanges(fresh, fresh);
+    expect(created.errors).toEqual([]);
+    expect(created.changes[0]).toMatchObject({ change: { action: 'create', columns: [{}, { name: 'code', collation: { schema: 'my app', name: 'de_phonebook' } }] } });
   });
 
   it('redefines an index exactly as read: extension method, unquoted names, collation, operator class, options', () => {
@@ -1209,5 +1257,218 @@ describe('audit fixes (table designer)', () => {
     unique.parts.push({ text: 'at', expression: false, descending: false, nulls: '', extra: '' });
     ex.exclusion.push({ text: 'at', expression: false, operator: '=' });
     expect(buildDraftChanges(draft, draft, [], 17).errors).toEqual([]);
+  });
+});
+
+describe('audit fixes (data grid package)', () => {
+  it('AUTO_INCREMENT beyond 2^53 is read and sent exactly, as text', () => {
+    const details = myTable();
+    if (details.engine !== 'mysql') throw new Error('fixture');
+    details.object.autoIncrement = '1800000000000000123';
+    const original = draftFromDetails(details);
+    expect(original.props.autoIncrement).toBe('1800000000000000123');
+    const draft = cloneDraft(original);
+    draft.props.autoIncrement = '1800000000000000999';
+    expect(buildDraftChanges(original, draft).changes[0]).toMatchObject({ change: { operations: [{ op: 'setOptions', options: { autoIncrement: '1800000000000000999' } }] } });
+    // Up to 2^53 - 1 the value stays a number.
+    draft.props.autoIncrement = '9007199254740991';
+    expect(buildDraftChanges(original, draft).changes[0]).toMatchObject({ change: { operations: [{ op: 'setOptions', options: { autoIncrement: 9007199254740991 } }] } });
+    draft.props.autoIncrement = '18446744073709551616';
+    expect(buildDraftChanges(original, draft).errors).toEqual(['AUTO_INCREMENT can be at most 18446744073709551615.']);
+    draft.props.autoIncrement = '0';
+    expect(buildDraftChanges(original, draft).errors).toEqual(['AUTO_INCREMENT must be a whole number from 1 up.']);
+  });
+
+  it('a new PostgreSQL table is created with its columns in the order chosen', () => {
+    const draft = newTableDraft('postgres', 'public', '');
+    draft.table = 'events';
+    const at = { ...newColumn('postgres', 'at'), dataType: 'timestamptz' };
+    draft.columns.push(at);
+    moveColumn(draft, at.id, -1);
+    const { changes, errors } = buildDraftChanges(draft, draft);
+    expect(errors).toEqual([]);
+    expect((changes[0]?.change as { columns: { name: string }[] }).columns.map((c) => c.name)).toEqual(['at', 'id']);
+  });
+});
+
+describe('a save that stopped part way (rebaseDraft)', () => {
+  const ran = (changes: readonly SaveStep['change'][], count: number): SaveStep[] => changes.map((change, n) => ({ change, applied: n < count }));
+
+  /** Renames and retypes `total`, comments `note`, drops orders_note_idx and adds orders_amount_idx. */
+  function pgEdits(): { original: ReturnType<typeof draftFromDetails>; draft: ReturnType<typeof draftFromDetails> } {
+    const original = draftFromDetails(pgTable());
+    const draft = cloneDraft(original);
+    const [, total, note] = draft.columns;
+    const [idx] = draft.indexes;
+    if (!total || !note || !idx) throw new Error('fixture');
+    total.name = 'amount';
+    total.dataType = 'numeric(14,2)';
+    note.comment = 'Free text';
+    idx.dropped = true;
+    const index = newIndex('postgres', 'orders_amount_idx');
+    index.parts.push({ text: 'amount', expression: false, descending: true, nulls: '', extra: '' });
+    draft.indexes.push(index);
+    return { original, draft };
+  }
+
+  it('keeps every change after an index drop that ran, without dropping it again', () => {
+    const { original, draft } = pgEdits();
+    const { changes } = buildDraftChanges(original, draft);
+    expect(changes.map((c) => (c.change as { object: string; action?: string }).object)).toEqual(['index', 'table', 'index', 'comment']);
+    const after = pgTable();
+    if (after.engine !== 'postgres' || after.object.kind !== 'table') throw new Error('fixture');
+    after.object.indexes = [];
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, ran(changes, 1));
+    expect(buildDraftChanges(read, kept)).toEqual({ changes: changes.slice(1), errors: [] });
+    expect(summarize(read, kept)).toMatchObject({ columns: { modified: 2 }, indexes: { added: 1, dropped: 0 } });
+  });
+
+  it('keeps the index and the comment after the ALTER TABLE ran', () => {
+    const { original, draft } = pgEdits();
+    const { changes } = buildDraftChanges(original, draft);
+    const after = pgTable();
+    if (after.engine !== 'postgres' || after.object.kind !== 'table') throw new Error('fixture');
+    after.object.indexes = [];
+    after.object.columns = after.object.columns.map((c) => (c.name === 'total' ? { ...c, name: 'amount', dataType: 'numeric(14,2)' } : c));
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, ran(changes, 2));
+    expect(buildDraftChanges(read, kept)).toEqual({ changes: changes.slice(2), errors: [] });
+    expect(kept.columns.map((c) => [c.name, c.comment])).toEqual([['id', ''], ['amount', ''], ['note', 'Free text']]);
+  });
+
+  it('turns a redefined index whose old index was dropped into a new one, and takes created indexes as read', () => {
+    const original = draftFromDetails(pgTable());
+    const draft = cloneDraft(original);
+    const [idx] = draft.indexes;
+    const [part] = idx?.parts ?? [];
+    if (!idx || !part) throw new Error('fixture');
+    idx.changed = true;
+    part.descending = true;
+    const { changes } = buildDraftChanges(original, draft);
+    expect(changes.map((c) => (c.change as { action: string }).action)).toEqual(['drop', 'create']);
+    const after = pgTable();
+    if (after.engine !== 'postgres' || after.object.kind !== 'table') throw new Error('fixture');
+    after.object.indexes = [];
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, ran(changes, 1));
+    expect(kept.indexes).toMatchObject([{ origName: null, name: 'orders_note_idx', changed: false }]);
+    expect(buildDraftChanges(read, kept)).toEqual({ changes: changes.slice(1), errors: [] });
+    // Both ran: the index is taken as read, nothing is left to do.
+    const done = draftFromDetails(pgTable());
+    expect(buildDraftChanges(done, rebaseDraft(draft, done, ran(changes, 2))).changes).toEqual([]);
+  });
+
+  it('keeps an index rename and a drop that did not run', () => {
+    const original = draftFromDetails(pgTable());
+    const draft = cloneDraft(original);
+    const [idx] = draft.indexes;
+    if (!idx) throw new Error('fixture');
+    idx.name = 'orders_note_key';
+    const total = draft.columns[1];
+    if (!total) throw new Error('fixture');
+    total.comment = 'Sum';
+    const { changes } = buildDraftChanges(original, draft);
+    // The rename runs, the comment fails.
+    const after = pgTable();
+    if (after.engine !== 'postgres' || after.object.kind !== 'table') throw new Error('fixture');
+    const [readIndex] = after.object.indexes;
+    if (!readIndex) throw new Error('fixture');
+    after.object.indexes = [{ ...readIndex, name: 'orders_note_key' }];
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, ran(changes, 1));
+    expect(kept.indexes.map((i) => [i.origName, i.name])).toEqual([['orders_note_key', 'orders_note_key']]);
+    expect(buildDraftChanges(read, kept)).toEqual({ changes: changes.slice(1), errors: [] });
+  });
+
+  it('MySQL: keeps the table options when only the column changes ran', () => {
+    const details = myTable();
+    const original = draftFromDetails(details);
+    const draft = cloneDraft(original);
+    const status = draft.columns[1];
+    if (!status) throw new Error('fixture');
+    status.name = 'state';
+    Object.assign(draft.props, { engine: 'Aria', comment: 'shop orders' });
+    const infos = details.engine === 'mysql' ? details.object.columns : [];
+    const { changes } = buildDraftChanges(original, draft, infos);
+    expect(changes).toHaveLength(2);
+    const after = myTable();
+    if (after.engine !== 'mysql') throw new Error('fixture');
+    after.object.columns = after.object.columns.map((c) => (c.name === 'status' ? { ...c, name: 'state' } : c));
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, ran(changes, 1));
+    expect(changedProps(read, kept)).toEqual(['comment', 'engine']);
+    expect(buildDraftChanges(read, kept, after.object.columns)).toEqual({ changes: changes.slice(1), errors: [] });
+  });
+
+  it('MySQL: a new column that did reach the server is not added a second time', () => {
+    const details = myTable();
+    const original = draftFromDetails(details);
+    const draft = cloneDraft(original);
+    const note = newColumn('mysql', 'note');
+    note.dataType = 'varchar(64)';
+    draft.columns.push(note);
+    const changed = draft.columns[2];
+    if (!changed) throw new Error('fixture');
+    changed.comment = 'Last change';
+    const infos = details.engine === 'mysql' ? details.object.columns : [];
+    const { changes } = buildDraftChanges(original, draft, infos);
+    // The step counts as not applied, but its ADD COLUMN did run: the table as read has `note`.
+    const after = myTable();
+    if (after.engine !== 'mysql') throw new Error('fixture');
+    after.object.columns = [...after.object.columns, myColumn('note', 4, 'varchar(64)')];
+    const read = draftFromDetails(after);
+    const kept = rebaseDraft(draft, read, changes.map((change) => ({ change, applied: false })));
+    expect(kept.columns.map((c) => [c.origName, c.name])).toEqual([['id', 'id'], ['status', 'status'], ['changed', 'changed'], ['note', 'note']]);
+    // `note` is compared with the column that exists now, so the next save changes it instead of adding it again.
+    expect(summarize(read, kept)).toMatchObject({ columns: { added: 0 } });
+    expect(kept.columns[3]?.id).toBe(read.columns[3]?.id);
+    expect(kept.columns[2]?.comment).toBe('Last change');
+  });
+
+  it('MySQL: a new column named like a renamed one stays new while the rename has not run', () => {
+    const details = myTable();
+    const original = draftFromDetails(details);
+    const draft = cloneDraft(original);
+    const status = draft.columns[1];
+    if (!status) throw new Error('fixture');
+    status.name = 'state';
+    draft.columns.push(newColumn('mysql', 'status'));
+    const infos = details.engine === 'mysql' ? details.object.columns : [];
+    const { changes } = buildDraftChanges(original, draft, infos);
+    const read = draftFromDetails(myTable());
+    const kept = rebaseDraft(draft, read, changes.map((change) => ({ change, applied: false })));
+    // The column read as `status` is the one being renamed; the new `status` is still to be added.
+    expect(kept.columns.map((c) => [c.origName, c.name])).toEqual([['id', 'id'], ['status', 'state'], ['changed', 'changed'], [null, 'status']]);
+    expect(buildDraftChanges(read, kept, infos)).toEqual({ changes, errors: [] });
+  });
+
+  it('a new table: keeps the owner and an unnamed index whose steps did not run, and drops one the server created', () => {
+    const draft = newTableDraft('postgres', 'public', '');
+    draft.table = 'orders';
+    draft.props.owner = 'reporting';
+    const first = newIndex('postgres', '');
+    first.parts.push({ text: 'id', expression: false, descending: true, nulls: '', extra: '' });
+    const second = newIndex('postgres', '');
+    second.parts.push({ text: 'id', expression: false, descending: false, nulls: '', extra: '' });
+    draft.indexes.push(first, second);
+    const { changes, errors } = buildDraftChanges(draft, draft);
+    expect(errors).toEqual([]);
+    expect(changes.map((c) => (c.change as { object: string; action: string }).action)).toEqual(['create', 'alter', 'create', 'create']);
+    // CREATE TABLE ran, the owner failed; then again with the first index created by the server as orders_id_idx.
+    const read = draftFromDetails(pgTable());
+    const kept = rebaseDraft(draft, read, ran(changes, 1));
+    expect(kept.isNew).toBe(false);
+    expect(kept.props.owner).toBe('reporting');
+    expect(kept.indexes.filter((i) => i.origName === null)).toHaveLength(2);
+    const created = pgTable();
+    if (created.engine !== 'postgres' || created.object.kind !== 'table') throw new Error('fixture');
+    const [readIndex] = created.object.indexes;
+    if (!readIndex) throw new Error('fixture');
+    created.object.indexes = [{ ...readIndex, name: 'orders_id_idx' }];
+    const readAgain = draftFromDetails(created);
+    const steps: SaveStep[] = changes.map((change, n) => ({ change, applied: n !== 1 && n !== 3 }));
+    const again = rebaseDraft(draft, readAgain, steps);
+    expect(again.indexes.map((i) => [i.origName, i.parts[0]?.descending])).toEqual([[null, false], ['orders_id_idx', false]]);
   });
 });

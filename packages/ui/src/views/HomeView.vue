@@ -147,7 +147,7 @@ const ENGINE_VERSIONS: Record<string, string> = {
 
 h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
   letter-spacing: -0.01em;
 }

@@ -4,7 +4,7 @@ import { useTabs } from '../../composables/useTabs';
 import { redisZsetRange } from '../../api/redis';
 import type { ScoredMember, ZsetRange } from '../../api/redis';
 import { latestOnly } from '../../lib/async';
-import { parseBound } from '../../lib/redisEdit';
+import { formatBound, parseBound } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
 import { redisErrorView } from '../../lib/redisErrors';
 import { formatCount } from '../../lib/values';
@@ -66,8 +66,9 @@ async function read(range: ZsetRange): Promise<void> {
   const token = requests.next();
   shown.loading = true;
   shown.error = null;
+  const sessionId = props.sessionId;
   try {
-    const page = await redisZsetRange(props.sessionId, props.keyName, range);
+    const page = await redisZsetRange(sessionId, props.keyName, range);
     if (!requests.isCurrent(token)) return;
     shown.range = range;
     shown.missing = page === null;
@@ -76,7 +77,7 @@ async function read(range: ZsetRange): Promise<void> {
     shown.nextOffset = page?.nextOffset ?? null;
   } catch (e: unknown) {
     if (!requests.isCurrent(token)) return;
-    const view = redisErrorView(useTabs().reportTabError(props.tabId, e));
+    const view = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId));
     shown.error = view.hint ? `${view.message} ${view.hint}` : view.message;
   } finally {
     if (requests.isCurrent(token)) shown.loading = false;
@@ -95,6 +96,16 @@ function apply(): void {
 function setMode(mode: 'rank' | 'score' | 'lex'): void {
   if (form.mode === mode) return;
   form.mode = mode;
+  // A range that was read (its rows, command and error) belongs to the mode it was read in: under
+  // another mode it would show, for example, score rows and a BYSCORE command under "By lex".
+  // A read still running is dropped for the same reason.
+  requests.next();
+  shown.loading = false;
+  shown.error = null;
+  shown.range = null;
+  members.value = [];
+  shown.nextOffset = null;
+  shown.missing = false;
   if (mode === 'score') {
     form.min = '-inf';
     form.max = '+inf';
@@ -102,8 +113,14 @@ function setMode(mode: 'rank' | 'score' | 'lex'): void {
     form.min = '-';
     form.max = '+';
   }
-  if (mode === 'rank') shown.range = null;
 }
+
+/**
+ * The range part of the view: shown once a range was read, and also when the
+ * first read of a range failed (its error with an empty table, never the rank
+ * list under a "By score" or "By lex" toggle).
+ */
+const showRange = computed(() => shown.range !== null || (form.mode !== 'rank' && shown.error !== null));
 
 function next(): void {
   if (shown.range && shown.nextOffset !== null) void read({ ...shown.range, offset: shown.nextOffset });
@@ -121,12 +138,12 @@ function reload(): void {
 }
 defineExpose({ reload });
 
+/** The command of the range that is shown (not of form fields edited since). */
 const command = computed(() => {
   const r = shown.range;
   if (!r) return null;
-  const open: [string, string] = r.by === 'score' ? ['-inf', '+inf'] : ['-', '+'];
-  const lo = form.min.trim() === '' ? open[0] : form.min;
-  const hi = form.max.trim() === '' ? open[1] : form.max;
+  const lo = formatBound(r.min, r.by, 'min');
+  const hi = formatBound(r.max, r.by, 'max');
   const ends = r.reverse ? `${hi} ${lo}` : `${lo} ${hi}`;
   return `ZRANGE ${props.keyName} ${ends} BY${r.by.toUpperCase()}${r.reverse ? ' REV' : ''} LIMIT ${r.offset} ${r.count}`;
 });
@@ -213,8 +230,11 @@ const command = computed(() => {
       Lex ranges only make sense when every member has the same score. Use [a or (a for the ends, - and + for open.
     </p>
 
-    <template v-if="shown.range">
-      <div class="bar">
+    <template v-if="showRange">
+      <div
+        v-if="command"
+        class="bar"
+      >
         <span class="mono subtle">{{ command }}</span>
       </div>
       <p
@@ -236,9 +256,12 @@ const command = computed(() => {
         :editable="editable"
         :first="shown.first"
         position-label="#"
-        :scores="shown.range.by === 'score'"
+        :scores="(shown.range?.by ?? form.mode) === 'score'"
       />
-      <div class="bar">
+      <div
+        v-if="shown.range"
+        class="bar"
+      >
         <span class="subtle">
           {{ members.length === 0 ? 'No members in this range' : `${formatCount(String(shown.first + 1))} to ${formatCount(String(shown.first + members.length))} in range` }}
         </span>

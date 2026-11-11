@@ -74,6 +74,71 @@ describe('value formatting', () => {
     expect([...big].sort(compareValues).map(plainText)).toEqual(['9007199254740992', '9007199254740993']);
   });
 
+  it('sorts non-finite floats as PostgreSQL does: -Infinity, numbers, Infinity, NaN', () => {
+    const values: Value[] = [
+      { t: 'float', v: 'NaN' },
+      { t: 'float', v: 'Infinity' },
+      { t: 'float', v: -7 },
+      { t: 'float', v: '-Infinity' },
+      { t: 'int', v: 3 },
+      { t: 'decimal', v: 'NaN' },
+      { t: 'decimal', v: '-Infinity' },
+    ];
+    expect([...values].sort(compareValues).map(plainText)).toEqual(['-inf', '-Infinity', '-7', '3', 'inf', 'NaN', 'NaN']);
+  });
+
+  it('sorts decimals exactly, beyond the precision of a double', () => {
+    const values: Value[] = [
+      { t: 'decimal', v: '-1.00000000000000000001' },
+      { t: 'decimal', v: '-1.00000000000000000009' },
+      { t: 'decimal', v: '1.00000000000000000009' },
+      { t: 'decimal', v: '1.00000000000000000001' },
+      { t: 'decimal', v: '123456789012345678901234567890.5' },
+      { t: 'decimal', v: '123456789012345678901234567890.25' },
+      { t: 'decimal', v: '0.5' },
+    ];
+    expect([...values].sort(compareValues).map(plainText)).toEqual([
+      '-1.00000000000000000009',
+      '-1.00000000000000000001',
+      '0.5',
+      '1.00000000000000000001',
+      '1.00000000000000000009',
+      '123456789012345678901234567890.25',
+      '123456789012345678901234567890.5',
+    ]);
+    // Mixed kinds compare by value: 2.5 (float) after 2 (int) and before 2.50001 (decimal).
+    const mixed: Value[] = [{ t: 'decimal', v: '2.50001' }, { t: 'float', v: 2.5 }, { t: 'int', v: 2 }, { t: 'float', v: 1e-7 }];
+    expect([...mixed].sort(compareValues).map(plainText)).toEqual(['0.0000001', '2', '2.5', '2.50001']);
+    // Equal values (-0 and 0, 1.50 and 1.5) compare equal in value and fall back to text.
+    expect(compareValues({ t: 'decimal', v: '1.50' }, { t: 'float', v: 1.5 })).toBe('1.50'.localeCompare('1.5'));
+    expect(compareValues({ t: 'float', v: -0 }, { t: 'int', v: 0 })).toBe('-0'.localeCompare('0'));
+  });
+
+  it('sorts intervals by length, in ISO 8601 and PostgreSQL style', () => {
+    const iso: Value[] = [
+      { t: 'interval', v: 'P10D' },
+      { t: 'interval', v: 'P2D' },
+      { t: 'interval', v: 'P1M' },
+      { t: 'interval', v: 'P1D' },
+      { t: 'interval', v: 'PT-1S' },
+      { t: 'interval', v: 'PT36H' },
+      { t: 'interval', v: 'P-1Y2M' },
+      { t: 'interval', v: 'PT0.5S' },
+    ];
+    expect([...iso].sort(compareValues).map(plainText)).toEqual(['P-1Y2M', 'PT-1S', 'PT0.5S', 'P1D', 'PT36H', 'P2D', 'P10D', 'P1M']);
+    const pg: Value[] = [
+      { t: 'interval', v: '10 days' },
+      { t: 'interval', v: '2 days' },
+      { t: 'interval', v: '1 mon' },
+      { t: 'interval', v: '1 day' },
+      { t: 'interval', v: '1 day -01:00:00' },
+      { t: 'interval', v: '1 year 2 mons 3 days 04:05:06.5' },
+    ];
+    expect([...pg].sort(compareValues).map(plainText)).toEqual(['1 day -01:00:00', '1 day', '2 days', '10 days', '1 mon', '1 year 2 mons 3 days 04:05:06.5']);
+    // A form it does not read keeps the text order.
+    expect(compareValues({ t: 'interval', v: 'b' }, { t: 'interval', v: 'P1D' })).toBe('b'.localeCompare('P1D'));
+  });
+
   it('maps a 1-based character position to an editor offset', () => {
     expect(charPositionToOffset('SELECT x', 1)).toBe(0);
     expect(charPositionToOffset('SELECT x', 8)).toBe(7);
@@ -86,6 +151,12 @@ describe('value formatting', () => {
     expect(formatDuration(38)).toBe('38 ms');
     expect(formatDuration(1500)).toBe('1.50 s');
     expect(formatDuration(192_000)).toBe('3 min 12 s');
+    // Rounded before the unit is chosen.
+    expect(formatDuration(999.6)).toBe('1.00 s');
+    expect(formatDuration(9_996)).toBe('10.0 s');
+    expect(formatDuration(59_940)).toBe('59.9 s');
+    expect(formatDuration(59_960)).toBe('1 min 0 s');
+    expect(formatDuration(119_600)).toBe('2 min 0 s');
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(1434)).toBe('1.4 KB');
     expect(formatTtl(null)).toBe('No expiry');

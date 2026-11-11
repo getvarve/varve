@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { useId } from 'vue';
+import { computed, inject, useId, watch } from 'vue';
 import type { Environment } from '../../api/records';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
+import { OBJECT_EDITOR_CONTEXT } from './types';
 
 /**
  * Header, section tabs and body of an object editor (design canvases
  * ViewEditor, FunctionEditor, ...): object name, kind, environment,
  * unsaved-change state, the editor's actions and its sections.
+ *
+ * Inside an editor built on `useObjectEditor` it also shows the editor's
+ * notice (object gone, reload failed) and a "Reading again" status,
+ * disables the actions and the sections while a plan is applied, and keeps
+ * the DDL section (the slot named `ddl`) mounted, hidden, while it holds
+ * edited DDL that has not run and another section shows.
  */
 const props = withDefaults(
   defineProps<{
@@ -30,6 +37,25 @@ const props = withDefaults(
 const active = defineModel<string>('active', { required: true });
 const emit = defineEmits<{ reload: [] }>();
 const tablistId = useId();
+const editor = inject(OBJECT_EDITOR_CONTEXT, null);
+const busy = computed(() => editor?.busy.value ?? false);
+const notice = computed(() => editor?.notice.value ?? null);
+/** The section whose unsaved text survives a switch to another section. */
+const DDL_SECTION = 'ddl';
+const keepDdl = computed(() => (editor?.ddlDirty.value ?? false) && props.tabs.some((t) => t.id === DDL_SECTION));
+
+// A section can go away (the DDL of an object that turned into a create form): show the first one then.
+watch(
+  () => props.tabs.map((t) => t.id),
+  (ids) => {
+    const first = ids[0];
+    if (first !== undefined && !ids.includes(active.value)) active.value = first;
+  },
+);
+
+function runNoticeAction(): void {
+  notice.value?.action?.run();
+}
 
 function tabId(id: string): string {
   return `${tablistId}-${id}`;
@@ -66,11 +92,45 @@ function onKey(event: KeyboardEvent, index: number): void {
       >{{ subtitle }}</span>
       <span class="grow" />
       <span
+        v-if="editor?.refreshing.value"
+        class="subtitle"
+        role="status"
+      >Reading again</span>
+      <span
         v-if="dirtyText"
         class="pill tone-warning"
       ><span class="dot" />{{ dirtyText }}</span>
-      <slot name="actions" />
+      <fieldset
+        class="contents"
+        :disabled="busy"
+      >
+        <slot name="actions" />
+      </fieldset>
     </header>
+    <div
+      v-if="notice && !loading && !loadError"
+      :class="['notice', 'banner', notice.tone === 'danger' ? 'tone-danger' : 'tone-warning']"
+      role="alert"
+    >
+      <Icon name="warning" /><span class="grow">{{ notice.text }}</span>
+      <button
+        v-if="notice.action"
+        type="button"
+        class="btn compact"
+        :disabled="busy"
+        @click="runNoticeAction"
+      >
+        {{ notice.action.label }}
+      </button>
+      <button
+        v-if="notice.retry"
+        type="button"
+        class="btn compact"
+        @click="emit('reload')"
+      >
+        Retry
+      </button>
+    </div>
     <div
       role="tablist"
       :aria-label="`${kindLabel} sections`"
@@ -121,10 +181,25 @@ function onKey(event: KeyboardEvent, index: number): void {
           Retry
         </button>
       </div>
-      <slot
+      <!-- While a plan applies nothing in the sections may change it or start another one. -->
+      <fieldset
         v-else
-        :name="active"
-      />
+        class="contents"
+        :disabled="busy"
+      >
+        <slot
+          v-if="active !== DDL_SECTION"
+          :name="active"
+        />
+        <!-- Edited DDL that has not run stays mounted while another section shows: switching sections does not drop it. -->
+        <div
+          v-if="active === DDL_SECTION || keepDdl"
+          v-show="active === DDL_SECTION"
+          class="contents"
+        >
+          <slot :name="DDL_SECTION" />
+        </div>
+      </fieldset>
     </div>
   </div>
 </template>
@@ -217,5 +292,22 @@ h1 {
 
 .state {
   margin: 16px;
+}
+
+.banner {
+  margin: 8px 16px 0;
+}
+
+/* Keeps a section mounted; no box of its own, so the section lays out as a child of the body. */
+.contents {
+  display: contents;
+}
+
+/* Groups controls for `disabled` only; no box of its own. */
+fieldset.contents {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
 }
 </style>

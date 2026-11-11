@@ -30,16 +30,17 @@ const status = shallowRef<ServerStatus | null>(null);
 const error = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const result = await serverStatus(props.session.id);
+  async (sessionId) => {
+    const result = await serverStatus(sessionId);
     if (!refresh.alive()) return;
     status.value = result;
     error.value = null;
   },
   10_000,
-  (e) => {
-    error.value = report(e);
+  (e, sessionId) => {
+    error.value = report(e, sessionId);
   },
+  () => props.session.id,
 );
 
 const ROLE_LABELS: Record<ReplicationRole, string> = {

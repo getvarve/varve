@@ -27,6 +27,8 @@ const MAX_HOST = 255;
 const MAX_TIMEOUT_MS = 86_400_000;
 const MAX_INIT_SQL_BYTES = 65_536;
 const MAX_U32 = 4_294_967_295;
+/** Highest Redis logical database number the profile stores (`u16`); the server's own `databases` setting may allow fewer. */
+const MAX_REDIS_DB = 65_535;
 
 const isDigits = (v: string): boolean => /^\d+$/.test(v);
 const inRange = (v: string, min: number, max: number): boolean => isDigits(v) && Number(v) >= min && Number(v) <= max;
@@ -129,7 +131,9 @@ export const connectionFormSchema = z
     if (utf8Length(v.options.initSql) > MAX_INIT_SQL_BYTES) issue(['options', 'initSql'], 'Init SQL can be at most 64 KB.');
     const db = v.options.redisDb.trim();
     if (v.engine === 'redis') {
-      if (!inRange(db, 0, 15)) issue(['options', 'redisDb'], 'Redis database numbers go from 0 to 15 on a default server.');
+      if (!inRange(db, 0, MAX_REDIS_DB)) {
+        issue(['options', 'redisDb'], 'The Redis database number is a whole number from 0 to 65535 (a default server has 0 to 15).');
+      }
     } else if (db !== '' && db !== '0') {
       issue(['options', 'redisDb'], 'A Redis database number only applies to Redis connections.');
     }
@@ -175,7 +179,9 @@ export function toConnectionSubmit(v: ConnectionFormValues): ConnectionSubmit {
     ssh: {
       enabled: sshEnabled,
       host: v.ssh.host.trim(),
-      port: optNumber(v.ssh.port) ?? 22,
+      // Validated only while the tunnel is on: a port left behind in the
+      // switched off tunnel is kept when valid, otherwise the default.
+      port: inRange(v.ssh.port.trim(), 1, 65535) ? Number(v.ssh.port.trim()) : 22,
       username: v.ssh.username.trim(),
       auth: v.ssh.auth,
       keyPath: optText(v.ssh.keyPath),
@@ -201,6 +207,35 @@ export function toConnectionSubmit(v: ConnectionFormValues): ConnectionSubmit {
     tlsPassphrase: usesClientKey && v.tls.passphrase !== '' ? v.tls.passphrase : null,
     saveTlsPassphrase: v.tls.savePassphrase,
   };
+}
+
+/**
+ * What a connection test depends on: everything that decides how and where
+ * it connects, and the secrets typed for it. Name, color, folder and the
+ * settings that only steer the app (environment, destructive confirmation,
+ * system objects) are left out, so changing them keeps a test result.
+ */
+export function connectionTestKey(submit: ConnectionSubmit): string {
+  const { input } = submit;
+  return JSON.stringify({
+    engine: input.engine,
+    host: input.host,
+    port: input.port,
+    database: input.database,
+    username: input.username,
+    tls: input.tls,
+    ssh: input.ssh,
+    options: {
+      readOnly: input.options.readOnly,
+      statementTimeoutMs: input.options.statementTimeoutMs,
+      keepaliveS: input.options.keepaliveS,
+      initSql: input.options.initSql,
+      redisDb: input.options.redisDb,
+    },
+    password: submit.password,
+    sshSecret: submit.sshSecret,
+    tlsPassphrase: submit.tlsPassphrase,
+  });
 }
 
 /** Form values for a new connection. */

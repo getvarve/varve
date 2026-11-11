@@ -62,9 +62,14 @@ export function keyRefusal(key: { columns: string[]; tableColumns: ColumnInfo[] 
 
 const MYSQL_BYTES = new Set(['binary', 'varbinary', 'tinyblob', 'blob', 'mediumblob', 'longblob']);
 
-/** True for MySQL / MariaDB columns that hold bytes; their values are typed as hex. */
+/** The PostgreSQL type a column stores: the base type of a domain, otherwise the column's own type. */
+function pgStoredType(column: ColumnInfo): string {
+  return column.baseType?.[1] ?? column.typeName;
+}
+
+/** True for columns that hold bytes; their values are typed as hex. PostgreSQL also counts a domain over `bytea`. */
 export function isBytesColumn(dialect: GridDialect, column: ColumnInfo): boolean {
-  if (dialect === 'postgres') return column.typeName === 'bytea';
+  if (dialect === 'postgres') return !column.array && pgStoredType(column) === 'bytea';
   return MYSQL_BYTES.has(column.typeName);
 }
 
@@ -74,6 +79,49 @@ export function parseHex(text: string): string | null {
   return /^([0-9a-fA-F]{2})*$/.test(body) ? body.toLowerCase() : null;
 }
 
+/** PostgreSQL types (by `typname`) that have no empty value: numbers, dates and times, booleans, uuid, json, network, geometric and range types. */
+const PG_NO_EMPTY = new Set([
+  'int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'money', 'oid', 'xid', 'xid8', 'cid', 'pg_lsn',
+  'bool', 'bit',
+  'date', 'time', 'timetz', 'timestamp', 'timestamptz', 'interval',
+  'uuid', 'json', 'jsonb', 'jsonpath',
+  'inet', 'cidr', 'macaddr', 'macaddr8',
+  'point', 'line', 'lseg', 'box', 'path', 'polygon', 'circle',
+  'int4range', 'int8range', 'numrange', 'tsrange', 'tstzrange', 'daterange',
+  'int4multirange', 'int8multirange', 'nummultirange', 'tsmultirange', 'tstzmultirange', 'datemultirange',
+  'regclass', 'regtype', 'regproc', 'regprocedure', 'regoper', 'regoperator', 'regnamespace', 'regrole', 'regconfig', 'regdictionary', 'regcollation',
+]);
+
+/** MySQL / MariaDB `DATA_TYPE`s that have no empty value (strict servers refuse `''`, others store 0 or a zero date). */
+const MYSQL_NO_EMPTY = new Set([
+  'tinyint', 'smallint', 'mediumint', 'int', 'integer', 'bigint', 'decimal', 'numeric', 'float', 'double', 'real', 'bit',
+  'date', 'datetime', 'timestamp', 'time', 'year',
+  'json', 'uuid', 'inet4', 'inet6',
+  'geometry', 'point', 'linestring', 'polygon', 'multipoint', 'multilinestring', 'multipolygon', 'geometrycollection', 'geomcollection',
+]);
+
+/**
+ * True when an empty text is not a value of the column's type (numbers,
+ * dates, booleans, uuid, json and the like, and PostgreSQL arrays): an
+ * emptied cell then means NULL. Text, byte, enum and unknown types keep
+ * the empty text, which the server checks.
+ */
+export function emptyMeansNull(dialect: GridDialect, column: ColumnInfo): boolean {
+  if (dialect === 'postgres') return column.array || PG_NO_EMPTY.has(pgStoredType(column));
+  return MYSQL_NO_EMPTY.has(column.typeName);
+}
+
+/**
+ * What an empty Value field of a cell turns into, as a line for the value
+ * editor to show before the change is kept; `null` when the empty text is a
+ * value of the column's type (or is refused, which the editor says itself).
+ */
+export function emptyOutcome(dialect: GridDialect, column: ColumnInfo, newRow: boolean): string | null {
+  if (!emptyMeansNull(dialect, column)) return null;
+  if (newRow) return column.hasDefault ? 'Empty leaves the column out: the server fills in its default.' : 'Empty leaves the column out: it becomes NULL.';
+  return column.nullable ? 'Empty is stored as NULL.' : null;
+}
+
 /** The outcome of reading typed text for a column. */
 export type ParsedCell = { ok: true; cell: CellValue } | { ok: false; message: string };
 
@@ -81,10 +129,22 @@ export type ParsedCell = { ok: true; cell: CellValue } | { ok: false; message: s
  * Turns the text typed into a cell into a `CellValue`. Text is sent as a
  * text value and the server converts it to the column's type (PostgreSQL
  * casts the literal, MySQL converts it), so the server decides what is a
- * valid number or date. MySQL byte columns take hex, `bit` columns a number.
+ * valid number or date. Byte columns take hex and are sent as bytes (a
+ * PostgreSQL `bytea` literal without `\x` would be read as escaped text),
+ * MySQL `bit` columns a number. An emptied cell of a type without an empty
+ * value is NULL, or refused when the column is NOT NULL. In a new row
+ * (`newRow`) it is "not set" instead, answered as `{ kind: 'default' }`: the
+ * INSERT leaves the column out and the server fills in its default (NULL
+ * without one), as for a cell that was never touched.
  */
-export function parseCellText(dialect: GridDialect, column: ColumnInfo, text: string): ParsedCell {
-  if (dialect === 'mysql' && MYSQL_BYTES.has(column.typeName)) {
+export function parseCellText(dialect: GridDialect, column: ColumnInfo, text: string, newRow = false): ParsedCell {
+  if (text === '' && emptyMeansNull(dialect, column)) {
+    if (newRow) return { ok: true, cell: { kind: 'default' } };
+    return column.nullable
+      ? { ok: true, cell: { kind: 'value', value: { t: 'null' } } }
+      : { ok: false, message: `${column.name} needs a value: it cannot be NULL, and ${column.dataType} has no empty value.` };
+  }
+  if (isBytesColumn(dialect, column)) {
     const hex = parseHex(text);
     return hex === null
       ? { ok: false, message: `${column.name} holds bytes: type them as hex, for example \\x0a1b.` }
@@ -99,9 +159,6 @@ export function parseCellText(dialect: GridDialect, column: ColumnInfo, text: st
       return { ok: true, cell: { kind: 'value', value: { t: 'uInt', v: n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n.toString() } } };
     }
     return { ok: false, message: `${column.name} is a bit column: type a number or b'0101'.` };
-  }
-  if (dialect === 'postgres' && column.typeName === 'bytea' && parseHex(text) === null) {
-    return { ok: false, message: `${column.name} holds bytes: type them as hex, for example \\x0a1b.` };
   }
   return { ok: true, cell: { kind: 'value', value: { t: 'text', v: text } } };
 }

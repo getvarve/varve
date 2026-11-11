@@ -42,8 +42,10 @@ use varve_core::Engine;
 use varve_records::{ConnectionProfile, SecretKindName, SshAuthMethod, connect_params};
 use varve_secrets::Secret;
 
-use crate::commands::{CmdError, Services, reusable_secrets};
-use crate::sessions::{SessionGuard, SessionInfo, SessionPurpose, connection_identity};
+use crate::commands::{CmdError, ReadAlready, Services, reusable_secrets};
+use crate::sessions::{
+    SessionError, SessionGuard, SessionInfo, SessionPurpose, connection_identity,
+};
 
 type CmdResult<T> = Result<T, CmdError>;
 
@@ -344,25 +346,44 @@ impl MetadataPool {
             .collect()
     }
 
-    fn forget_typed(&self, connection_id: &str) {
+    /// Forgets the secrets typed for a profile.
+    pub(crate) fn forget_typed(&self, connection_id: &str) {
         if let Ok(mut typed) = self.typed.lock() {
             typed.remove(connection_id);
         }
     }
 
     /// Removes the sessions unused for at least `idle`; returns their ids.
-    fn take_idle(&self, idle: Duration) -> Vec<String> {
+    /// One that `busy` reports in use (a long call runs on it) stays and
+    /// counts as used now. `busy` runs without the pool's lock held.
+    fn take_idle(&self, idle: Duration, busy: impl Fn(&str) -> bool) -> Vec<String> {
+        let candidates: Vec<(MetaKey, String)> = match self.entries.lock() {
+            Ok(map) => map
+                .iter()
+                .filter(|(_, e)| e.last_used.elapsed() >= idle)
+                .map(|(k, e)| (k.clone(), e.session_id.clone()))
+                .collect(),
+            Err(_) => return Vec::new(),
+        };
+        let in_use: Vec<bool> = candidates.iter().map(|(_, id)| busy(id)).collect();
         let Ok(mut map) = self.entries.lock() else {
             return Vec::new();
         };
-        let keys: Vec<MetaKey> = map
-            .iter()
-            .filter(|(_, e)| e.last_used.elapsed() >= idle)
-            .map(|(k, _)| k.clone())
-            .collect();
-        keys.into_iter()
-            .filter_map(|k| map.remove(&k).map(|e| e.session_id))
-            .collect()
+        let mut taken = Vec::new();
+        for ((key, id), in_use) in candidates.into_iter().zip(in_use) {
+            // Only the entry that was checked: it may have been replaced
+            // or used since.
+            let Some(entry) = map.get_mut(&key).filter(|e| e.session_id == id) else {
+                continue;
+            };
+            if in_use {
+                entry.last_used = Instant::now();
+            } else if entry.last_used.elapsed() >= idle {
+                map.remove(&key);
+                taken.push(id);
+            }
+        }
+        taken
     }
 }
 
@@ -423,19 +444,21 @@ impl Services {
                 PoolRole::Admin => SessionPurpose::Admin,
             };
             let typed = self.metadata.typed_for(&profile);
-            let lease = self
-                .tunnels
-                .lease_for(&connect, self.secrets.as_ref(), typed.ssh)
+            let ssh = self.tunnel_secret(&connect, typed.ssh).await?;
+            let lease = self.tunnels.lease_for(&connect, &ReadAlready, ssh).await?;
+            let (password, tls) = self
+                .server_secrets(&connect, typed.password, typed.tls)
                 .await?;
             let params = connect_params(
                 &connect,
-                self.secrets.as_ref(),
-                typed.password,
-                typed.tls,
+                &ReadAlready,
+                password,
+                tls,
                 lease.as_ref().map(|l| l.endpoint()),
             )?;
-            // The secrets were read after the tunnel came up: they must
-            // still be those of the checked profile.
+            // The secrets were read and the tunnel came up while the
+            // profile could change: they must still be those of the
+            // checked profile.
             if self.metadata.edit_generation(&info.connection_id) != generation {
                 continue;
             }
@@ -599,9 +622,32 @@ impl Services {
         self.close_pooled(ids).await;
     }
 
-    /// After a profile was deleted: forgets its typed secrets and its
-    /// decrypted TLS client key, and closes its pooled sessions.
+    /// After a profile was deleted: closes its user sessions (open tabs,
+    /// their transactions, tunnels and listeners) and its pooled sessions,
+    /// and forgets its typed secrets and its decrypted TLS client key.
     pub(crate) async fn profile_deleted(&self, profile: &ConnectionProfile) {
+        // A session being opened holds the profile lock until it is
+        // registered (and then sees the record is gone, see
+        // `open_profile_session`): wait for it, so it is listed below.
+        drop(self.metadata.profile_lock(&profile.id).lock().await);
+        let users: Vec<String> = self
+            .sessions
+            .list()
+            .into_iter()
+            .filter(|s| s.connection_id == profile.id)
+            .map(|s| s.id)
+            .collect();
+        for id in users {
+            match self.close_session(&id).await {
+                Ok(())
+                | Err(CmdError::Session {
+                    error: SessionError::NotFound { .. },
+                }) => {}
+                Err(error) => {
+                    tracing::debug!(%error, "closing a session of a deleted profile");
+                }
+            }
+        }
         self.metadata.forget_typed(&profile.id);
         forget_tls_key(profile);
         let ids = self.metadata.take_profile_sessions(&profile.id);
@@ -610,9 +656,13 @@ impl Services {
 
     /// Closes pooled sessions unused for at least `idle` and returns how
     /// many were closed. The app calls it every minute with
-    /// [`METADATA_IDLE`].
+    /// [`METADATA_IDLE`]. A session a call is running on is not idle,
+    /// however long ago that call fetched it.
     pub async fn close_idle_metadata(&self, idle: Duration) -> usize {
-        let ids = self.metadata.take_idle(idle);
+        let ids = self.metadata.take_idle(idle, |id| {
+            // Locked: a statement runs on it right now.
+            self.sessions.info(id).is_ok() && self.sessions.transaction_state_now(id).is_none()
+        });
         let count = ids.len();
         self.close_pooled(ids).await;
         count
@@ -744,8 +794,39 @@ mod tests {
         ids.sort();
         assert_eq!(ids, ["s1", "s2"]);
         pool.insert(key(None, PoolRole::Admin), "s3".into());
-        assert!(pool.take_idle(Duration::from_secs(3600)).is_empty());
-        assert_eq!(pool.take_idle(Duration::ZERO), ["s3"]);
+        assert!(
+            pool.take_idle(Duration::from_secs(3600), |_| false)
+                .is_empty()
+        );
+        assert_eq!(pool.take_idle(Duration::ZERO, |_| false), ["s3"]);
         assert!(!format!("{pool:?}").contains("pw"));
+    }
+
+    #[test]
+    fn a_session_with_a_long_call_running_is_not_idle() {
+        let pool = MetadataPool::default();
+        let key = |role| MetaKey {
+            connection_id: "p1".into(),
+            identity: "i".into(),
+            database: None,
+            role,
+        };
+        pool.insert(key(PoolRole::Catalog), "running".into());
+        pool.insert(key(PoolRole::Admin), "quiet".into());
+        // Both were fetched long ago; a call still runs on one of them.
+        assert_eq!(
+            pool.take_idle(Duration::ZERO, |id| id == "running"),
+            ["quiet"]
+        );
+        // It stays pooled, and counts as used when the check saw it busy.
+        assert!(
+            pool.take_idle(Duration::from_secs(3600), |_| false)
+                .is_empty()
+        );
+        assert_eq!(
+            pool.get(&key(PoolRole::Catalog)).as_deref(),
+            Some("running")
+        );
+        assert!(pool.get(&key(PoolRole::Admin)).is_none());
     }
 }

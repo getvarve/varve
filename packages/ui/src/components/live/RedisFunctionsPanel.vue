@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, useId, watch } from 'vue';
 import type { CmdError } from '../../api/errors';
 import { redisFunctionPlan, redisFunctions } from '../../api/live';
 import type { FlushMode, FunctionLibrary } from '../../api/live';
@@ -32,6 +32,7 @@ const props = defineProps<{
   tabId?: string | null;
 }>();
 const emit = defineEmits<{ reconnect: [] }>();
+const codeId = useId();
 const report = useReporter(() => props.tabId);
 const toasts = useToasts();
 const plans = useRedisPlan(
@@ -47,17 +48,23 @@ const loading = ref(false);
 
 async function load(): Promise<void> {
   loading.value = true;
+  const sessionId = props.session.id;
   try {
-    libraries.value = await redisFunctions(props.session.id, null, false);
+    libraries.value = await redisFunctions(sessionId, null, false);
     error.value = null;
   } catch (e: unknown) {
-    error.value = report(e);
+    error.value = report(e, sessionId);
     libraries.value = null;
   } finally {
     loading.value = false;
   }
 }
 void load();
+// The panel stays mounted across a reconnect: what it shows was read on the old session, so read it again.
+watch(
+  () => props.session.id,
+  () => void load(),
+);
 
 const unsupported = computed(() => {
   const e = error.value;
@@ -79,14 +86,15 @@ async function select(name: string): Promise<void> {
   code.value = null;
   codeError.value = null;
   const token = codeRequests.next();
+  const sessionId = props.session.id;
   try {
     // The pattern is the exact name; glob characters in it are escaped.
     const pattern = name.replace(/[*?[\]\\]/g, (c) => `\\${c}`);
-    const found = await redisFunctions(props.session.id, pattern, true);
+    const found = await redisFunctions(sessionId, pattern, true);
     if (!codeRequests.isCurrent(token)) return;
     code.value = found.find((l) => l.name === name)?.code ?? '';
   } catch (e: unknown) {
-    if (codeRequests.isCurrent(token)) codeError.value = report(e);
+    if (codeRequests.isCurrent(token)) codeError.value = report(e, sessionId);
   }
 }
 
@@ -118,19 +126,19 @@ function startLoad(fromSelected: boolean): void {
 
 async function previewLoad(): Promise<void> {
   if (loadProblem.value) return;
-  await plans.plan(`Load library ${sourceName.value ?? ''}${replace.value ? ' (replace)' : ''}`, () =>
-    redisFunctionPlan(props.session.id, { kind: 'load', code: source.value, replace: replace.value }),
+  await plans.plan(`Load library ${sourceName.value ?? ''}${replace.value ? ' (replace)' : ''}`, (sessionId) =>
+    redisFunctionPlan(sessionId, { kind: 'load', code: source.value, replace: replace.value }),
   );
 }
 
 async function previewDelete(name: string): Promise<void> {
   mode.value = 'none';
-  await plans.plan(`Delete library ${name}`, () => redisFunctionPlan(props.session.id, { kind: 'delete', library: name }));
+  await plans.plan(`Delete library ${name}`, (sessionId) => redisFunctionPlan(sessionId, { kind: 'delete', library: name }));
 }
 
 async function previewFlush(): Promise<void> {
   mode.value = 'none';
-  await plans.plan('Flush the Lua script cache', () => redisFunctionPlan(props.session.id, { kind: 'scriptFlush', mode: flushMode.value }));
+  await plans.plan('Flush the Lua script cache', (sessionId) => redisFunctionPlan(sessionId, { kind: 'scriptFlush', mode: flushMode.value }));
 }
 
 async function apply(): Promise<void> {
@@ -215,10 +223,10 @@ async function apply(): Promise<void> {
       </div>
       <label
         class="visually-hidden"
-        for="fn-code"
+        :for="codeId"
       >Library code</label>
       <textarea
-        id="fn-code"
+        :id="codeId"
         v-model="source"
         class="textarea code-input"
         rows="10"

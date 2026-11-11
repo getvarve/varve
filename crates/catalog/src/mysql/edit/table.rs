@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use varve_driver::{Dialect, Value};
 
 use super::types::{ColumnDef, IndexDef, IndexKind, IndexMethod, KeyPart, RowPeriod};
-use super::{Plan, Target, fragment, ident, ident_list, invalid, object_name, plain_text};
+use super::{
+    Plan, Target, fragment, ident, ident_list, invalid, object_name, plain_text, table_text,
+};
 use crate::model::CatalogResult;
 use crate::sql;
 
@@ -192,7 +194,7 @@ impl TableConstraint {
                 out.push(' ');
                 out.push_str(&index.parts_sql(t, plan)?);
                 if let Some(comment) = comment {
-                    out.push_str(&format!(" COMMENT {}", plain_text(comment, "a comment")?));
+                    out.push_str(&format!(" COMMENT {}", table_text(comment, "a comment")?));
                 }
                 Ok(out)
             }
@@ -298,8 +300,9 @@ pub struct TableOptions {
     /// Storage engine, for example `InnoDB`, `MyISAM`, `MEMORY`, `Aria`.
     #[serde(default)]
     pub engine: Option<String>,
-    /// Next `AUTO_INCREMENT` value.
-    #[serde(default)]
+    /// Next `AUTO_INCREMENT` value: decimal text or a JSON integer (it can
+    /// pass 2^53, where a JSON number loses precision in the UI).
+    #[serde(default, with = "crate::uint_text::option")]
     pub auto_increment: Option<u64>,
     /// Default character set.
     #[serde(default)]
@@ -434,13 +437,13 @@ impl TableOptions {
         if let Some(dir) = &self.data_directory {
             out.push(format!(
                 "DATA DIRECTORY={}",
-                plain_text(dir, "a directory")?
+                table_text(dir, "a directory")?
             ));
         }
         if let Some(dir) = &self.index_directory {
             out.push(format!(
                 "INDEX DIRECTORY={}",
-                plain_text(dir, "a directory")?
+                table_text(dir, "a directory")?
             ));
         }
         if let Some(value) = self.delay_key_write {
@@ -806,12 +809,12 @@ fn partition_options(
         out.push_str(&format!(" ENGINE={}", ident(engine)?));
     }
     if let Some(comment) = comment {
-        out.push_str(&format!(" COMMENT={}", plain_text(comment, "a comment")?));
+        out.push_str(&format!(" COMMENT={}", table_text(comment, "a comment")?));
     }
     if let Some(dir) = data_directory {
         out.push_str(&format!(
             " DATA DIRECTORY={}",
-            plain_text(dir, "a directory")?
+            table_text(dir, "a directory")?
         ));
     }
     Ok(out)
@@ -1280,6 +1283,47 @@ mod tests {
         }
         let old = plan_json(&mysql(8, 0, 15), ORDERS)?;
         assert_eq!(old.warnings.len(), 1);
+        Ok(())
+    }
+
+    /// `AUTO_INCREMENT` past 2^53 travels as decimal text; a JSON integer
+    /// is still read.
+    #[test]
+    fn auto_increment_travels_as_text() -> CatalogResult<()> {
+        let big = ORDERS.replace(
+            "\"autoIncrement\": 1000",
+            "\"autoIncrement\": \"9007199254740993\"",
+        );
+        let plan = plan_json(&my80(), &big)?;
+        assert!(
+            sql(&plan).contains(" AUTO_INCREMENT=9007199254740993 "),
+            "{}",
+            sql(&plan)
+        );
+        let options: super::TableOptions =
+            serde_json::from_str(r#"{"autoIncrement": 18446744073709551615}"#).map_err(|e| {
+                crate::model::CatalogError::Invalid {
+                    message: e.to_string(),
+                }
+            })?;
+        assert_eq!(options.auto_increment, Some(u64::MAX));
+        let written =
+            serde_json::to_value(&options).map_err(|e| crate::model::CatalogError::Invalid {
+                message: e.to_string(),
+            })?;
+        assert_eq!(written["autoIncrement"], "18446744073709551615");
+        let none: super::TableOptions =
+            serde_json::from_str("{}").map_err(|e| crate::model::CatalogError::Invalid {
+                message: e.to_string(),
+            })?;
+        assert_eq!(none.auto_increment, None);
+        assert!(
+            plan_json(
+                &my80(),
+                &ORDERS.replace("\"autoIncrement\": 1000", "\"autoIncrement\": \"-1\"")
+            )
+            .is_err()
+        );
         Ok(())
     }
 

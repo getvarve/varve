@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId, watch } from 'vue';
 import { catalogEngines } from '../../api/grid';
 import type { MyEngine } from '../../api/grid';
 import { presentError, toCmdError } from '../../api/errors';
+import { latestOnly } from '../../lib/async';
 import { changedProps, collationOf, engineRowLoss, rowFormatFor, rowFormatsOf } from '../../lib/gridDesigner';
 import type { TablePropsDraft } from '../../lib/gridDesigner';
 import Icon from '../common/Icon.vue';
@@ -65,14 +66,25 @@ function addParent(): void {
 const engines = ref<MyEngine[] | null>(null);
 const enginesError = ref<string | null>(null);
 
-onMounted(async () => {
+/** Reads the server's storage engines on the designer's session; only the newest read counts. */
+const engineLoads = latestOnly();
+async function loadEngines(): Promise<void> {
   if (pg.value) return;
+  const token = engineLoads.next();
   try {
-    engines.value = await catalogEngines(ctx.sessionId);
+    const list = await catalogEngines(ctx.sessionId);
+    if (!engineLoads.isCurrent(token)) return;
+    engines.value = list;
+    enginesError.value = null;
   } catch (error: unknown) {
+    if (!engineLoads.isCurrent(token)) return;
     enginesError.value = presentError(toCmdError(error)).message;
   }
-});
+}
+
+onMounted(loadEngines);
+// A reconnect gives the designer a new session: the list (or the error of the session that is gone) is read again on it.
+watch(() => ctx.sessionId, loadEngines);
 
 /** The server's engines, plus the table's own when the server no longer lists it as available. */
 const engineOptions = computed<MyEngine[]>(() => {

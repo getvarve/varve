@@ -5,6 +5,7 @@ import type { Value } from '../../api/sessions';
 import { canReference, editableText, targetOf, textValue } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
 import { cellClass, cellText, fullText, isPlaceholder, placeholderHelp, plainText } from '../../lib/values';
+import { vFocus } from './vFocus';
 
 /**
  * List elements with inline LSET and remove (by the index as read), plus
@@ -16,6 +17,8 @@ const uid = useId();
 const editing = ref<string | null>(null);
 const editText = ref('');
 const newValue = ref('');
+/** Set when a push was asked with an empty element; the explicit buttons then push the empty string. */
+const emptyPush = ref(false);
 
 function tip(value: Value): string {
   return isPlaceholder(value) ? placeholderHelp(value) : fullText(value);
@@ -44,7 +47,13 @@ function commitEdit(item: ListItem): void {
   else props.draft.stage({ op: 'listSet', index: item.index, value: textValue(editText.value), original: item.value });
 }
 
-function push(end: 'head' | 'tail'): void {
+/** Stages the new element; an empty element is only pushed through the explicit "Push empty" buttons. */
+function push(end: 'head' | 'tail', allowEmpty = false): void {
+  if (newValue.value === '' && !allowEmpty) {
+    emptyPush.value = true;
+    return;
+  }
+  emptyPush.value = false;
   props.draft.stage({ op: 'listPush', end, values: [textValue(newValue.value)] });
   newValue.value = '';
 }
@@ -93,9 +102,9 @@ function push(end: 'head' | 'tail'): void {
             <input
               :id="`${uid}-edit-${item.index}`"
               v-model="editText"
+              v-focus
               class="input inline mono"
               spellcheck="false"
-              autofocus
               @keydown.enter.prevent="commitEdit(item)"
               @keydown.escape.prevent.stop="editing = null"
               @blur="commitEdit(item)"
@@ -162,6 +171,8 @@ function push(end: 'head' | 'tail'): void {
         class="input compact mono grow"
         placeholder="New element"
         spellcheck="false"
+        :aria-invalid="emptyPush"
+        :aria-describedby="emptyPush ? `${uid}-empty` : undefined"
       >
       <button
         type="button"
@@ -176,6 +187,27 @@ function push(end: 'head' | 'tail'): void {
       >
         Push right (RPUSH)
       </button>
+      <template v-if="emptyPush && newValue === ''">
+        <span
+          :id="`${uid}-empty`"
+          class="error"
+          role="alert"
+        >Enter an element.</span>
+        <button
+          type="button"
+          class="btn ghost compact"
+          @click="push('head', true)"
+        >
+          Push empty left
+        </button>
+        <button
+          type="button"
+          class="btn ghost compact"
+          @click="push('tail', true)"
+        >
+          Push empty right
+        </button>
+      </template>
     </form>
   </div>
 </template>

@@ -19,6 +19,12 @@ let countResult: Promise<number | null> | number | null = 2;
 const described: string[] = [];
 let objects: Record<string, unknown> = {};
 let enginesFail = false;
+/** The session each `catalog_engines` call was sent on. */
+const engineSessions: string[] = [];
+/** `edit_apply`: plan ids that fail, and what each applied plan changes in `objects`. */
+const applied: string[] = [];
+let failingPlans = new Set<string>();
+let onApplied: (planId: string) => void = () => {};
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (command: string, args: Record<string, unknown>) => {
@@ -31,6 +37,7 @@ vi.mock('@tauri-apps/api/core', () => ({
         return found;
       }
       case 'catalog_engines':
+        engineSessions.push(args.sessionId as string);
         if (enginesFail) throw { kind: 'catalog', error: { kind: 'driver', error: { kind: 'query', message: 'denied', code: null, detail: null, hint: null, position: null } } };
         return [
           { name: 'Aria', default: false, transactions: false, comment: 'Crash-safe tables' },
@@ -44,6 +51,15 @@ vi.mock('@tauri-apps/api/core', () => ({
       case 'execute':
         executed.push(args.sql as string);
         return { results: [{ kind: 'rows', columns: [{ name: 'n', typeName: 'bigint' }], rows: [[{ t: 'int', v: 2 }]], truncated: false }], notices: [], elapsedMs: 1 };
+      case 'edit_apply': {
+        const planId = args.planId as string;
+        if (failingPlans.has(planId)) {
+          throw { kind: 'catalog', error: { kind: 'driver', error: { kind: 'query', message: 'permission denied', code: '42501', detail: null, hint: null, position: null } } };
+        }
+        applied.push(planId);
+        onApplied(planId);
+        return { statements: 1, transactional: true, outputs: [] };
+      }
       case 'edit_plan':
         planned.push(args.change as EngineChange);
         return { planId: `p${planned.length}`, plan: { statements: ['-- planned'], transactional: true, destructive: false, warnings: [] } };
@@ -241,6 +257,10 @@ beforeEach(() => {
   described.length = 0;
   objects = {};
   enginesFail = false;
+  engineSessions.length = 0;
+  applied.length = 0;
+  failingPlans = new Set();
+  onApplied = () => {};
 });
 
 afterEach(() => {
@@ -283,6 +303,16 @@ describe('new partitioned table (PostgreSQL)', () => {
 });
 
 describe('Properties (PostgreSQL)', () => {
+  it('clears the unsaved mark when it unmounts with a draft', async () => {
+    objects = { 'table:orders': pgTable({ unlogged: true }) };
+    const wrapper = await mountDesigner();
+    await openSection(wrapper, 'Properties');
+    await wrapper.findAll<HTMLInputElement>('input[type="checkbox"]').at(0)?.setValue(false);
+    expect(wrapper.emitted('dirty')?.at(-1)).toEqual([true]);
+    wrapper.unmount();
+    expect(wrapper.emitted('dirty')?.at(-1)).toEqual([false]);
+  });
+
   it('says SET LOGGED rewrites the table and saves the property changes', async () => {
     objects = { 'table:orders': pgTable({ unlogged: true, storageParameters: [{ name: 'fillfactor', value: '90' }] }) };
     const wrapper = await mountDesigner();
@@ -352,6 +382,29 @@ describe('Properties (MySQL / MariaDB)', () => {
     await flushPromises();
     expect(wrapper.text()).toContain("The server's engines could not be read");
     expect(wrapper.findAll('input').some((i) => (i.element as HTMLInputElement).value === 'InnoDB')).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('follows the new session after a reconnect: engines are read on it and its read-only flag applies', async () => {
+    enginesFail = true;
+    objects = { 'table:orders': myTable() };
+    const wrapper = await mountDesigner({ engine: 'mysql' });
+    await openSection(wrapper, 'Properties');
+    await flushPromises();
+    expect(engineSessions).toEqual(['s1']);
+    expect(wrapper.text()).toContain("The server's engines could not be read");
+    expect(wrapper.text()).not.toContain('read-only');
+
+    // The tab connected again: a new session, on a connection that was edited to read only meanwhile.
+    enginesFail = false;
+    await wrapper.setProps({ session: { ...session('mysql'), id: 's2', readOnly: true } });
+    await flushPromises();
+    expect(engineSessions).toEqual(['s1', 's2']);
+    expect(wrapper.text()).not.toContain("The server's engines could not be read");
+    const select = wrapper.find<HTMLSelectElement>('select');
+    expect([...select.element.options].map((o) => o.text.trim())).toEqual(['Aria', 'InnoDB (default)', 'MyISAM', 'BLACKHOLE']);
+    expect(select.element.disabled).toBe(true);
+    expect(wrapper.text()).toContain('This connection is read-only');
     wrapper.unmount();
   });
 });
@@ -694,6 +747,70 @@ describe('MySQL / MariaDB subpartitions and REORGANIZE PARTITION', () => {
         systemVersioned: false,
       },
     });
+    wrapper.unmount();
+  });
+});
+
+describe('a save that stops part way', () => {
+  async function editOwnerAndName(wrapper: VueWrapper): Promise<void> {
+    await openSection(wrapper, 'Properties');
+    for (const [label, value] of [['Owner', 'reporting'], ['Name', 'orders_new']] as const) {
+      const field = wrapper.findAll('label').find((l) => l.text() === label);
+      await wrapper.find(`#${field?.attributes('for') ?? ''}`).setValue(value);
+    }
+  }
+
+  /** Clicks a button of the review, which the modal renders in the document body. */
+  async function clickReview(label: RegExp): Promise<void> {
+    const button = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) => label.test(b.textContent?.trim() ?? ''));
+    if (!button) throw new Error(`no review button ${label.source}`);
+    button.click();
+    await flushPromises();
+  }
+
+  async function applyAndClose(): Promise<void> {
+    await clickReview(/^Apply$/);
+    // A failed step leaves the review open with the outcome; closing it reads the table again.
+    await clickReview(/^(Cancel|Close)$/);
+  }
+
+  it('keeps the changes whose steps did not run, and plans only those again', async () => {
+    objects = { 'table:orders': pgTable() };
+    const wrapper = await mountDesigner();
+    await editOwnerAndName(wrapper);
+    await save(wrapper);
+    expect(planned.map((c) => (c.change as { operations: { op: string }[] }).operations.map((o) => o.op))).toEqual([['owner'], ['rename']]);
+    // The owner step runs, the rename fails.
+    failingPlans = new Set(['p2']);
+    onApplied = (planId) => {
+      if (planId === 'p1') objects = { 'table:orders': pgTable({ owner: 'reporting' }) };
+    };
+    described.length = 0;
+    await applyAndClose();
+    expect(applied).toEqual(['p1']);
+    expect(described).toEqual(['table:orders']);
+    expect(wrapper.text()).toContain('the changes that did not run are still in the draft');
+    expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toMatch(/Properties\s*1/);
+    planned.length = 0;
+    await save(wrapper);
+    expect(planned).toEqual([
+      { engine: 'postgres', change: { object: 'table', action: 'alter', name: { schema: 'public', name: 'orders' }, operations: [{ op: 'rename', newName: 'orders_new' }] } },
+    ]);
+    wrapper.unmount();
+  });
+
+  it('keeps the whole draft without reading the table again when the first step fails', async () => {
+    objects = { 'table:orders': pgTable() };
+    const wrapper = await mountDesigner();
+    await editOwnerAndName(wrapper);
+    await save(wrapper);
+    failingPlans = new Set(['p1']);
+    described.length = 0;
+    await applyAndClose();
+    expect(applied).toEqual([]);
+    expect(described).toEqual([]);
+    expect(wrapper.text()).toContain('Nothing was changed; your changes are still in the draft.');
+    expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toMatch(/Properties\s*2/);
     wrapper.unmount();
   });
 });

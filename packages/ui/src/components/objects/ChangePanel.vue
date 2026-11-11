@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
 import type { Engine } from '../../api/records';
 import { useCrossFade } from '../../composables/useCrossFade';
 import { stepsSql } from '../../lib/ddlApply';
+import DropImpactPanel from './DropImpactPanel.vue';
 import PlanPreview from './PlanPreview.vue';
+import { OBJECT_EDITOR_CONTEXT } from './types';
 import type { ChangePlan } from './useChangePlan';
 
 /**
  * The plan preview of an editor in its two modes: saving the form, or
  * dropping the object (with CASCADE where the engine and kind have it).
  * The `drop` slot shows what the drop affects (`DropImpactPanel.vue`) and
- * drop options of the kind. The preview settles in when it appears and
+ * drop options of the kind; left empty in an editor built on
+ * `useObjectEditor` on PostgreSQL, it lists what the drop affects (and what
+ * CASCADE also drops) by itself. The preview settles in when it appears and
  * cross-fades (120ms) when the planned SQL changes.
  */
 const props = withDefaults(
@@ -35,6 +39,9 @@ const cascade = defineModel<boolean>('cascade', { required: true });
 const emit = defineEmits<{ applied: []; cancelDrop: []; reconnect: []; refresh: [] }>();
 
 const offersCascade = computed(() => props.cascadeAvailable ?? props.engine === 'postgres');
+const editor = inject(OBJECT_EDITOR_CONTEXT, null);
+/** The object whose drop impact the default `drop` slot lists. */
+const impactObject = computed(() => (props.engine === 'postgres' ? (editor?.current.value ?? null) : null));
 const label = computed(() => {
   if (props.mode === 'drop') return `Drop ${props.objectName}`;
   if (props.saveLabel) return props.saveLabel;
@@ -74,7 +81,15 @@ useCrossFade(previewEl, () => stepsSql(props.plan.state.steps), 120);
     <slot
       v-if="mode === 'drop'"
       name="drop"
-    />
+    >
+      <DropImpactPanel
+        v-if="editor && impactObject"
+        :session="editor.session.value"
+        :object="impactObject"
+        :cascade="editor.cascade.value"
+        :report-error="editor.reportError"
+      />
+    </slot>
     <PlanPreview
       ref="preview"
       class="plan-in"

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, useId, watch } from 'vue';
 import { presentError } from '../../api/errors';
 import type { CmdError } from '../../api/errors';
 import { galeraStatus, serverVariables, variableChangeApply, variableChangePlan } from '../../api/live';
 import type { EditPlan, EditScope, GaleraStatus, ServerVariable, VariableChange } from '../../api/live';
+import { readableStatements } from '../../api/plans';
 import type { SessionInfo } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
 import { useToasts } from '../../composables/useToasts';
@@ -14,6 +15,7 @@ import Icon from '../common/Icon.vue';
 import GaleraSummary from './GaleraSummary.vue';
 import LiveError from './LiveError.vue';
 import { useReporter } from './report';
+import { maskSecret, shownStatements } from './variableSecrets';
 
 /**
  * Server variables (design: ServerVariables): search, category, "changed
@@ -45,17 +47,18 @@ const galera = shallowRef<GaleraStatus | null>(null);
 
 async function load(): Promise<void> {
   loading.value = true;
+  const sessionId = props.session.id;
   try {
-    vars.value = await serverVariables(props.session.id);
+    vars.value = await serverVariables(sessionId);
     error.value = null;
   } catch (e: unknown) {
-    error.value = report(e);
+    error.value = report(e, sessionId);
   } finally {
     loading.value = false;
   }
   if (engine.value === 'mariadb') {
     try {
-      galera.value = await galeraStatus(props.session.id);
+      galera.value = await galeraStatus(sessionId);
     } catch {
       // Galera is optional context; the variables are the panel. A refusal leaves the side panel out.
       galera.value = null;
@@ -91,6 +94,8 @@ interface Editor {
   action: 'set' | 'reset';
   scope: EditScope;
   value: string;
+  /** The variable holds a secret: its value is typed hidden and masked wherever the plan is shown. */
+  secret: boolean;
   /** Planned on the server: the preview. */
   planned: { planId: string; plan: EditPlan; change: VariableChange } | null;
   error: string;
@@ -115,7 +120,7 @@ function openEditor(v: ServerVariable): void {
   // A masked value holds a secret: never prefill it.
   let current = v.masked ? '' : ((scope === 'session' ? v.sessionValue : v.globalValue) ?? v.value ?? '');
   if (v.varType === 'boolean') current = ['on', 'true', 'yes', '1'].includes(current.trim().toLowerCase()) ? 'on' : 'off';
-  editor.value = { name: v.name, action: 'set', scope, value: current, planned: null, error: '', busy: false };
+  editor.value = { name: v.name, action: 'set', scope, value: current, secret: v.masked, planned: null, error: '', busy: false };
 }
 
 function closeEditor(): void {
@@ -130,6 +135,16 @@ function touched(): void {
   }
 }
 
+// The panel stays mounted across a reconnect: the values were read on the old session, and a
+// preview was planned there. Read the variables again; the open form stays, Preview plans anew.
+watch(
+  () => props.session.id,
+  () => {
+    touched();
+    void load();
+  },
+);
+
 const valueProblem = computed(() => {
   const e = editor.value;
   const v = editing.value;
@@ -137,17 +152,25 @@ const valueProblem = computed(() => {
   return checkVariableValue(v, e.value);
 });
 
+/** A failure as the editor shows it: the value of a secret variable never comes back in clear text. */
+function serverMessage(message: string, secret: boolean, typed: string): string {
+  return secret ? maskSecret(message, typed) : message;
+}
+
 async function preview(): Promise<void> {
   const e = editor.value;
   if (!e || e.busy || valueProblem.value) return;
   const change: VariableChange = e.action === 'set' ? { action: 'set', scope: e.scope, value: e.value } : { action: 'reset', scope: e.scope };
   e.busy = true;
   e.error = '';
+  // The value this request sends: a server that refuses it repeats it in its message.
+  const typed = e.value;
+  const sessionId = props.session.id;
   try {
-    const planned = await variableChangePlan(props.session.id, e.name, change);
+    const planned = await variableChangePlan(sessionId, e.name, change);
     if (editor.value === e) e.planned = { ...planned, change };
   } catch (err: unknown) {
-    e.error = presentError(report(err)).message;
+    e.error = serverMessage(presentError(report(err, sessionId)).message, e.secret, typed);
   } finally {
     e.busy = false;
   }
@@ -157,26 +180,35 @@ async function apply(): Promise<void> {
   const e = editor.value;
   if (!e?.planned || e.busy) return;
   const planId = e.planned.planId;
+  // The value the plan was made with (any change to the form drops the plan).
+  const typed = e.planned.change.action === 'set' ? e.planned.change.value : '';
   e.busy = true;
   e.error = '';
+  const sessionId = props.session.id;
   try {
     const done = await runWithConfirmation(
       async (confirmed) => {
-        await variableChangeApply(props.session.id, planId, confirmed);
+        await variableChangeApply(sessionId, planId, confirmed);
         return true;
       },
-      (request) => dialogs.askDestructive({ connectionName: props.connectionName, environment: request.environment, statements: request.statements }),
+      (request) =>
+        dialogs.askDestructive({
+          connectionName: props.connectionName,
+          environment: request.environment,
+          statements: shownStatements(request.statements, e.secret),
+        }),
     );
     if (done === null) return;
-    toasts.push('success', `${e.name} changed`, e.planned.plan.statements.join(';\n'));
+    // A secret is never repeated on screen: the toast then only names the variable.
+    toasts.push('success', `${e.name} changed`, e.secret ? '' : readableStatements(e.planned.plan).join(';\n'));
     editor.value = null;
     await load();
   } catch (err: unknown) {
     // The server takes the plan when it starts running it, so after any
     // failure the preview is spent: drop it, and Preview plans again.
-    const p = presentError(report(err));
+    const p = presentError(report(err, sessionId));
     e.planned = null;
-    e.error = `${p.detail ? `${p.message} (${p.detail})` : p.message} Preview again to retry.`;
+    e.error = `${serverMessage(p.detail ? `${p.message} (${p.detail})` : p.message, e.secret, typed)} Preview again to retry.`;
   } finally {
     e.busy = false;
   }
@@ -209,8 +241,11 @@ const scopeNote = computed(() => {
   return '';
 });
 
+// Per instance: two variables tabs can be mounted at once.
+const uid = useId();
+
 function inputId(name: string): string {
-  return `sv-edit-${name.replace(/[^\w-]/g, '_')}`;
+  return `${uid}-sv-edit-${name.replace(/[^\w-]/g, '_')}`;
 }
 </script>
 
@@ -483,8 +518,14 @@ function inputId(name: string): string {
                       v-if="editor.planned"
                       class="preview"
                     >
-                      <span class="label">Preview</span>
-                      <pre class="code">{{ editor.planned.plan.statements.join(';\n') }};</pre>
+                      <div class="preview-head">
+                        <span class="label">Preview</span>
+                        <span
+                          v-if="editor.secret"
+                          class="pill tone-neutral"
+                        ><Icon name="lock" />Secret masked</span>
+                      </div>
+                      <pre class="code">{{ shownStatements(readableStatements(editor.planned.plan), editor.secret).join(';\n') }};</pre>
                       <ul
                         v-if="editor.planned.plan.warnings.length > 0"
                         class="warnings"
@@ -647,6 +688,12 @@ function inputId(name: string): string {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .warnings {

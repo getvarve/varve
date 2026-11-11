@@ -14,7 +14,7 @@ const props = defineProps<{
   current: ObjectRef | null;
   /** Bumped by the editor after a change so the list reloads. */
   revision: number;
-  reportError: ((error: unknown) => void) | null;
+  reportError: ((error: unknown, sessionId: string) => void) | null;
 }>();
 const emit = defineEmits<{ openObject: [object: ObjectRef]; createObject: [kind: ObjectKind, container: NewObjectContainer] }>();
 
@@ -33,14 +33,15 @@ const newKind = ref<ObjectKind>('enumType');
 async function load(): Promise<void> {
   failed.value = false;
   const next: Partial<Record<ObjectKind, ObjectSummary[]>> = {};
+  const sessionId = props.session.id;
   try {
     for (const g of GROUPS) {
-      next[g.kind] = await catalogList(props.session.id, { database: props.database, schema: props.schema, parent: null }, g.kind);
+      next[g.kind] = await catalogList(sessionId, { database: props.database, schema: props.schema, parent: null }, g.kind);
     }
     items.value = next;
   } catch (error: unknown) {
     failed.value = true;
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
   }
 }
 

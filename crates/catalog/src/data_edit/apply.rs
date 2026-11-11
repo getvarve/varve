@@ -22,21 +22,22 @@ use crate::rows::run;
 /// - On success the written rows come back as stored (defaults, generated
 ///   and identity values filled in), one entry per change.
 ///
-/// The session must not be inside a transaction: on PostgreSQL and MariaDB
-/// an open transaction is detected and refused with
-/// [`CatalogError::Invalid`]; MySQL has no way to tell, and its
-/// `START TRANSACTION` commits an open transaction implicitly. The future
-/// must run to completion: dropping it midway leaves the transaction open
-/// on the session.
+/// The session must not be inside a transaction (MySQL's and MariaDB's
+/// `START TRANSACTION` would commit it implicitly, PostgreSQL would nest
+/// the grid's work in it): an open transaction is refused with
+/// [`CatalogError::Invalid`], and so is a MySQL session whose transaction
+/// state cannot be read. The future must run to completion: dropping it
+/// midway leaves the transaction open on the session.
 ///
 /// # Errors
 ///
 /// [`CatalogError::Invalid`] when the plan was made for another engine or
-/// the session has an open transaction; [`CatalogError::Driver`] for a
+/// the session has (or may have) an open transaction; [`CatalogError::Driver`] for a
 /// read-only session (the driver's or server's refusal, after rolling
 /// back), a lost connection, a cancel or timeout, and for failures of the
-/// transaction statements themselves; [`CatalogError::Unexpected`] when a
-/// written row cannot be read back.
+/// transaction statements themselves; [`CatalogError::Unexpected`] when
+/// reading a written row back finds more than one row. A row the read back
+/// does not find is returned without values (`row: None`).
 pub async fn apply(
     session: &dyn Session,
     server: &ServerInfo,
@@ -116,25 +117,84 @@ fn fatal(error: &DriverError) -> bool {
 }
 
 async fn refuse_open_transaction(session: &dyn Session, engine: Engine) -> CatalogResult<()> {
-    // PostgreSQL: outside a transaction block each statement is its own
-    // transaction, so its start time is the statement's start time.
-    let check = match engine {
-        Engine::Postgres => {
-            "SELECT pg_catalog.transaction_timestamp() OPERATOR(pg_catalog.<>) \
-             pg_catalog.statement_timestamp() AS open"
-        }
-        Engine::Mariadb => "SELECT @@in_transaction AS open",
-        Engine::Mysql | Engine::Redis => return Ok(()),
+    // The server's own status flag from the last reply (PostgreSQL
+    // ReadyForQuery, MySQL and MariaDB SERVER_STATUS_IN_TRANS): no round
+    // trip and no privilege. The queries are only the fallback.
+    let open = match session.in_transaction() {
+        Some(open) => Some(open),
+        None => query_open_transaction(session, engine).await?,
     };
-    let rows = crate::rows::query(session, check).await?;
-    if rows.single("the transaction state")?.bool("open")? == Some(true) {
-        return Err(CatalogError::Invalid {
+    match open {
+        Some(false) => Ok(()),
+        Some(true) => Err(CatalogError::Invalid {
             message: "the session has an open transaction; commit or roll it back before saving \
                       grid changes"
                 .into(),
-        });
+        }),
+        // Only MySQL ends up here. Its START TRANSACTION would commit an
+        // open transaction without a word, so an unknown state is refused.
+        None => Err(CatalogError::Invalid {
+            message: "cannot tell whether the session has an open transaction, and saving grid \
+                      changes would commit it; commit or roll back, then try again on a new \
+                      session"
+                .into(),
+        }),
     }
-    Ok(())
+}
+
+/// Asks the server whether the session is inside a transaction. `None`
+/// when no query could tell (MySQL without access to `INNODB_TRX` and no
+/// transaction in the Performance Schema).
+async fn query_open_transaction(
+    session: &dyn Session,
+    engine: Engine,
+) -> CatalogResult<Option<bool>> {
+    // Each query with whether its "no" settles the question.
+    let queries: &[(&str, bool)] = match engine {
+        // Outside a transaction block each statement is its own
+        // transaction, so its start time is the statement's start time.
+        Engine::Postgres => &[(
+            "SELECT pg_catalog.transaction_timestamp() OPERATOR(pg_catalog.<>) \
+             pg_catalog.statement_timestamp() AS open",
+            true,
+        )],
+        Engine::Mariadb => &[("SELECT @@in_transaction AS open", true)],
+        // MySQL has no session variable for it. The Performance Schema
+        // shows the thread's explicit transaction at once, but its table is
+        // also empty when the Performance Schema is off or does not record
+        // transactions (the default on MySQL 5.7), so only its "yes"
+        // counts. INNODB_TRX (needs PROCESS) is refreshed only every 0.1 s,
+        // so it comes second; its answer is final.
+        Engine::Mysql => &[
+            (
+                "SELECT COUNT(*) > 0 AS open FROM performance_schema.events_transactions_current t \
+                 JOIN performance_schema.threads th ON th.THREAD_ID = t.THREAD_ID \
+                 WHERE th.PROCESSLIST_ID = CONNECTION_ID() AND t.STATE = 'ACTIVE' \
+                 AND t.AUTOCOMMIT = 'NO'",
+                false,
+            ),
+            (
+                "SELECT COUNT(*) > 0 AS open FROM information_schema.INNODB_TRX \
+                 WHERE trx_mysql_thread_id = CONNECTION_ID()",
+                true,
+            ),
+        ],
+        // Redis plans are refused before this.
+        Engine::Redis => return Ok(None),
+    };
+    for (sql, no_settles) in queries {
+        match crate::rows::query(session, sql).await {
+            Ok(rows) => match rows.single("the transaction state")?.bool("open")? {
+                Some(false) if !no_settles => {}
+                answer => return Ok(answer),
+            },
+            // A missing table or privilege on MySQL: try the next query.
+            Err(CatalogError::Driver { error })
+                if engine == Engine::Mysql && error.kind != ErrorKind::ConnectionLost => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
 }
 
 async fn rollback(session: &dyn Session, change: usize) -> CatalogResult<()> {
@@ -295,6 +355,11 @@ async fn run_change(session: &dyn Session, change: &PlannedChange) -> Result<Ste
     if let Some(refresh) = &change.refresh {
         match statement(session, refresh).await? {
             Answer::Rows(found, 1) => row = Some(found),
+            // The server accepted the write but stored a key other than the
+            // literal (fractional seconds cut, a DECIMAL rounded, a trigger
+            // that rewrote the key, trailing spaces in a PAD SPACE key): the
+            // row is written, it just cannot be found by what was typed.
+            Answer::Rows(_, 0) => row = None,
             Answer::Rows(_, n) => {
                 return Err(unexpected(
                     change,
@@ -313,4 +378,274 @@ async fn run_change(session: &dyn Session, change: &PlannedChange) -> Result<Ste
         row = None;
     }
     Ok(Step::Done(row))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use varve_driver::{CancelHandle, Column, ExecOptions, ExecOutput};
+
+    use super::*;
+
+    /// A session that answers each statement with the next scripted reply
+    /// and records what it ran.
+    struct Scripted {
+        server: ServerInfo,
+        in_transaction: Option<bool>,
+        replies: Mutex<Vec<Result<StatementResult, DriverError>>>,
+        ran: Mutex<Vec<String>>,
+    }
+
+    struct NoCancel;
+
+    #[async_trait::async_trait]
+    impl CancelHandle for NoCancel {
+        async fn cancel(&self) -> Result<(), DriverError> {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Session for Scripted {
+        fn server_info(&self) -> &ServerInfo {
+            &self.server
+        }
+
+        fn cancel_handle(&self) -> Arc<dyn CancelHandle> {
+            Arc::new(NoCancel)
+        }
+
+        async fn execute(
+            &self,
+            sql: &str,
+            _options: &ExecOptions,
+        ) -> Result<ExecOutput, DriverError> {
+            self.ran
+                .lock()
+                .map_err(|_| poisoned())?
+                .push(sql.to_owned());
+            let mut replies = self.replies.lock().map_err(|_| poisoned())?;
+            if replies.is_empty() {
+                return Err(DriverError::new(ErrorKind::Query, "no scripted reply"));
+            }
+            replies.remove(0).map(|result| ExecOutput {
+                results: vec![result],
+                notices: vec![],
+                elapsed_ms: 0,
+            })
+        }
+
+        fn in_transaction(&self) -> Option<bool> {
+            self.in_transaction
+        }
+
+        async fn ping(&self) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        async fn close(self: Box<Self>) -> Result<(), DriverError> {
+            Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    fn poisoned() -> DriverError {
+        DriverError::new(ErrorKind::Protocol, "poisoned")
+    }
+
+    fn mysql_session(
+        in_transaction: Option<bool>,
+        replies: Vec<Result<StatementResult, DriverError>>,
+    ) -> Scripted {
+        Scripted {
+            server: ServerInfo {
+                engine: Engine::Mysql,
+                version: "8.0.40".into(),
+                major: 8,
+                minor: 0,
+                patch: Some(40),
+            },
+            in_transaction,
+            replies: Mutex::new(replies),
+            ran: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn rows(columns: &[&str], data: Vec<Vec<Value>>) -> Result<StatementResult, DriverError> {
+        Ok(StatementResult::Rows {
+            columns: columns
+                .iter()
+                .map(|c| Column {
+                    name: (*c).into(),
+                    type_name: "bigint".into(),
+                })
+                .collect(),
+            rows: data,
+            truncated: false,
+        })
+    }
+
+    fn ok(rows_affected: u64) -> Result<StatementResult, DriverError> {
+        Ok(StatementResult::Command {
+            tag: "OK".into(),
+            rows_affected: Some(rows_affected),
+        })
+    }
+
+    fn denied() -> Result<StatementResult, DriverError> {
+        Err(DriverError::new(ErrorKind::Query, "access denied").with_code("1142"))
+    }
+
+    fn insert_plan() -> RowEditPlan {
+        RowEditPlan {
+            engine: Engine::Mysql,
+            changes: vec![PlannedChange {
+                change: 0,
+                op: ChangeOp::Insert,
+                lock: None,
+                statement: "INSERT INTO `d`.`t` (`at`) VALUES ('2026-01-01 10:00:00.123456')"
+                    .into(),
+                returns_row: false,
+                refresh: Some(
+                    "SELECT * FROM `d`.`t` WHERE `at` = '2026-01-01 10:00:00.123456'".into(),
+                ),
+                checks_original: false,
+            }],
+            warnings: Vec::new(),
+            has_expressions: false,
+        }
+    }
+
+    fn ran(session: &Scripted) -> Vec<String> {
+        session.ran.lock().map(|r| r.clone()).unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn mysql_refuses_an_open_transaction_from_the_status_flag() {
+        let session = mysql_session(Some(true), vec![]);
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Invalid { .. })),
+            "{result:?}"
+        );
+        assert!(ran(&session).is_empty());
+    }
+
+    #[tokio::test]
+    async fn mysql_without_the_flag_asks_the_server_and_refuses_an_open_transaction() {
+        // The Performance Schema is not readable; INNODB_TRX shows the
+        // transaction.
+        let session = mysql_session(
+            None,
+            vec![denied(), rows(&["open"], vec![vec![Value::Int(1)]])],
+        );
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Invalid { .. })),
+            "{result:?}"
+        );
+        let ran = ran(&session);
+        assert_eq!(ran.len(), 2);
+        assert!(ran.iter().all(|sql| !sql.contains("START TRANSACTION")));
+    }
+
+    #[tokio::test]
+    async fn an_empty_performance_schema_does_not_prove_there_is_no_transaction()
+    -> CatalogResult<()> {
+        let none = || rows(&["open"], vec![vec![Value::Int(0)]]);
+        // The Performance Schema records no transactions; INNODB_TRX shows one.
+        let session = mysql_session(
+            None,
+            vec![none(), rows(&["open"], vec![vec![Value::Int(1)]])],
+        );
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Invalid { .. })),
+            "{result:?}"
+        );
+        assert_eq!(ran(&session).len(), 2);
+        // INNODB_TRX is not readable either: the state is unknown.
+        let session = mysql_session(None, vec![none(), denied()]);
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Invalid { .. })),
+            "{result:?}"
+        );
+        assert_eq!(ran(&session).len(), 2);
+        // Both say there is none: the save goes ahead.
+        let session = mysql_session(
+            None,
+            vec![
+                none(),
+                none(),
+                ok(0),
+                ok(1),
+                rows(&["id", "at"], vec![]),
+                ok(0),
+            ],
+        );
+        apply(&session, &session.server.clone(), &insert_plan()).await?;
+        let ran = ran(&session);
+        assert!(ran.iter().any(|sql| sql.contains("START TRANSACTION")));
+        assert_eq!(ran.last().map(String::as_str), Some("COMMIT"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn mysql_refuses_when_the_transaction_state_is_unknown() {
+        let session = mysql_session(None, vec![denied(), denied()]);
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Invalid { .. })),
+            "{result:?}"
+        );
+        assert!(
+            ran(&session)
+                .iter()
+                .all(|sql| !sql.contains("START TRANSACTION"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_row_the_read_back_does_not_find_is_saved_without_values() -> CatalogResult<()> {
+        // The column keeps fewer fractional digits than were typed, so the
+        // read back by the typed value finds nothing.
+        let session = mysql_session(
+            Some(false),
+            vec![ok(0), ok(1), rows(&["id", "at"], vec![]), ok(0)],
+        );
+        let outcome = apply(&session, &session.server.clone(), &insert_plan()).await?;
+        let ApplyOutcome::Applied { rows } = outcome else {
+            return Err(CatalogError::Unexpected {
+                message: format!("expected applied, got {outcome:?}"),
+            });
+        };
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows.first().and_then(|r| r.row.clone()), None);
+        assert_eq!(ran(&session).last().map(String::as_str), Some("COMMIT"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn more_than_one_row_read_back_still_rolls_back() {
+        let session = mysql_session(
+            Some(false),
+            vec![
+                ok(0),
+                ok(1),
+                rows(&["id"], vec![vec![Value::Int(1)], vec![Value::Int(2)]]),
+                ok(0),
+            ],
+        );
+        let result = apply(&session, &session.server.clone(), &insert_plan()).await;
+        assert!(
+            matches!(result, Err(CatalogError::Unexpected { .. })),
+            "{result:?}"
+        );
+        assert_eq!(ran(&session).last().map(String::as_str), Some("ROLLBACK"));
+    }
 }

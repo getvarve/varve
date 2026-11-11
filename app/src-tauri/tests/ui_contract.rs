@@ -35,7 +35,7 @@ use varve_app::m2::editors::{EditApplied, EngineChange};
 use varve_app::m2::impact::DropImpact;
 use varve_app::m2::live_redis::{ConfigRequest, FunctionRequest, RedisPlanView};
 use varve_app::m2::notify::{NotifyBatch, NotifyMessage, NotifyState, NotifyStatus};
-use varve_app::m2::plans::Planned;
+use varve_app::m2::plans::{EditPlanView, Planned};
 use varve_app::m2::pubsub::{PubSubEvent, PubSubMessage, PubSubNames, PubSubSubscriptionInfo};
 use varve_app::m2::redis_edit::RedisEditRequest;
 use varve_app::mcp::McpStatus;
@@ -108,7 +108,7 @@ fn roundtrip(name: &str, v: J) -> Result<J, String> {
         "UpdateCheck" => rt::<UpdateCheck>(v),
         "UpdateProgress" => rt::<UpdateProgress>(v),
         "ObjectDetails" => rt::<ObjectDetails>(v),
-        "EditPlan" => rt::<EditPlan>(v),
+        "EditPlanView" => rt::<EditPlanView>(v),
         "EngineChange" => rt::<EngineChange>(v),
         "ExplainCapabilities" => rt::<ExplainCapabilities>(v),
         "ExplainOptions" => rt::<ExplainOptions>(v),
@@ -249,16 +249,37 @@ fn constructed() -> TestResult<Vec<(String, &'static str, J)>> {
             })?,
         ),
         (
-            "Planned<EditPlan>".into(),
+            "Planned<EditPlanView>".into(),
             "ddl.Planned<ddl.EditPlan>",
             to_json(&Planned {
                 plan_id: "p5".into(),
-                plan: EditPlan {
+                plan: EditPlanView::from(EditPlan {
                     statements: vec!["DROP INDEX \"s\".\"i\"".into()],
                     transactional: false,
                     destructive: true,
                     warnings: vec![],
-                },
+                }),
+            })?,
+        ),
+        // A MySQL statement built at run time: five statements run, the
+        // preview shows the one ALTER.
+        (
+            "Planned<EditPlanView>.runTime".into(),
+            "ddl.Planned<ddl.EditPlan>",
+            to_json(&Planned {
+                plan_id: "p6".into(),
+                plan: EditPlanView::from(EditPlan {
+                    statements: vec![
+                        "SET @varve_ddl = CONCAT(X'414C544552')".into(),
+                        "PREPARE varve_ddl FROM @varve_ddl".into(),
+                        "SET @varve_ddl = NULL".into(),
+                        "EXECUTE varve_ddl /* ALTER TABLE `t` COMMENT='a\\\\b' */".into(),
+                        "DEALLOCATE PREPARE varve_ddl".into(),
+                    ],
+                    transactional: false,
+                    destructive: false,
+                    warnings: vec!["a comment holds a backslash".into()],
+                }),
             })?,
         ),
         (

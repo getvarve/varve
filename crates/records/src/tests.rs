@@ -333,6 +333,109 @@ fn deleting_a_folder_moves_contents_to_the_parent_by_default() -> TestResult {
     Ok(())
 }
 
+fn query_in(folder: Option<&str>, name: &str) -> SavedQueryInput {
+    SavedQueryInput {
+        folder_id: folder.map(str::to_string),
+        connection_id: None,
+        database: None,
+        name: name.into(),
+        sql: "select 1".into(),
+        tags: vec![],
+    }
+}
+
+fn connection_in(folder: Option<&str>, name: &str) -> ConnectionInput {
+    ConnectionInput {
+        folder_id: folder.map(str::to_string),
+        ..pg(name)
+    }
+}
+
+#[test]
+fn moved_contents_follow_the_parents_own_items() -> TestResult {
+    let r = records()?;
+    let top = r.create_folder(WS, None, "Top", None)?;
+    let t = Some(top.id.as_str());
+    // Names sort the other way round, so only sort_order can give the
+    // expected order.
+    let a = r.create_connection(WS, &connection_in(t, "Z first"))?;
+    let b = r.create_connection(WS, &connection_in(t, "Y second"))?;
+    let qa = r.create_query(WS, &query_in(t, "Z first"))?;
+    let fa = r.create_folder(WS, t, "Z first", None)?;
+    let inner = r.create_folder(WS, t, "Inner", None)?;
+    let i = Some(inner.id.as_str());
+    let x = r.create_connection(WS, &connection_in(i, "B third"))?;
+    let y = r.create_connection(WS, &connection_in(i, "A fourth"))?;
+    let qx = r.create_query(WS, &query_in(i, "A second"))?;
+    let fx = r.create_folder(WS, i, "A second", None)?;
+
+    r.delete_folder(&inner.id, FolderDeleteMode::MoveContentsToParent)?;
+    let orders_of = |ids: &[&str]| -> Result<Vec<i64>, RecordError> {
+        ids.iter()
+            .map(|id| Ok(r.connection(id)?.sort_order))
+            .collect()
+    };
+    let orders = orders_of(&[&a.id, &b.id, &x.id, &y.id])?;
+    assert!(
+        orders.windows(2).all(|w| w[0] < w[1]),
+        "connections out of order: {orders:?}"
+    );
+    let in_top: Vec<String> = r
+        .connections(WS)?
+        .into_iter()
+        .filter(|c| c.folder_id.as_deref() == t)
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(in_top, ["Z first", "Y second", "B third", "A fourth"]);
+    assert!(r.query(&qa.id)?.sort_order < r.query(&qx.id)?.sort_order);
+    assert!(r.folder(&fa.id)?.sort_order < r.folder(&fx.id)?.sort_order);
+    Ok(())
+}
+
+#[test]
+fn editing_the_folder_of_a_record_puts_it_last_there() -> TestResult {
+    let r = records()?;
+    let target = r.create_folder(WS, None, "Target", None)?;
+    let t = Some(target.id.as_str());
+    let first = r.create_connection(WS, &connection_in(t, "B"))?;
+    let second = r.create_connection(WS, &connection_in(t, "C"))?;
+    let moving = r.create_connection(WS, &connection_in(None, "A"))?;
+    let stays = r.create_connection(WS, &connection_in(None, "D"))?;
+
+    let moved = r.update_connection(&moving.id, &connection_in(t, "A"))?;
+    assert!(moved.sort_order > r.connection(&second.id)?.sort_order);
+    assert!(r.connection(&first.id)?.sort_order < r.connection(&second.id)?.sort_order);
+    // Same folder: the order is kept.
+    let edited = r.update_connection(&stays.id, &connection_in(None, "D renamed"))?;
+    assert_eq!(edited.sort_order, stays.sort_order);
+
+    let q1 = r.create_query(WS, &query_in(t, "B"))?;
+    let q2 = r.create_query(WS, &query_in(None, "A"))?;
+    let moved = r.update_query(&q2.id, &query_in(t, "A"))?;
+    assert!(moved.sort_order > q1.sort_order);
+    let kept = r.update_query(&q1.id, &query_in(t, "B renamed"))?;
+    assert_eq!(kept.sort_order, q1.sort_order);
+    Ok(())
+}
+
+#[test]
+fn redis_database_numbers_above_fifteen_are_accepted() -> TestResult {
+    let r = records()?;
+    for db in [16_u16, 63, u16::MAX] {
+        let mut input = redis("");
+        input.options.init_sql = None;
+        input.options.redis_db = db;
+        assert_eq!(r.create_connection(WS, &input)?.options.redis_db, db);
+    }
+    let mut pg_with_db = pg("x");
+    pg_with_db.options.redis_db = 16;
+    assert!(matches!(
+        r.create_connection(WS, &pg_with_db),
+        Err(RecordError::Invalid(m)) if m.contains("only applies to Redis")
+    ));
+    Ok(())
+}
+
 #[test]
 fn deleting_a_folder_with_contents_removes_everything_below_it() -> TestResult {
     let r = records()?;
@@ -422,6 +525,46 @@ fn reorder_requires_siblings() -> TestResult {
         r.reorder(ReorderKind::Connections, &[a.id, c.id]),
         Err(RecordError::Invalid(_))
     ));
+    Ok(())
+}
+
+/// A keychain that cannot be reached (no Secret Service running).
+struct UnreachableKeychain;
+
+impl SecretStore for UnreachableKeychain {
+    fn set(&self, _: &SecretKey, _: &Secret) -> Result<(), varve_secrets::SecretError> {
+        Err(varve_secrets::SecretError::Unavailable("no store".into()))
+    }
+
+    fn get(&self, _: &SecretKey) -> Result<Option<Secret>, varve_secrets::SecretError> {
+        Err(varve_secrets::SecretError::Unavailable("no store".into()))
+    }
+
+    fn delete(&self, _: &SecretKey) -> Result<(), varve_secrets::SecretError> {
+        Err(varve_secrets::SecretError::Unavailable("no store".into()))
+    }
+}
+
+#[test]
+fn an_unreachable_keychain_is_reported_as_such() -> TestResult {
+    let r = records()?;
+    let profile = r.create_connection(WS, &pg("Saved"))?;
+    let profile = r.set_saved_secrets(&profile.id, &[SecretKindName::DbPassword])?;
+    match connect_params(&profile, &UnreachableKeychain, None, None, None) {
+        Err(RecordError::KeychainUnavailable(message)) => {
+            assert!(message.contains("not available"), "{message}");
+        }
+        other => panic!("expected an unavailable keychain, got {other:?}"),
+    }
+    // A typed password does not need the keychain.
+    let params = connect_params(
+        &profile,
+        &UnreachableKeychain,
+        Some(Secret::new("typed".into())),
+        None,
+        None,
+    )?;
+    assert_eq!(params.password.as_ref().map(Secret::expose), Some("typed"));
     Ok(())
 }
 

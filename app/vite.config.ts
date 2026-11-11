@@ -17,5 +17,8 @@ export default defineConfig({
     sourcemap: true,
     // A desktop app loads its chunks from disk; the result grid chunk (AG Grid) alone is about 1.2 MB and loads on first use.
     chunkSizeWarningLimit: 1300,
+    // The bundled fonts stay files: the CSP allows fonts from the app
+    // itself only (`font-src 'self'`), not as data: URLs.
+    assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
   },
 });

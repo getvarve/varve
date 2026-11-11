@@ -1,4 +1,4 @@
-import { reactive, watch } from 'vue';
+import { effectScope, reactive, watch } from 'vue';
 import { toCmdError } from '../../api/errors';
 import {
   ddlDismissPendingRestore,
@@ -195,16 +195,23 @@ let started = false;
 let poll: ReturnType<typeof setInterval> | null = null;
 
 /**
- * Loads both lists once and keeps them current: again whenever the
- * connection records change (an edit or delete may leave keychain entries
- * behind), and every 30 s while keychain entries are pending (the backend
- * retries in the background). Safe to call more than once.
+ * Loads both lists and keeps them current: again whenever the connection
+ * records change (an edit or delete may leave keychain entries behind), and
+ * every 30 s while keychain entries are pending (the backend retries in the
+ * background). Safe to call more than once: a later call only reloads both
+ * lists. The watchers live in a detached scope, not in the scope of the
+ * component that called this first, so they keep running when that
+ * component unmounts.
  */
 function start(): void {
-  if (started) return;
-  started = true;
   void refreshRestores();
   void refreshKeychain();
+  if (started) return;
+  started = true;
+  effectScope(true).run(watchLists);
+}
+
+function watchLists(): void {
   watch(
     () => useWorkspace().records.value,
     () => {

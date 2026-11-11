@@ -3,7 +3,7 @@ import { toTypedSchema } from '@vee-validate/zod';
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
 import { useForm } from 'vee-validate';
 import type { Path } from 'vee-validate';
-import { computed, onBeforeUnmount, reactive, ref, useId } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, useId, watch } from 'vue';
 import { presentError, secretLabel, toCmdError } from '../../api/errors';
 import { createConnection, defaultPort, ENGINES, ENVIRONMENTS, forgetSecret, saveSecret, trustSshHostKey, updateConnection } from '../../api/records';
 import type { ConnectionInput, ConnectionProfile, Engine, SecretKindName, SshAuthMethod, TlsMode } from '../../api/records';
@@ -17,6 +17,7 @@ import {
   COLOR_TOKENS,
   connectionFormFromProfile,
   connectionFormSchema,
+  connectionTestKey,
   emptyConnectionForm,
   fieldForServerMessage,
   toConnectionSubmit,
@@ -318,7 +319,7 @@ const save = handleSubmit(
         } else remember.tlsPassphrase = out.tlsPassphrase;
       }
       if (remember.password !== undefined || remember.sshSecret !== undefined || remember.tlsPassphrase !== undefined) {
-        rememberTypedSecrets(saved.id, remember);
+        rememberTypedSecrets(saved.id, remember, saved.version);
       }
       current.value = saved;
       if (keychainWarning !== null) {
@@ -366,6 +367,14 @@ function secretHint(secret: SecretKindName): string {
   if (secret === 'tls_key_passphrase') return 'The TLS client key is encrypted. Enter its passphrase on the TLS tab to test.';
   return `Enter the ${secretLabel(secret)} on the SSH tab to test.`;
 }
+
+// A result is about the settings it tested: changing how or where to connect clears it.
+watch(
+  () => connectionTestKey(toConnectionSubmit(form)),
+  () => {
+    if (ui.test.state !== 'running') ui.test = { state: 'idle' };
+  },
+);
 
 async function test(): Promise<void> {
   const result = await validate();

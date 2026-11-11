@@ -15,6 +15,8 @@ import { describePartial } from '../../lib/partialRun';
 import { presentRedisFailure } from '../../lib/redisErrors';
 import { formatCount, formatDuration, fullText, needsViewer } from '../../lib/values';
 import Icon from '../common/Icon.vue';
+import { rememberChoice, resultChoice } from './resultChoice';
+import type { ResultChoice } from './resultChoice';
 
 const props = defineProps<{
   run: RunResult | null;
@@ -41,17 +43,25 @@ const rowResults = computed(() =>
     .map((result, index) => ({ result, index }))
     .filter((r): r is { result: RowsResult; index: number } => r.result.kind === 'rows'),
 );
-const active = ref<number | 'messages'>('messages');
+// The shown result set comes from the run (the tab's state), so a panel that
+// is mounted again for the same run opens where the user left it.
+const active = ref<ResultChoice>(resultChoice(props.run));
 
 watch(
   () => props.run,
   (run) => {
-    cell.value = null;
-    const first = rowResults.value[0];
-    // A failed run opens on its error, even when earlier statements returned rows.
-    active.value = run?.output && first && !run.error ? 0 : 'messages';
+    active.value = resultChoice(run);
   },
 );
+
+// The value panel belongs to one cell of one grid: another run or result set closes it.
+watch([() => props.run, active], () => {
+  cell.value = null;
+});
+
+watch(active, (choice) => {
+  rememberChoice(props.run, choice);
+});
 
 const activeResult = computed(() => (typeof active.value === 'number' ? (rowResults.value[active.value]?.result ?? null) : null));
 
@@ -76,7 +86,7 @@ function describe(result: StatementResult): string {
 
 // Tabs keyboard
 
-const tabKeys = computed<(number | 'messages')[]>(() => [...rowResults.value.map((_, i) => i), 'messages']);
+const tabKeys = computed<ResultChoice[]>(() => [...rowResults.value.map((_, i) => i), 'messages']);
 
 function onTabKey(event: KeyboardEvent): void {
   const keys = tabKeys.value;
@@ -130,7 +140,12 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
     if (!path) return;
     const text = format === 'csv' ? toCsv(result.columns, result.rows) : toJson(result.columns, result.rows);
     await writeTextFile(path, text);
-    toasts.push('success', `Exported ${formatCount(result.rows.length)} rows`, path);
+    // A truncated result holds only the rows kept before the row limit, and so does the file.
+    toasts.push(
+      result.truncated ? 'warning' : 'success',
+      result.truncated ? `Exported the first ${formatCount(result.rows.length)} rows only` : `Exported ${formatCount(result.rows.length)} rows`,
+      result.truncated ? `${path}. The server returned more rows than the result kept; add a LIMIT or narrow the query and export again for the rest.` : path,
+    );
     await noteExport({
       connectionId: props.connectionId,
       objects: [props.exportName],

@@ -21,7 +21,6 @@ tokio = { workspace = true, features = ["net", "time", "rt", "io-util"] }
 tracing.workspace = true
 redis = { version = "1.7.1", default-features = false, features = ["tokio-comp"] }
 rustls = { version = "0.23.46", default-features = false, features = ["std", "logging", "tls12", "ring"] }
-rustls-native-certs = "0.8.5"
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["logging", "tls12", "ring"] }
 
 [dev-dependencies]

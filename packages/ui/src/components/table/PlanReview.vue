@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { readableStatements } from '../../api/plans';
 import { useCrossFade } from '../../composables/useCrossFade';
 import Modal from '../common/Modal.vue';
 import type { PlanStep } from './planFlow';
@@ -30,7 +31,7 @@ const done = computed(() => props.steps.length > 0 && props.steps.every((s) => s
 const destructive = computed(() => props.steps.some((s) => s.status === 'pending' && s.plan.destructive));
 
 const stepsEl = ref<HTMLElement | null>(null);
-useCrossFade(stepsEl, () => props.steps.map((s) => s.plan.statements.join(';\n')).join('\n\n'), 120);
+useCrossFade(stepsEl, () => props.steps.map((s) => readableStatements(s.plan).join(';\n')).join('\n\n'), 120);
 
 const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
   pending: { text: 'Not run yet', tone: 'tone-neutral' },
@@ -99,7 +100,7 @@ const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
           <pre
             class="sql mono"
             :aria-label="`SQL of step ${i + 1}`"
-          >{{ step.plan.statements.map((s) => `${s};`).join('\n') }}</pre>
+          >{{ readableStatements(step.plan).map((s) => `${s};`).join('\n') }}</pre>
           <ul
             v-if="step.notes.length > 0"
             class="notice tone-danger notes"

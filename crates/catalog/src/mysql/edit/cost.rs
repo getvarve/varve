@@ -94,6 +94,17 @@ fn text_rank(name: TypeName) -> Option<(bool, u8)> {
     }
 }
 
+/// A `FLOAT` or `DOUBLE` as (double precision, `(M,D)` when given).
+/// `FLOAT(p)` with `p` above 24 is a `DOUBLE`.
+fn float_form(ty: &DataType) -> Option<(bool, Option<(u32, u32)>)> {
+    let fixed = ty.length.zip(ty.scale);
+    match ty.name {
+        TypeName::Float => Some((fixed.is_none() && ty.length.is_some_and(|p| p > 24), fixed)),
+        TypeName::Double => Some((true, fixed)),
+        _ => None,
+    }
+}
+
 /// True when every value of `old` fits `new` unchanged.
 fn widens(old: &DataType, new: &DataType) -> bool {
     if let (Some(a), Some(b)) = (integer_rank(old.name), integer_rank(new.name)) {
@@ -110,8 +121,25 @@ fn widens(old: &DataType, new: &DataType) -> bool {
     if let (Some((ab, a)), Some((bb, b))) = (text_rank(old.name), text_rank(new.name)) {
         return ab == bb && b >= a;
     }
+    if let (Some(a), Some(b)) = (float_form(old), float_form(new)) {
+        return match (a, b) {
+            // Double to single precision loses digits.
+            ((true, _), (false, _)) => false,
+            (_, (_, None)) => true,
+            // A fixed (M,D) form rounds what the free form held.
+            ((_, None), (_, Some(_))) => false,
+            ((_, Some((m1, d1))), (_, Some((m2, d2)))) => {
+                d2 >= d1 && m2.saturating_sub(d2) >= m1.saturating_sub(d1)
+            }
+        };
+    }
     match (old.name, new.name) {
-        (TypeName::Float, TypeName::Double) => true,
+        // Fractional seconds: fewer digits round the stored values.
+        (TypeName::Time, TypeName::Time)
+        | (TypeName::Datetime, TypeName::Datetime)
+        | (TypeName::Timestamp, TypeName::Timestamp) => {
+            new.length.unwrap_or(0) >= old.length.unwrap_or(0)
+        }
         (TypeName::Decimal, TypeName::Decimal) => {
             let precision = |t: &DataType| t.length.unwrap_or(10);
             let scale = |t: &DataType| t.scale.unwrap_or(0);
@@ -284,6 +312,88 @@ mod tests {
         let mut ty = DataType::new(TypeName::Varchar);
         ty.length = Some(length);
         ColumnDef::new(name, ty)
+    }
+
+    fn typed(name: TypeName, length: Option<u32>, scale: Option<u32>) -> DataType {
+        let mut ty = DataType::new(name);
+        ty.length = length;
+        ty.scale = scale;
+        ty
+    }
+
+    #[test]
+    fn fractional_seconds_and_float_digits_that_shrink_lose_data() {
+        use TypeName::{Datetime, Double, Float, Time, Timestamp};
+        for name in [Time, Datetime, Timestamp] {
+            assert!(!widens(
+                &typed(name, Some(6), None),
+                &typed(name, None, None)
+            ));
+            assert!(!widens(
+                &typed(name, Some(6), None),
+                &typed(name, Some(3), None)
+            ));
+            assert!(widens(
+                &typed(name, Some(3), None),
+                &typed(name, Some(6), None)
+            ));
+            assert!(widens(
+                &typed(name, None, None),
+                &typed(name, Some(0), None)
+            ));
+        }
+        for (old, new, fits) in [
+            (
+                typed(Float, Some(10), Some(4)),
+                typed(Float, Some(6), Some(1)),
+                false,
+            ),
+            (
+                typed(Float, Some(6), Some(1)),
+                typed(Float, Some(10), Some(4)),
+                true,
+            ),
+            (
+                typed(Float, Some(10), Some(4)),
+                typed(Float, Some(10), Some(2)),
+                false,
+            ),
+            (
+                typed(Double, Some(12), Some(4)),
+                typed(Double, Some(8), Some(4)),
+                false,
+            ),
+            (
+                typed(Double, Some(8), Some(4)),
+                typed(Double, None, None),
+                true,
+            ),
+            (
+                typed(Double, None, None),
+                typed(Double, Some(20), Some(4)),
+                false,
+            ),
+            (typed(Float, None, None), typed(Double, None, None), true),
+            (
+                typed(Float, Some(7), Some(2)),
+                typed(Double, Some(7), Some(1)),
+                false,
+            ),
+            (typed(Double, None, None), typed(Float, None, None), false),
+            (
+                typed(Double, None, None),
+                typed(Float, Some(30), None),
+                true,
+            ),
+            (
+                typed(Float, Some(30), None),
+                typed(Float, Some(10), None),
+                false,
+            ),
+            (typed(Float, None, None), typed(Float, None, None), true),
+        ] {
+            assert_eq!(widens(&old, &new), fits, "{old:?} -> {new:?}");
+        }
     }
 
     #[test]

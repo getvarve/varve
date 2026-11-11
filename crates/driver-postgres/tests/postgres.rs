@@ -760,6 +760,60 @@ async fn max_rows_truncates_and_keeps_reading() -> TestResult {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs the dev database matrix"]
+async fn max_rows_stops_a_query_in_a_read_only_session() -> TestResult {
+    for (_, port) in servers() {
+        let session = connect(&params(port)).await?;
+        let schema = format!("max_rows_stop_{port}");
+        run(
+            session.as_ref(),
+            &format!(
+                "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; \
+                 CREATE TABLE {schema}.t AS SELECT g FROM generate_series(1, 1000) g"
+            ),
+        )
+        .await?;
+        // Only where the server refuses every write is the query cancelled
+        // at the limit: a cancel can undo nothing there.
+        let mut read_only = params(port);
+        read_only.read_only = true;
+        let reader = connect(&read_only).await?;
+        // 10^12 rows: read to the end this would never finish.
+        let started = Instant::now();
+        let output = reader
+            .execute(
+                &format!(
+                    "SELECT a.g FROM {schema}.t a, {schema}.t b, {schema}.t c, {schema}.t d; \
+                     SELECT 'after'"
+                ),
+                &ExecOptions { max_rows: 10 },
+            )
+            .await?;
+        assert!(started.elapsed() < Duration::from_secs(30));
+        let Some(StatementResult::Rows {
+            rows, truncated, ..
+        }) = output.results.first()
+        else {
+            return Err("no rows".into());
+        };
+        assert_eq!(rows.len(), 10);
+        assert!(*truncated);
+        // The next statement of the script and the next call run normally.
+        assert_eq!(
+            output.results.get(1).and_then(|r| match r {
+                StatementResult::Rows { rows, .. } => rows.first().cloned(),
+                StatementResult::Command { .. } => None,
+            }),
+            Some(vec![Value::Text("after".into())])
+        );
+        assert_eq!(reader.in_transaction(), Some(false));
+        assert_eq!(scalar(reader.as_ref(), "SELECT 1").await?, Value::Int(1));
+        run(session.as_ref(), &format!("DROP SCHEMA {schema} CASCADE")).await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the dev database matrix"]
 async fn captures_notices() -> TestResult {
     for (_, port) in servers() {
         let session = connect(&params(port)).await?;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed, nextTick, ref, useId, watch } from 'vue';
 import { formatProgress, progressPercent, useUpdates } from '../../composables/useUpdates';
 import Icon from '../common/Icon.vue';
 import Modal from '../common/Modal.vue';
@@ -34,10 +34,22 @@ const title = computed(() => {
 });
 
 const percent = computed(() => (status.value.kind === 'downloading' ? progressPercent(status.value.progress) : null));
+
+// Each state brings its own footer: focus moves to its primary action (or its
+// first button), not left on the Close button or on a button that is gone.
+const modal = ref<InstanceType<typeof Modal> | null>(null);
+watch(
+  () => status.value.kind,
+  async () => {
+    await nextTick();
+    modal.value?.focusInitial();
+  },
+);
 </script>
 
 <template>
   <Modal
+    ref="modal"
     :title="title"
     :width="520"
     :described-by="messageId"

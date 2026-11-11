@@ -9,6 +9,7 @@ import { tags } from '@lezer/highlight';
 import { basicSetup } from 'codemirror';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Engine } from '../../api/records';
+import { useTabVisible } from '../../composables/useTabs';
 import { markedErrorRuns, rememberMarkedRun } from '../../lib/errorPosition';
 import { commandOfLine } from '../../lib/redisHelp';
 import { redisLanguage } from '../../lib/redisMode';
@@ -31,6 +32,47 @@ const emit = defineEmits<{ 'update:modelValue': [value: string]; run: [text: str
 
 const host = ref<HTMLElement | null>(null);
 let view: EditorView | null = null;
+// While the tab is hidden the editor is `display: none`: CodeMirror measures 0 px and cannot scroll. An error
+// marked then is scrolled to when the tab is shown again, after CodeMirror has measured its real size.
+const tabVisible = useTabVisible();
+let scrollWhenShown = false;
+
+// While another page (Activity, Settings) is shown the whole workspace is taken out of the document, and a tab
+// that is not the active one is `display: none`: either way the editor's scrolling element comes back at the top
+// left. The position is remembered while the tab is shown and put back when it is shown again.
+let savedScroll: { top: number; left: number } | null = null;
+/** True from the moment the tab is shown until the position is back: scroll events meanwhile are not the user's. */
+let settling = false;
+let restoreFrame: number | null = null;
+
+function noteScroll(): void {
+  if (!view || !tabVisible.value || settling) return;
+  savedScroll = { top: view.scrollDOM.scrollTop, left: view.scrollDOM.scrollLeft };
+}
+
+function cancelRestore(): void {
+  if (restoreFrame !== null) cancelAnimationFrame(restoreFrame);
+  restoreFrame = null;
+}
+
+/** Puts the remembered scroll position back once the editor is laid out again and CodeMirror has measured it. */
+function restoreScrollWhenLaidOut(): void {
+  settling = true;
+  cancelRestore();
+  // Two frames: one for the layout, one for CodeMirror's own measure of its real size.
+  restoreFrame = requestAnimationFrame(() => {
+    restoreFrame = requestAnimationFrame(() => {
+      restoreFrame = null;
+      // Hidden again meanwhile: the position stays remembered for the next time.
+      if (!tabVisible.value) return;
+      settling = false;
+      if (!view || !savedScroll) return;
+      const scroller = view.scrollDOM;
+      if (scroller.scrollTop !== savedScroll.top) scroller.scrollTop = savedScroll.top;
+      if (scroller.scrollLeft !== savedScroll.left) scroller.scrollLeft = savedScroll.left;
+    });
+  });
+}
 
 const setError = StateEffect.define<{ from: number; to: number } | null>();
 const errorField = StateField.define<DecorationSet>({
@@ -156,10 +198,13 @@ onMounted(() => {
       ],
     }),
   });
+  view.scrollDOM.addEventListener('scroll', noteScroll, { passive: true });
   markError(props.errorRange);
 });
 
 onBeforeUnmount(() => {
+  cancelRestore();
+  view?.scrollDOM.removeEventListener('scroll', noteScroll);
   view?.destroy();
   view = null;
 });
@@ -186,11 +231,45 @@ function markError(range: { key: number; from: number; to: number; doc: string }
   const length = view.state.doc.length;
   const from = Math.min(range.from, length);
   const to = Math.min(Math.max(range.to, from), length);
+  if (!tabVisible.value) {
+    scrollWhenShown = true;
+    view.dispatch({ effects: setError.of({ from, to }), selection: EditorSelection.cursor(from) });
+    return;
+  }
   view.dispatch({
     effects: [setError.of({ from, to }), EditorView.scrollIntoView(from, { y: 'center' })],
     selection: EditorSelection.cursor(from),
   });
 }
+
+/** The start of the error mark, while there is one (typing clears it). */
+function markedErrorStart(): number | null {
+  if (!view) return null;
+  const cursor = view.state.field(errorField).iter();
+  return cursor.value ? cursor.from : null;
+}
+
+watch(
+  tabVisible,
+  (shown) => {
+    if (!shown || !view) return;
+    view.requestMeasure();
+    if (scrollWhenShown) {
+      scrollWhenShown = false;
+      // Scrolled to where the mark is now; an edit since (a replaced text) cleared it, and then there is nothing to show.
+      const from = markedErrorStart();
+      if (from !== null) {
+        // The error of a run that ended while the tab was hidden wins over the old position.
+        cancelRestore();
+        settling = false;
+        view.dispatch({ effects: EditorView.scrollIntoView(from, { y: 'center' }) });
+        return;
+      }
+    }
+    restoreScrollWhenLaidOut();
+  },
+  { flush: 'post' },
+);
 
 watch(
   () => props.errorRange?.key ?? null,

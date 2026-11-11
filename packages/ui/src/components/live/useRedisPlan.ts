@@ -1,9 +1,9 @@
 import { ref, shallowRef } from 'vue';
 import { presentError } from '../../api/errors';
-import type { CmdError } from '../../api/errors';
 import { redisPlanApply } from '../../api/live';
 import type { Planned, RedisPlanView } from '../../api/live';
 import type { SessionInfo, Value } from '../../api/sessions';
+import type { Reporter } from './report';
 import { useDialogs } from '../../composables/useDialogs';
 import { runWithConfirmation } from '../../lib/destructive';
 
@@ -25,28 +25,32 @@ export interface ShownPlan {
  * apply the preview is gone: it is cleared, the error names the failing
  * command (the server's `detail`), and `replan` plans the same change again
  * (`canReplan`). Nothing is applied twice without a new preview.
+ *
+ * `make` is given the session id to plan on (read before the call); a
+ * failure is reported with the id of the session it was sent on.
  */
-export function useRedisPlan(session: () => SessionInfo, connectionName: () => string, report: (error: unknown) => CmdError) {
+export function useRedisPlan(session: () => SessionInfo, connectionName: () => string, report: Reporter) {
   const dialogs = useDialogs();
   const shown = shallowRef<ShownPlan | null>(null);
   const busy = ref(false);
   const error = ref('');
   /** The last planned change, so a failed apply can be planned again. */
-  let last: { title: string; make: () => Promise<Planned<RedisPlanView>> } | null = null;
+  let last: { title: string; make: (sessionId: string) => Promise<Planned<RedisPlanView>> } | null = null;
   const canReplan = ref(false);
 
-  async function plan(title: string, make: () => Promise<Planned<RedisPlanView>>): Promise<boolean> {
+  async function plan(title: string, make: (sessionId: string) => Promise<Planned<RedisPlanView>>): Promise<boolean> {
     if (busy.value) return false;
     busy.value = true;
     error.value = '';
     canReplan.value = false;
     last = { title, make };
+    const sessionId = session().id;
     try {
-      const planned = await make();
+      const planned = await make(sessionId);
       shown.value = { title, planId: planned.planId, plan: planned.plan };
       return true;
     } catch (e: unknown) {
-      error.value = presentError(report(e)).message;
+      error.value = presentError(report(e, sessionId)).message;
       return false;
     } finally {
       busy.value = false;
@@ -59,9 +63,10 @@ export function useRedisPlan(session: () => SessionInfo, connectionName: () => s
     if (!current || busy.value) return null;
     busy.value = true;
     error.value = '';
+    const sessionId = session().id;
     try {
       const replies = await runWithConfirmation(
-        (confirmed) => redisPlanApply(session().id, current.planId, confirmed),
+        (confirmed) => redisPlanApply(sessionId, current.planId, confirmed),
         (request) => dialogs.askDestructive({ connectionName: connectionName(), environment: request.environment, statements: request.statements }),
       );
       if (replies !== null) {
@@ -71,7 +76,7 @@ export function useRedisPlan(session: () => SessionInfo, connectionName: () => s
       return replies;
     } catch (e: unknown) {
       // The plan was taken when it started (or has expired): it cannot run again.
-      const p = presentError(report(e));
+      const p = presentError(report(e, sessionId));
       shown.value = null;
       canReplan.value = last !== null;
       error.value = p.detail ? `${p.message} (${p.detail})` : p.message;

@@ -14,7 +14,11 @@ import { dbNumberLimit, dbOptions } from '../../lib/redisDbOptions';
 import { redisErrorView } from '../../lib/redisErrors';
 
 /** Switches the logical database of a Redis tab's session (`redis_select_db`). */
-const props = defineProps<{ tab: WorkspaceTab }>();
+const props = defineProps<{
+  tab: WorkspaceTab;
+  /** Asked before switching; `false` keeps the current database (for example to keep unsaved edits). */
+  beforeSwitch?: () => Promise<boolean>;
+}>();
 const emit = defineEmits<{ keyspace: [dbs: DbKeyspace[]] }>();
 
 const tabs = useTabs();
@@ -39,7 +43,7 @@ async function loadKeyspace(): Promise<void> {
     if (!requests.isCurrent(token)) return;
     keyspace.value = [];
     const cmd = toCmdError(error);
-    if (isLostSession(cmd)) tabs.markLost(props.tab.id, cmd);
+    if (isLostSession(cmd)) tabs.markLost(props.tab.id, cmd, sessionId);
     else toasts.pushError(error, 'Could not read the Redis databases');
   }
 }
@@ -80,12 +84,13 @@ async function chooseTyped(): Promise<void> {
     toasts.push('warning', 'No such database', `Enter a database number from 0 to ${limit ?? 0}.`);
     return;
   }
-  await switchTo(db);
-  typed.value = '';
+  // A declined switch keeps the typed number, so it can be tried again.
+  if (await switchTo(db)) typed.value = '';
 }
 
-async function switchTo(db: number): Promise<void> {
-  if (db === props.tab.db) return;
+async function switchTo(db: number): Promise<boolean> {
+  if (db === props.tab.db) return true;
+  if (props.beforeSwitch && !(await props.beforeSwitch())) return false;
   busy.value = true;
   try {
     await tabs.selectDb(props.tab.id, db);
@@ -97,6 +102,7 @@ async function switchTo(db: number): Promise<void> {
   } finally {
     busy.value = false;
   }
+  return true;
 }
 </script>
 

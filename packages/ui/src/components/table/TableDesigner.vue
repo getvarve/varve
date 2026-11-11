@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, provide, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue';
 import type { ObjectKind } from '../../api/catalog';
 import { catalogRowCount, describeDesignable, runGridQuery, tableRef } from '../../api/grid';
 import type { DesignerDetails, EngineChange, TableTarget } from '../../api/grid';
 import { presentError, toCmdError } from '../../api/errors';
 import type { SessionInfo } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
-import { buildDraftChanges, cloneDraft, draftFromDetails, newTableDraft, summarize } from '../../lib/gridDesigner';
+import { buildDraftChanges, cloneDraft, draftFromDetails, newTableDraft, rebaseDraft, summarize } from '../../lib/gridDesigner';
 import type { TableDraft } from '../../lib/gridDesigner';
 import Icon from '../common/Icon.vue';
 import ColumnsSection from './ColumnsSection.vue';
@@ -61,8 +61,12 @@ const emit = defineEmits<{
   created: [target: TableTarget, kind: ObjectKind];
   /** The designer showed `focus`. */
   focused: [focus: DesignerFocus];
-  /** A call failed; the parent reports it (lost sessions, reconnect needed). */
-  error: [error: unknown];
+  /**
+   * A call failed; the parent reports it (lost sessions, reconnect needed).
+   * `sessionId` is the session the call was sent on, so a late failure on a
+   * session that was replaced meanwhile is not held against the new one.
+   */
+  error: [error: unknown, sessionId: string];
 }>();
 
 /** The table being designed; set after a new table is created. */
@@ -96,6 +100,17 @@ const ctx = reactive<DesignerContext>({
   sessionId: props.session.id,
 });
 provide(DESIGNER, ctx);
+// The designer stays mounted over a reconnect: the sections must then use the new session
+// and follow its read-only flag and server version, not those of the session that is gone.
+watch(
+  () => props.session,
+  (session) => {
+    ctx.sessionId = session.id;
+    ctx.readOnly = session.readOnly;
+    ctx.serverMajor = session.server.major;
+    ctx.invisibleColumns = invisibleColumnsOn(session.server);
+  },
+);
 const ready = ref(false);
 
 async function load(): Promise<void> {
@@ -112,6 +127,7 @@ async function load(): Promise<void> {
   }
   loading.value = true;
   loadError.value = null;
+  const sessionId = props.session.id;
   try {
     const details = await describe(target);
     ctx.details = details;
@@ -122,7 +138,7 @@ async function load(): Promise<void> {
     ready.value = true;
     loadCount.value += 1;
   } catch (error: unknown) {
-    emit('error', error);
+    emit('error', error, sessionId);
     loadError.value = presentError(toCmdError(error)).message;
   } finally {
     loading.value = false;
@@ -137,11 +153,12 @@ function isNotFound(error: unknown): boolean {
 
 /** Reads the designed object; a PostgreSQL `table` that is not one is tried as a materialized view. */
 async function describe(target: TableTarget): Promise<DesignerDetails> {
+  const sessionId = props.session.id;
   try {
-    return await describeDesignable(props.session.id, tableRef(target, readKind.value));
+    return await describeDesignable(sessionId, tableRef(target, readKind.value));
   } catch (error: unknown) {
     if (engine.value !== 'postgres' || readKind.value !== 'table' || !isNotFound(error)) throw error;
-    const details = await describeDesignable(props.session.id, tableRef(target, 'materializedView'));
+    const details = await describeDesignable(sessionId, tableRef(target, 'materializedView'));
     readKind.value = 'materializedView';
     return details;
   }
@@ -181,6 +198,10 @@ watch(
 const summary = computed(() => (ready.value ? summarize(ctx.original, ctx.draft) : null));
 const dirty = computed(() => (summary.value?.total ?? 0) > 0);
 watch(dirty, (d) => emit('dirty', d));
+// The draft goes with the designer: the tab must not keep showing the unsaved dot for it.
+onBeforeUnmount(() => {
+  if (dirty.value) emit('dirty', false);
+});
 
 const counts = computed<Record<Section, number | null>>(() => {
   if (!ready.value) return { columns: 0, indexes: 0, constraints: 0, partitions: 0, properties: null };
@@ -292,14 +313,15 @@ async function countRows(steps: PlanStep[], pending: PendingCount): Promise<void
 async function openReview(title: string, changes: EngineChange[], kind: 'save' | 'now'): Promise<void> {
   planning.value = true;
   banner.value = null;
+  const sessionId = props.session.id;
   try {
     const found = kind === 'save' ? await reviewNotes(ctx.draft, ctx.details, changes, scalar) : { notes: [], counts: [] };
-    const steps = await planSteps(props.session.id, changes, found.notes);
+    const steps = await planSteps(sessionId, changes, found.notes);
     Object.assign(review, { open: true, title, steps, busy: false, message: null, kind, ran: false });
     // The review shows the estimate at once; exact counts replace it when they arrive (never awaited).
     for (const pending of found.counts) void countRows(steps, pending);
   } catch (error: unknown) {
-    emit('error', error);
+    emit('error', error, sessionId);
     banner.value = { tone: 'danger', text: error instanceof Error ? error.message : String(error) };
   } finally {
     planning.value = false;
@@ -343,7 +365,7 @@ async function apply(): Promise<void> {
         review.message = { tone: 'warning', text: `${result.message} Commit or roll back in the console first, then apply again; the plan is kept.` };
         break;
       case 'failed':
-        review.message = { tone: 'danger', text: `${result.message} Steps before it stay applied; the table is read again when you close this.` };
+        review.message = { tone: 'danger', text: `${result.message} ${afterFailure()}` };
         break;
     }
   } finally {
@@ -351,13 +373,27 @@ async function apply(): Promise<void> {
   }
 }
 
+/** What happens next after a failed step, for the review's message. */
+function afterFailure(): string {
+  if (review.kind === 'now') return 'Steps before it stay applied; the table is read again when you close this.';
+  if (!review.steps.some((s) => s.status === 'applied')) return 'Nothing was changed; your changes stay in the draft.';
+  return 'Steps before it stay applied; when you close this the table is read again and the changes that did not run stay in the draft.';
+}
+
 async function closeReview(): Promise<void> {
   const ran = review.ran;
   const kind = review.kind;
-  const failed = review.steps.find((s) => s.status === 'failed');
+  const steps = review.steps;
+  const failed = steps.find((s) => s.status === 'failed');
+  const applied = steps.some((s) => s.status === 'applied');
   review.open = false;
   if (!ran) return;
   emit('changed');
+  if (kind === 'save' && failed && !applied) {
+    // The first step failed: nothing reached the server, so the draft stays exactly as it is for another try.
+    banner.value = { tone: 'danger', text: `${failed.label} failed: ${failed.error ?? ''} Nothing was changed; your changes are still in the draft.` };
+    return;
+  }
   if (kind === 'save') {
     if (ctx.draft.isNew && review.steps[0]?.status === 'applied') {
       const created: TableTarget = {
@@ -376,12 +412,49 @@ async function closeReview(): Promise<void> {
         emit('created', moved, readKind.value);
       }
     }
-    await load();
-    banner.value = failed
-      ? { tone: 'danger', text: `${failed.label} failed: ${failed.error ?? ''} The table was read again; redo the changes that did not run.` }
-      : { tone: 'success', text: 'Saved.' };
+    if (!failed) {
+      await load();
+      banner.value = { tone: 'success', text: 'Saved.' };
+    } else if (await reloadKeepingDraft(steps)) {
+      banner.value = { tone: 'danger', text: `${failed.label} failed: ${failed.error ?? ''} The steps before it were applied and the table was read again; the changes that did not run are still in the draft.` };
+    }
   } else {
     await refreshDetails();
+  }
+}
+
+/**
+ * After a save that stopped part way: reads the table again as the new
+ * original and keeps the draft's changes whose steps did not run, so saving
+ * again plans only those (lib/gridDesigner.ts `rebaseDraft`). False when
+ * the table could not be read; the banner then says so and the draft stays.
+ */
+async function reloadKeepingDraft(steps: readonly PlanStep[]): Promise<boolean> {
+  loading.value = true;
+  const sessionId = props.session.id;
+  try {
+    // Something ran, so the table exists: for a new table the first step, CREATE TABLE, is the one that ran.
+    const target = current.value;
+    if (!target) throw new Error('The designer does not know which table it edits.');
+    const details = await describe(target);
+    const read = draftFromDetails(details);
+    read.props.databaseTablespace = databaseTablespace.value;
+    const kept = rebaseDraft(ctx.draft, read, steps.map((s) => ({ change: s.change, applied: s.status === 'applied' })));
+    ctx.details = details;
+    ctx.original = read;
+    ctx.draft = kept;
+    saveErrors.value = [];
+    loadCount.value += 1;
+    return true;
+  } catch (error: unknown) {
+    emit('error', error, sessionId);
+    banner.value = {
+      tone: 'danger',
+      text: `Some steps were applied, but the ${what.value} could not be read again: ${presentError(toCmdError(error)).message} Read it again before saving.`,
+    };
+    return false;
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -411,6 +484,7 @@ function movedTo(steps: PlanStep[]): TableTarget | null {
 async function refreshDetails(): Promise<void> {
   const target = current.value;
   if (!target) return;
+  const sessionId = props.session.id;
   try {
     const details = await describe(target);
     ctx.details = details;
@@ -423,7 +497,7 @@ async function refreshDetails(): Promise<void> {
     }
     loadCount.value += 1;
   } catch (error: unknown) {
-    emit('error', error);
+    emit('error', error, sessionId);
     banner.value = { tone: 'danger', text: presentError(toCmdError(error)).message };
   }
 }

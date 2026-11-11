@@ -19,7 +19,8 @@ use serde_json::{Map, Value};
 use varve_activity::TextLevel;
 use varve_core::Engine;
 use varve_records::{
-    ConnectionInput, ConnectionProfile, FolderDeleteMode, ReorderKind, SavedQuery, SavedQueryInput,
+    ConnectionInput, ConnectionProfile, Environment, FolderDeleteMode, PERSONAL_WORKSPACE, Records,
+    ReorderKind, SavedQuery, SavedQueryInput,
 };
 
 use super::McpHost;
@@ -31,8 +32,10 @@ Redis. These tools read and change the user's folders, connection profiles, save
 settings in the running app; the window shows every change at once. Start with \
 get_workspace. Passwords and passphrases stay in the system keychain and never pass through \
 these tools: after a host, port, user or tunnel change the user may have to enter them again \
-in Varve. Connections tagged production deserve extra care: confirm with the user before \
-changing or deleting one.";
+in Varve. Init SQL and the safety options (`options.readOnly`, `options.confirmDestructive`, \
+`environment`) can only be made stricter here: setting or changing init SQL, or loosening a \
+safety option, is refused and the user does it in Varve. Connections tagged production \
+deserve extra care: confirm with the user before changing or deleting one.";
 
 /// The tool set; one per MCP session.
 #[derive(Clone)]
@@ -44,6 +47,7 @@ pub struct VarveTools {
 
 /// A record id.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct IdParams {
     /// Id of the record (a UUID from get_workspace).
     pub id: String,
@@ -51,7 +55,7 @@ pub struct IdParams {
 
 /// Arguments of `create_folder`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateFolderParams {
     /// Parent folder id; leave out for the top level.
     #[serde(default)]
@@ -65,6 +69,7 @@ pub struct CreateFolderParams {
 
 /// Arguments of `update_folder`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateFolderParams {
     /// Folder id.
     pub id: String,
@@ -78,12 +83,15 @@ pub struct UpdateFolderParams {
 
 /// Arguments of `move_folder`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = target_required)]
 pub struct MoveFolderParams {
     /// Folder id.
     pub id: String,
-    /// New parent folder id, or `null` for the top level.
-    pub parent_id: Option<String>,
+    /// New parent folder id, or `null` for the top level. Required: a
+    /// left out target is refused rather than read as the top level.
+    #[serde(default, deserialize_with = "present")]
+    pub parent_id: Option<Option<String>>,
 }
 
 /// What happens to what a deleted folder holds.
@@ -99,6 +107,7 @@ pub enum DeleteMode {
 
 /// Arguments of `delete_folder`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DeleteFolderParams {
     /// Folder id.
     pub id: String,
@@ -117,8 +126,10 @@ pub struct CreateConnectionParams {
     /// `verify_full`; `caPath`, `clientCertPath`, `clientKeyPath`}, `ssh`
     /// {`enabled`, `host`, `port`, `username`, `auth`: `password`,
     /// `key_file`, `agent`; `keyPath`} and `options` {`readOnly`,
-    /// `confirmDestructive`, `statementTimeoutMs`, `keepaliveS`, `initSql`,
+    /// `confirmDestructive`, `statementTimeoutMs`, `keepaliveS`,
     /// `showSystemObjects`, `redisDb`}. No passwords: the user saves those
+    /// in Varve. `options.initSql` cannot be set here, and
+    /// `options.confirmDestructive` cannot be `false`: the user sets those
     /// in Varve.
     pub connection: Map<String, Value>,
 }
@@ -137,12 +148,15 @@ pub struct UpdateParams {
 
 /// Arguments of `move_connection`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(transform = target_required)]
 pub struct MoveConnectionParams {
     /// Connection id.
     pub id: String,
-    /// Folder id, or `null` for the top level.
-    pub folder_id: Option<String>,
+    /// Folder id, or `null` for the top level. Required: a left out
+    /// target is refused rather than read as the top level.
+    #[serde(default, deserialize_with = "present")]
+    pub folder_id: Option<Option<String>>,
 }
 
 /// Arguments of `create_saved_query`.
@@ -168,6 +182,7 @@ pub enum ReorderList {
 
 /// Arguments of `reorder`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ReorderParams {
     /// Which list.
     pub kind: ReorderList,
@@ -189,7 +204,7 @@ pub enum TextLevelParam {
 
 /// Changes to the activity log settings.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActivityChanges {
     /// How much statement text is kept.
     #[serde(default)]
@@ -202,7 +217,7 @@ pub struct ActivityChanges {
 
 /// Arguments of `update_settings`; leave out what stays.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateSettingsParams {
     /// Activity log settings.
     #[serde(default)]
@@ -225,6 +240,32 @@ struct SettingsView {
     remember_secrets_for_session: bool,
     /// `null` when this build does not update itself.
     auto_check_updates: Option<bool>,
+}
+
+/// Lists the target of a move (`parentId`, `folderId`) as required in the
+/// tool's schema. The field has a serde default, so that a call without it
+/// reaches the tool and gets [`missing_target`] as its answer; without
+/// this, the default would make the schema call the field optional.
+fn target_required(schema: &mut schemars::Schema) {
+    for field in ["parentId", "folderId"] {
+        let Some(property) = schema
+            .get_mut("properties")
+            .and_then(|properties| properties.get_mut(field))
+            .and_then(Value::as_object_mut)
+        else {
+            continue;
+        };
+        property.remove("default");
+        let required = schema
+            .ensure_object()
+            .entry("required")
+            .or_insert_with(|| Value::Array(Vec::new()));
+        if let Value::Array(required) = required
+            && !required.iter().any(|name| name == field)
+        {
+            required.push(Value::String(field.into()));
+        }
+    }
 }
 
 /// Tells a field given as `null` (`Some(None)`) from a missing one (`None`).
@@ -316,14 +357,16 @@ impl VarveTools {
         &self,
         Parameters(p): Parameters<MoveFolderParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let Some(parent_id) = p.parent_id else {
+            return Ok(failure(&missing_target("parentId")));
+        };
         let services = Arc::clone(&self.services);
-        let result =
-            run_blocking(move || services.move_folder(&p.id, p.parent_id.as_deref())).await;
+        let result = run_blocking(move || services.move_folder(&p.id, parent_id.as_deref())).await;
         Ok(self.changed(result))
     }
 
     #[tool(
-        description = "Deletes a folder. `move_contents_to_parent` keeps what it holds; `delete_contents` also deletes every connection and saved query inside, with the connections' saved keychain entries. Confirm with the user first.",
+        description = "Deletes a folder. `move_contents_to_parent` keeps what it holds; `delete_contents` also deletes every connection and saved query inside, with the connections' saved keychain entries, and closes the open sessions and tabs of those connections. Confirm with the user first.",
         annotations(destructive_hint = true)
     )]
     async fn delete_folder(
@@ -353,7 +396,7 @@ impl VarveTools {
     }
 
     #[tool(
-        description = "Creates a connection profile. The user saves its password in Varve when connecting."
+        description = "Creates a connection profile. The user saves its password in Varve when connecting. Init SQL (`options.initSql`) and `options.confirmDestructive: false` are refused: the user sets those in Varve."
     )]
     async fn create_connection(
         &self,
@@ -362,7 +405,12 @@ impl VarveTools {
         let input = match parse_record::<ConnectionInput>(
             Value::Object(p.connection),
             &connection_template(),
-        ) {
+        )
+        .and_then(|input| {
+            let created = Records::preview_connection(PERSONAL_WORKSPACE, &input)?;
+            refuse_unsafe_change(&Safety::new_connection(), &Safety::of(&created))?;
+            Ok(input)
+        }) {
             Ok(input) => input,
             Err(error) => return Ok(failure(&error)),
         };
@@ -372,7 +420,7 @@ impl VarveTools {
     }
 
     #[tool(
-        description = "Changes fields of a connection profile. When the host, port, user or route (TLS, SSH) changes, Varve removes the saved passwords that no longer apply, exactly as when the user edits it.",
+        description = "Changes fields of a connection profile. When the host, port, user or route (TLS, SSH) changes, Varve removes the saved passwords that no longer apply, exactly as when the user edits it. Init SQL (`options.initSql`) cannot be set, changed or cleared here, and the safety options can only be made stricter: turning `options.readOnly` or `options.confirmDestructive` off, or moving `environment` to a less strict one (production, staging, test, development), is refused. The user changes those in Varve.",
         annotations(idempotent_hint = true)
     )]
     async fn update_connection(
@@ -393,7 +441,15 @@ impl VarveTools {
             Ok(input) => input,
             Err(error) => return Ok(failure(&error)),
         };
-        let result = self.services.update_connection(&p.id, &input).await;
+        // Checked again against the profile as stored, under its record
+        // lock, so an edit in the window meanwhile cannot be undone around
+        // the check.
+        let result = self
+            .services
+            .update_connection_checked(&p.id, &input, |stored, edited| {
+                refuse_unsafe_change(&Safety::of(stored), &Safety::of(edited))
+            })
+            .await;
         Ok(self.changed(result))
     }
 
@@ -405,9 +461,12 @@ impl VarveTools {
         &self,
         Parameters(p): Parameters<MoveConnectionParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        let Some(folder_id) = p.folder_id else {
+            return Ok(failure(&missing_target("folderId")));
+        };
         let services = Arc::clone(&self.services);
         let result =
-            run_blocking(move || services.move_connection(&p.id, p.folder_id.as_deref())).await;
+            run_blocking(move || services.move_connection(&p.id, folder_id.as_deref())).await;
         Ok(self.changed(result))
     }
 
@@ -422,7 +481,7 @@ impl VarveTools {
     }
 
     #[tool(
-        description = "Deletes a connection profile and its saved keychain entries. Open sessions of it are closed. Confirm with the user first.",
+        description = "Deletes a connection profile and its saved keychain entries. Its open sessions are closed and the window closes their tabs (asking about unsaved editor text first). Confirm with the user first.",
         annotations(destructive_hint = true)
     )]
     async fn delete_connection(
@@ -643,6 +702,96 @@ fn failure(error: &CmdError) -> CallToolResult {
     CallToolResult::error(vec![ContentBlock::text(text)])
 }
 
+/// The error for a move without its target field.
+fn missing_target(field: &str) -> CmdError {
+    CmdError::Invalid {
+        message: format!(
+            "Give `{field}`: a folder id, or `null` for the top level. It cannot be left out."
+        ),
+    }
+}
+
+/// What a connection runs on connect and how carefully it treats
+/// statements: only the user may set init SQL or loosen these, in Varve.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Safety {
+    init_sql: Option<String>,
+    read_only: bool,
+    confirm_destructive: bool,
+    environment: Environment,
+}
+
+impl Safety {
+    /// The values of a stored (validated, normalized) profile.
+    fn of(profile: &ConnectionProfile) -> Self {
+        Self {
+            init_sql: profile.options.init_sql.clone(),
+            read_only: profile.options.read_only,
+            confirm_destructive: profile.options.confirm_destructive,
+            environment: profile.environment,
+        }
+    }
+
+    /// What a new connection starts from (the defaults of the input).
+    fn new_connection() -> Self {
+        let options = varve_records::ConnectionOptions::default();
+        Self {
+            init_sql: options.init_sql,
+            read_only: options.read_only,
+            confirm_destructive: options.confirm_destructive,
+            environment: Environment::default(),
+        }
+    }
+}
+
+/// How strict an environment is: production is the strictest.
+fn strictness(environment: Environment) -> u8 {
+    match environment {
+        Environment::Development => 0,
+        Environment::Test => 1,
+        Environment::Staging => 2,
+        Environment::Production => 3,
+    }
+}
+
+/// Refuses an MCP change from `before` to `after` that sets, changes or
+/// clears init SQL (it runs on every connect, with the saved password and
+/// without the destructive-statement confirmation), or that loosens a
+/// safety option. Making them stricter is allowed.
+fn refuse_unsafe_change(before: &Safety, after: &Safety) -> Result<(), CmdError> {
+    if before.init_sql != after.init_sql {
+        return Err(CmdError::Invalid {
+            message: "Init SQL runs every time Varve connects, so MCP clients cannot set, change \
+                      or clear it. Change it in Varve, in the connection's settings."
+                .into(),
+        });
+    }
+    let mut loosened = Vec::new();
+    if before.read_only && !after.read_only {
+        loosened.push("turning read-only off".to_string());
+    }
+    if before.confirm_destructive && !after.confirm_destructive {
+        loosened.push("turning off the confirmation of destructive statements".to_string());
+    }
+    if strictness(after.environment) < strictness(before.environment) {
+        loosened.push(format!(
+            "changing the environment from {} to {}",
+            before.environment.as_str(),
+            after.environment.as_str()
+        ));
+    }
+    if loosened.is_empty() {
+        return Ok(());
+    }
+    Err(CmdError::Invalid {
+        message: format!(
+            "MCP clients can only make a connection's safety options stricter, so {} was \
+             refused. Change it in Varve, in the connection's settings.",
+            loosened.join(" and ")
+        ),
+    })
+}
+
 /// The editable fields of a profile, as the edit form starts from them.
 fn input_from_profile(profile: &ConnectionProfile) -> ConnectionInput {
     ConnectionInput {
@@ -820,6 +969,141 @@ mod tests {
         .unwrap_or_default();
         assert!(error.contains("`options.readonly`"), "{error}");
         assert!(error.contains("readOnly"), "{error}");
+    }
+
+    fn safety(environment: Environment, read_only: bool, confirm: bool) -> Safety {
+        Safety {
+            init_sql: None,
+            read_only,
+            confirm_destructive: confirm,
+            environment,
+        }
+    }
+
+    #[test]
+    fn init_sql_is_left_to_the_user() {
+        let plain = Safety::new_connection();
+        let with_sql = Safety {
+            init_sql: Some("SET search_path = app".into()),
+            ..plain.clone()
+        };
+        for (before, after) in [(&plain, &with_sql), (&with_sql, &plain)] {
+            let error = refuse_unsafe_change(before, after)
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default();
+            assert!(error.contains("Init SQL"), "{error}");
+            assert!(error.contains("in Varve"), "{error}");
+        }
+        let changed = Safety {
+            init_sql: Some("SET search_path = other".into()),
+            ..plain.clone()
+        };
+        assert!(refuse_unsafe_change(&with_sql, &changed).is_err());
+        assert!(refuse_unsafe_change(&with_sql, &with_sql.clone()).is_ok());
+    }
+
+    #[test]
+    fn safety_options_only_get_stricter() {
+        let prod = safety(Environment::Production, true, true);
+        for looser in [
+            safety(Environment::Production, false, true),
+            safety(Environment::Production, true, false),
+            safety(Environment::Staging, true, true),
+            safety(Environment::Development, true, true),
+        ] {
+            let error = refuse_unsafe_change(&prod, &looser)
+                .err()
+                .map(|e| e.to_string())
+                .unwrap_or_default();
+            assert!(error.contains("stricter"), "{looser:?}: {error}");
+        }
+        let error = refuse_unsafe_change(&prod, &safety(Environment::Test, false, true))
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(error.contains("read-only off"), "{error}");
+        assert!(error.contains("from production to test"), "{error}");
+
+        let dev = safety(Environment::Development, false, false);
+        for stricter in [
+            safety(Environment::Test, false, false),
+            safety(Environment::Production, true, true),
+            safety(Environment::Development, false, true),
+        ] {
+            assert!(
+                refuse_unsafe_change(&dev, &stricter).is_ok(),
+                "{stricter:?}"
+            );
+        }
+        // A new connection may not start without the confirmation.
+        assert!(
+            refuse_unsafe_change(
+                &Safety::new_connection(),
+                &safety(Environment::Development, false, false)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_move_needs_its_target_and_known_fields() {
+        let to_top: Result<MoveFolderParams, _> =
+            serde_json::from_value(serde_json::json!({ "id": "f", "parentId": null }));
+        assert!(matches!(
+            to_top,
+            Ok(MoveFolderParams {
+                parent_id: Some(None),
+                ..
+            })
+        ));
+        let into: Result<MoveConnectionParams, _> =
+            serde_json::from_value(serde_json::json!({ "id": "c", "folderId": "f" }));
+        assert!(matches!(
+            into,
+            Ok(MoveConnectionParams { folder_id: Some(Some(ref id)), .. }) if id == "f"
+        ));
+        // A left out target reaches the tool as `None`, which answers with
+        // `missing_target`; it is never read as the top level.
+        let missing: Result<MoveFolderParams, _> =
+            serde_json::from_value(serde_json::json!({ "id": "f" }));
+        assert!(matches!(
+            missing,
+            Ok(MoveFolderParams {
+                parent_id: None,
+                ..
+            })
+        ));
+        let missing: Result<MoveConnectionParams, _> =
+            serde_json::from_value(serde_json::json!({ "id": "c" }));
+        assert!(matches!(
+            missing,
+            Ok(MoveConnectionParams {
+                folder_id: None,
+                ..
+            })
+        ));
+        assert!(matches!(
+            missing_target("parentId"),
+            CmdError::Invalid { message } if message.contains("`parentId`")
+        ));
+        // A misspelled target is an unknown field.
+        assert!(
+            serde_json::from_value::<MoveFolderParams>(
+                serde_json::json!({ "id": "f", "parent_id": null })
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<IdParams>(serde_json::json!({ "id": "c", "force": true }))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<UpdateSettingsParams>(
+                serde_json::json!({ "activity": { "retentionDay": 3 } })
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -59,7 +59,7 @@ pub use recorder::{
 pub use redact::{
     ERROR_MESSAGE_HIDDEN, ERROR_MESSAGE_OMITTED, ERROR_MESSAGE_WITHHELD, MAX_REDACTED_BYTES,
     REDACTED, SYNTAX_ERROR_HIDDEN, SqlDialect, TextLevel, prepare_error_message,
-    prepare_statement_text, redact_secrets,
+    prepare_statement_text, redact_secrets, secret_server_variable,
 };
 
 #[cfg(test)]

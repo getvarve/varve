@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useId, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { catalogList } from '../../api/catalog';
 import type { ObjectKind, ObjectSummary } from '../../api/catalog';
 import { catalogDescribe } from '../../api/ddl';
 import type { PgFunction, PgTrigger } from '../../api/ddl';
+import { latestOnly } from '../../lib/async';
 import { isMissing } from '../../lib/ddlApply';
 import { parseQualified } from '../../lib/ddlText';
 import { buildPgTrigger, errorsOf, objectRef, pgAtLeast, pgTriggerFormFrom, pgTriggerSchema } from '../../lib/ddlPlan';
@@ -37,8 +38,9 @@ async function loadParent(): Promise<void> {
   siblings.value = [];
   if (!tableName.value) return;
   for (const kind of TABLE_KINDS) {
+    const sessionId = props.session.id;
     try {
-      const d = await catalogDescribe(props.session.id, objectRef(kind, database.value, tableSchema.value, tableName.value));
+      const d = await catalogDescribe(sessionId, objectRef(kind, database.value, tableSchema.value, tableName.value));
       if (d.engine === 'postgres' && 'triggers' in d.object) {
         tableKind.value = kind;
         siblings.value = d.object.triggers;
@@ -47,7 +49,7 @@ async function loadParent(): Promise<void> {
     } catch (error: unknown) {
       // Not this kind of relation: try the next one. Anything else is a real failure.
       if (!isMissing(error)) {
-        props.reportError?.(error);
+        props.reportError?.(error, sessionId);
         throw error;
       }
     }
@@ -78,14 +80,17 @@ const tabs = computed(() => [
 ]);
 const title = computed(() => (editor.current.value ? editor.current.value.name : 'New trigger'));
 const blocked = computed(() => Object.values(errors.value)[0] ?? editor.blockedReason.value);
-const ids = { name: useId(), when: useId(), fn: useId(), args: useId(), col: useId(), oldTable: useId(), newTable: useId(), comment: useId() };
+const ids = { name: useId(), when: useId(), fn: useId(), args: useId(), col: useId(), oldTable: useId(), newTable: useId(), comment: useId(), functions: useId() };
 const newColumn = ref('');
-const argsText = computed({
-  get: () => form.arguments.join(', '),
-  set: (value: string) => {
-    form.arguments = value.split(',').map((v) => v.trim()).filter((v) => v !== '');
-  },
-});
+
+// Arguments are edited one per field: an argument may hold a comma or be empty, and is passed exactly as typed.
+function addArgument(): void {
+  form.arguments.push('');
+}
+
+function removeArgument(index: number): void {
+  form.arguments.splice(index, 1);
+}
 
 function addColumn(): void {
   const c = newColumn.value.trim();
@@ -106,32 +111,51 @@ function triggerSummary(t: PgTrigger): string {
   return `${timing} ${t.events.map((e) => e.toUpperCase()).join(', ')} · ${t.level}${state}`;
 }
 
-// Trigger function preview.
+// Trigger function preview: read once typing pauses, and only the answer for the latest text is shown.
+const FUNCTION_PREVIEW_DELAY_MS = 250;
 const fnPreview = ref<PgFunction | null>(null);
 const fnList = ref<ObjectSummary[]>([]);
+const latestPreview = latestOnly();
+let previewTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function previewFunction(text: string, token: number): Promise<void> {
+  const q = parseQualified(text);
+  if (q.name === '') return;
+  const sessionId = props.session.id;
+  try {
+    const d = await catalogDescribe(sessionId, objectRef('function', database.value, q.schema ?? tableSchema.value, q.name, { signature: '' }));
+    if (!latestPreview.isCurrent(token)) return;
+    if (d.engine === 'postgres' && d.object.kind === 'function') fnPreview.value = d.object;
+  } catch (error: unknown) {
+    // Not a known function (yet, or overloaded): the preview stays empty.
+    if (!isMissing(error)) props.reportError?.(error, sessionId);
+  }
+}
+
 watch(
   () => form.function,
-  async (text) => {
+  (text) => {
+    const token = latestPreview.next();
     fnPreview.value = null;
-    const q = parseQualified(text);
-    if (q.name === '') return;
-    try {
-      const d = await catalogDescribe(props.session.id, objectRef('function', database.value, q.schema ?? tableSchema.value, q.name, { signature: '' }));
-      if (d.engine === 'postgres' && d.object.kind === 'function') fnPreview.value = d.object;
-    } catch (error: unknown) {
-      // Not a known function (yet, or overloaded): the preview stays empty.
-      if (!isMissing(error)) props.reportError?.(error);
-    }
+    if (previewTimer !== null) clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      previewTimer = null;
+      void previewFunction(text, token);
+    }, FUNCTION_PREVIEW_DELAY_MS);
   },
 );
+onBeforeUnmount(() => {
+  if (previewTimer !== null) clearTimeout(previewTimer);
+});
 
 onMounted(async () => {
   await editor.load();
+  const sessionId = props.session.id;
   try {
-    const list = await catalogList(props.session.id, { database: database.value, schema: tableSchema.value, parent: null }, 'function');
+    const list = await catalogList(sessionId, { database: database.value, schema: tableSchema.value, parent: null }, 'function');
     fnList.value = list.filter((f) => (f.detail ?? '').includes('trigger'));
   } catch (error: unknown) {
-    props.reportError?.(error);
+    props.reportError?.(error, sessionId);
   }
 });
 </script>
@@ -354,11 +378,11 @@ onMounted(async () => {
                 :id="ids.fn"
                 v-model="form.function"
                 class="input mono"
-                list="pg-trigger-functions"
+                :list="ids.functions"
                 spellcheck="false"
                 :aria-invalid="!!errors.function"
               >
-              <datalist id="pg-trigger-functions">
+              <datalist :id="ids.functions">
                 <option
                   v-for="f in fnList"
                   :key="`${f.object.schema}.${f.object.name}`"
@@ -369,15 +393,42 @@ onMounted(async () => {
             <FormField
               label="Arguments"
               :input-id="ids.args"
-              help="Comma separated; passed as text (TG_ARGV)."
+              help="One per field, passed as text (TG_ARGV); commas and empty arguments are kept."
             >
-              <input
-                :id="ids.args"
-                v-model="argsText"
-                class="input mono"
-                placeholder="none"
-                spellcheck="false"
-              >
+              <div class="args">
+                <div
+                  v-for="n in form.arguments.length"
+                  :key="n"
+                  class="arg"
+                >
+                  <input
+                    :id="n === 1 ? ids.args : undefined"
+                    v-model="form.arguments[n - 1]"
+                    class="input mono"
+                    :aria-label="`Argument ${n}`"
+                    spellcheck="false"
+                  >
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    :aria-label="`Remove argument ${n}`"
+                    @click="removeArgument(n - 1)"
+                  >
+                    <Icon
+                      name="close"
+                      :size="12"
+                    />
+                  </button>
+                </div>
+                <button
+                  :id="form.arguments.length === 0 ? ids.args : undefined"
+                  type="button"
+                  class="btn compact"
+                  @click="addArgument"
+                >
+                  Add argument
+                </button>
+              </div>
             </FormField>
           </div>
           <details class="advanced">
@@ -529,6 +580,25 @@ onMounted(async () => {
 
 <style scoped src="./editor.css"></style>
 <style scoped>
+.args {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.arg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.arg .input {
+  flex-grow: 1;
+  min-width: 0;
+}
+
 .trigger-layout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr) 360px;

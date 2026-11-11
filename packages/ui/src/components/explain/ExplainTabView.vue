@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { ExplainTab } from '../../composables/useTabs';
+import { useLastSession } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import ExplainView from './ExplainView.vue';
 
@@ -13,13 +14,15 @@ import ExplainView from './ExplainView.vue';
 const props = defineProps<{ tab: ExplainTab }>();
 
 const workspace = useWorkspace();
+// Kept while the session is lost, so the plan on screen survives until the tab connects again.
+const session = useLastSession(() => props.tab);
 const connectionName = computed(() => workspace.connection(props.tab.connectionId)?.name ?? props.tab.title);
 </script>
 
 <template>
   <ExplainView
-    v-if="tab.session"
-    :session="tab.session"
+    v-if="session"
+    :session="session"
     :connection-name="connectionName"
     :statement="tab.statement"
     :tab-id="tab.id"

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use varve_driver::ServerInfo;
 
 use super::common::{
-    DropBehavior, PlanBuilder, QualifiedName, RoleSpec, comment_on, data_type, expr, ident,
-    invalid, lit, paren_expr, require,
+    CollationName, DropBehavior, PlanBuilder, QualifiedName, RoleSpec, comment_on, data_type, expr,
+    ident, invalid, lit, paren_expr, require,
 };
 use crate::model::{CatalogResult, EditPlan};
 
@@ -20,7 +20,7 @@ pub struct CompositeAttribute {
     pub data_type: String,
     /// `COLLATE`.
     #[serde(default)]
-    pub collation: Option<String>,
+    pub collation: Option<CollationName>,
 }
 
 impl CompositeAttribute {
@@ -31,7 +31,7 @@ impl CompositeAttribute {
             data_type(&self.data_type, "an attribute type")?
         );
         if let Some(c) = &self.collation {
-            s.push_str(&format!(" COLLATE {}", ident(c)?));
+            s.push_str(&format!(" COLLATE {}", c.sql()?));
         }
         Ok(s)
     }
@@ -100,7 +100,7 @@ pub enum CompositeOperation {
         data_type: String,
         /// `COLLATE`.
         #[serde(default)]
-        collation: Option<String>,
+        collation: Option<CollationName>,
         /// `CASCADE`: also alter typed tables using the type.
         #[serde(default)]
         cascade: bool,
@@ -121,7 +121,7 @@ pub struct CreateRangeType {
     pub subtype_opclass: Option<QualifiedName>,
     /// Collation of the subtype.
     #[serde(default)]
-    pub collation: Option<String>,
+    pub collation: Option<CollationName>,
     /// Canonical function (discrete ranges).
     #[serde(default)]
     pub canonical: Option<QualifiedName>,
@@ -353,7 +353,7 @@ pub(crate) fn plan_type(server: &ServerInfo, change: &TypeChange) -> CatalogResu
                             super::common::data_type(data_type, "an attribute type")?
                         );
                         if let Some(col) = collation {
-                            s.push_str(&format!(" COLLATE {}", ident(col)?));
+                            s.push_str(&format!(" COLLATE {}", col.sql()?));
                         }
                         s.push_str(cascade(*c));
                         s
@@ -368,7 +368,7 @@ pub(crate) fn plan_type(server: &ServerInfo, change: &TypeChange) -> CatalogResu
                 options.push(format!("SUBTYPE_OPCLASS = {}", o.sql()?));
             }
             if let Some(c) = &r.collation {
-                options.push(format!("COLLATION = {}", ident(c)?));
+                options.push(format!("COLLATION = {}", c.sql()?));
             }
             if let Some(f) = &r.canonical {
                 options.push(format!("CANONICAL = {}", f.sql()?));
@@ -458,7 +458,7 @@ pub struct CreateDomain {
     pub data_type: String,
     /// `COLLATE`.
     #[serde(default)]
-    pub collation: Option<String>,
+    pub collation: Option<CollationName>,
     /// `DEFAULT`.
     #[serde(default)]
     pub default: Option<String>,
@@ -586,7 +586,7 @@ pub(crate) fn plan_domain(server: &ServerInfo, change: &DomainChange) -> Catalog
                 data_type(&d.data_type, "a base type")?
             );
             if let Some(c) = &d.collation {
-                s.push_str(&format!(" COLLATE {}", ident(c)?));
+                s.push_str(&format!(" COLLATE {}", c.sql()?));
             }
             if let Some(e) = &d.default {
                 s.push_str(&format!(

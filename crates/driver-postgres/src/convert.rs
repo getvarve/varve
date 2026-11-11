@@ -303,6 +303,11 @@ pub(crate) fn convert(kind: &ValueKind, text: &str) -> Value {
         // Kept as the server's text: key order, duplicate keys and number
         // precision survive (jsonb has already normalized its own text).
         ValueKind::Json => Value::json(text),
+        // An array with explicit bounds (`[0:2]={7,8,9}`, from a slice or
+        // an assignment to index 0) stays the server's text: a list of
+        // values cannot carry the bounds, and writing it back as one would
+        // make the array 1-based. The text round-trips as a literal.
+        ValueKind::Array { .. } if text.starts_with('[') => other(),
         ValueKind::Array { element, delimiter } => {
             parse_array(text, *delimiter).map_or_else(other, |node| node_to_value(&node, element))
         }
@@ -502,15 +507,10 @@ fn node_to_value(node: &Node, element: &ValueKind) -> Value {
     }
 }
 
-/// Parses an array literal such as `{1,NULL,"a \"b\""}`, `{{1,2},{3,4}}` or
-/// `[0:1]={7,8}`.
+/// Parses an array literal such as `{1,NULL,"a \"b\""}` or `{{1,2},{3,4}}`
+/// (one with explicit bounds is never parsed, see [`convert`]).
 fn parse_array(text: &str, delimiter: char) -> Option<Node> {
-    let body = if text.starts_with('[') {
-        &text[text.find('=')? + 1..]
-    } else {
-        text
-    };
-    let chars: Vec<char> = body.chars().collect();
+    let chars: Vec<char> = text.chars().collect();
     let mut parser = ArrayParser {
         chars: &chars,
         at: 0,
@@ -873,9 +873,14 @@ mod tests {
                 Value::Array(vec![Value::Int(3), Value::Int(4)]),
             ])
         );
+        // Explicit bounds survive as the server's text.
         assert_eq!(
             convert(&array(ValueKind::Int), "[0:1]={7,8}"),
-            Value::Array(vec![Value::Int(7), Value::Int(8)])
+            Value::Other("[0:1]={7,8}".into())
+        );
+        assert_eq!(
+            convert(&array(ValueKind::Text), "[1:2][5:6]={{a,b},{c,d}}"),
+            Value::Other("[1:2][5:6]={{a,b},{c,d}}".into())
         );
         let boxes = ValueKind::Array {
             element: Box::new(ValueKind::Other),
