@@ -2,12 +2,15 @@ import type * as RecordsModule from '../api/records';
 import type * as SessionsModule from '../api/sessions';
 import type { ConnectionProfile } from '../api/records';
 import type { ExecOutput, SessionInfo } from '../api/sessions';
+import { effectScope, nextTick, watch } from 'vue';
 import { useDialogs } from './useDialogs';
 import { useQuerySave } from './useQuerySave';
-import { knownDefaultDatabase, rememberDefaultDatabase, scanBinding, TAB_KINDS, tabIdentity, useTabs } from './useTabs';
-import type { KeysTab, ObjectTab, QueryTab, TabKind } from './useTabs';
+import { knownDefaultDatabase, rememberDefaultDatabase, scanBinding, showsView, TAB_KINDS, tabIdentity, useLastSession, useTabs } from './useTabs';
+import type { KeysTab, ObjectTab, QueryTab, TabKind, WorkspaceTab } from './useTabs';
 import { useWorkspace } from './useWorkspace';
 import { fetchTree } from '../api/records';
+import { NO_MULTI } from '../lib/redisMode';
+import { closeSession } from '../api/sessions';
 
 const redisProfile = {
   id: 'r1',
@@ -27,6 +30,14 @@ const pgProfile = {
   name: 'Orders',
   engine: 'postgres',
   database: 'shop',
+} as unknown as ConnectionProfile;
+
+const myProfile = {
+  ...redisProfile,
+  id: 'm1',
+  name: 'Store',
+  engine: 'mysql',
+  database: 'app',
 } as unknown as ConnectionProfile;
 
 let sessionCount = 0;
@@ -62,7 +73,7 @@ vi.mock('../api/redis', async (original) => ({
 }));
 vi.mock('../api/records', async (original) => ({
   ...(await original<typeof RecordsModule>()),
-  fetchTree: vi.fn(async () => ({ folders: [], connections: [redisProfile, pgProfile], queries: [] })),
+  fetchTree: vi.fn(async () => ({ folders: [], connections: [redisProfile, pgProfile, myProfile], queries: [] })),
   updateQuery: (...args: unknown[]) => updateQuery(...args),
 }));
 
@@ -111,6 +122,69 @@ describe('tab sessions', () => {
     await running;
     const after = tabs.tabs.find((t) => t.id === tab.id) as QueryTab;
     expect(after.run).toBeNull();
+    await tabs.closeTab(tab.id);
+  });
+
+  /** Runs `text` in the console of a query tab and lets it succeed. */
+  async function runOk(id: string, text: string): Promise<void> {
+    const running = useTabs().runQuery(id, text, 0);
+    await tick();
+    releaseExecute({ results: [], notices: [], elapsedMs: 1 });
+    await running;
+  }
+
+  it('keeps the database when a SELECT queued in MULTI is discarded in a later run', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openQueryTab(redisProfile) as QueryTab;
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as QueryTab;
+    await runOk(tab.id, 'MULTI');
+    expect(live.multi).toEqual({ open: true, queuedDb: null });
+    await runOk(tab.id, 'SELECT 3');
+    // Only queued: the session is still on the database it was on.
+    expect(live.db).toBe(0);
+    expect(live.multi).toEqual({ open: true, queuedDb: 3 });
+    await runOk(tab.id, 'DISCARD');
+    expect(live.db).toBe(0);
+    expect(live.multi).toEqual(NO_MULTI);
+    // Outside a block a SELECT counts at once.
+    await runOk(tab.id, 'SELECT 2');
+    expect(live.db).toBe(2);
+    await tabs.closeTab(tab.id);
+  });
+
+  it('applies a SELECT queued in MULTI when a later run sends EXEC', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openQueryTab(redisProfile) as QueryTab;
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as QueryTab;
+    await runOk(tab.id, 'MULTI');
+    await runOk(tab.id, 'SELECT 3');
+    expect(live.db).toBe(0);
+    await runOk(tab.id, 'EXEC');
+    expect(live.db).toBe(3);
+    expect(live.multi).toEqual(NO_MULTI);
+    await tabs.closeTab(tab.id);
+  });
+
+  it('forgets an open MULTI block when the tab gets a new session or loses its session', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openQueryTab(redisProfile) as QueryTab;
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as QueryTab;
+    await runOk(tab.id, 'MULTI\nSELECT 3');
+    expect(live.multi).toEqual({ open: true, queuedDb: 3 });
+    await tabs.reconnect(tab.id);
+    await settle();
+    expect(live.multi).toEqual(NO_MULTI);
+    // The block belonged to the old session: EXEC on the new one switches nothing.
+    await runOk(tab.id, 'EXEC');
+    expect(live.db).toBe(0);
+    await runOk(tab.id, 'MULTI\nSELECT 5');
+    expect(live.multi).toEqual({ open: true, queuedDb: 5 });
+    tabs.markLost(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: live.session?.id ?? '' } });
+    expect(live.session).toBeNull();
+    expect(live.multi).toEqual(NO_MULTI);
     await tabs.closeTab(tab.id);
   });
 });
@@ -267,6 +341,124 @@ describe('tab registration', () => {
     const pgQuery = tabs.openQueryTab(pgProfile, null, '', 'analytics');
     expect(pgQuery.database).toBe('analytics');
     expect(pgQuery.title).toBe('Orders · analytics');
+    // Other MySQL tabs name their database in every statement; their session stays on the profile's.
+    expect(tabs.openTableDataTab(myProfile, { kind: 'table', database: 'shop', schema: null, parent: null, name: 'orders', signature: null }).database).toBeNull();
+  });
+
+  it('opens a MySQL query tab on the database it was opened for, also after a reconnect', async () => {
+    const tabs = useTabs();
+    openDatabaseSession.mockClear();
+    const tab = tabs.openQueryTab(myProfile, null, '', 'shop');
+    expect(tab.database).toBe('shop');
+    expect(tab.title).toBe('Store · shop');
+    await settle();
+    expect(openDatabaseSession).toHaveBeenLastCalledWith('m1', 'shop');
+    await tabs.reconnect(tab.id);
+    await settle();
+    expect(openDatabaseSession).toHaveBeenCalledTimes(2);
+    expect(openDatabaseSession).toHaveBeenLastCalledWith('m1', 'shop');
+    await tabs.closeTab(tab.id);
+  });
+
+  it('keeps the old session until a reconnect has a new one, then closes the old one', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openLiveTab(pgProfile, 'galera');
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as WorkspaceTab;
+    const old = live.session?.id;
+    expect(old).toBeDefined();
+    const seen: (string | null)[] = [];
+    const scope = effectScope();
+    scope.run(() => watch(() => live.session?.id ?? null, (id) => seen.push(id), { flush: 'sync' }));
+    vi.mocked(closeSession).mockClear();
+    const reconnecting = tabs.reconnect(tab.id);
+    expect(live.status).toBe('connecting');
+    expect(live.session?.id).toBe(old);
+    expect(closeSession).not.toHaveBeenCalled();
+    await reconnecting;
+    await settle();
+    // One step from the old session to the new one: a view rendering `v-if="tab.session"` stays mounted.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBeNull();
+    expect(seen[0]).not.toBe(old);
+    expect(live.status).toBe('ready');
+    expect(closeSession).toHaveBeenCalledWith(old);
+    scope.stop();
+    await tabs.closeTab(tab.id);
+  });
+
+  it('closes the old session when a reconnect fails, and refuses runs while it connects', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openQueryTab(redisProfile) as QueryTab;
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as QueryTab;
+    const old = live.session?.id;
+    let fail: (error: unknown) => void = () => undefined;
+    openSession.mockImplementationOnce(
+      () =>
+        new Promise<SessionInfo>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    vi.mocked(closeSession).mockClear();
+    execute.mockClear();
+    const reconnecting = tabs.reconnect(tab.id);
+    await tick();
+    await tabs.runQuery(tab.id, 'GET a', 0);
+    expect(execute).not.toHaveBeenCalled();
+    fail({ kind: 'internal', message: 'The server went away.' });
+    await reconnecting;
+    await settle();
+    expect(live.status).toBe('error');
+    expect(live.session).toBeNull();
+    expect(closeSession).toHaveBeenCalledWith(old);
+    await tabs.closeTab(tab.id);
+  });
+
+  it('says which tab is on screen', async () => {
+    const tabs = useTabs();
+    const a = tabs.openLiveTab(pgProfile, 'redisConfig');
+    const b = tabs.openQueryTab(redisProfile);
+    await settle();
+    tabs.setWorkspaceShown(true);
+    expect(tabs.activeId.value).toBe(b.id);
+    expect(tabs.isTabVisible(b.id)).toBe(true);
+    expect(tabs.isTabVisible(a.id)).toBe(false);
+    tabs.activate(a.id);
+    expect(tabs.isTabVisible(a.id)).toBe(true);
+    // A reconnect hides a view behind the connection state; query tabs show their own.
+    const live = tabs.tabs.find((t) => t.id === a.id) as WorkspaceTab;
+    live.status = 'connecting';
+    expect(showsView(live)).toBe(false);
+    expect(tabs.isTabVisible(a.id)).toBe(false);
+    live.status = 'ready';
+    expect(showsView({ ...live, kind: 'query', status: 'connecting' } as WorkspaceTab)).toBe(true);
+    // Activity or Settings shown: no tab is on screen.
+    tabs.setWorkspaceShown(false);
+    expect(tabs.isTabVisible(a.id)).toBe(false);
+    await tabs.closeTab(a.id);
+    await tabs.closeTab(b.id);
+  });
+
+  it('keeps the last session for a view while the tab has none', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openLiveTab(pgProfile, 'redisModules');
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as WorkspaceTab;
+    const first = live.session;
+    const scope = effectScope();
+    const last = scope.run(() => useLastSession(() => live));
+    expect(last?.value).toBe(first);
+    tabs.markLost(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: first?.id ?? '' } });
+    await nextTick();
+    expect(live.session).toBeNull();
+    expect(last?.value).toBe(first);
+    await tabs.reconnect(tab.id);
+    await settle();
+    expect(last?.value).toBe(live.session);
+    expect(last?.value).not.toBe(first);
+    scope.stop();
+    await tabs.closeTab(tab.id);
   });
 
   it('marks a tab for reconnect on reconnectRequired and clears it on reconnect', async () => {
@@ -281,9 +473,54 @@ describe('tab registration', () => {
     const after = tabs.tabs.find((t) => t.id === tab.id);
     expect(after?.reconnectNeeded).toBeNull();
     expect(after?.status).toBe('ready');
-    const lost = tabs.reportTabError(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: 'x' } });
+    const lost = tabs.reportTabError(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: after?.session?.id ?? '' } });
     expect(lost.kind).toBe('session');
     expect(tabs.tabs.find((t) => t.id === tab.id)?.status).toBe('error');
+    await tabs.closeTab(tab.id);
+  });
+
+  it('ignores a late error of the session a reconnect replaced', async () => {
+    const tabs = useTabs();
+    const tab = tabs.openLiveTab(pgProfile, 'serverStatus');
+    await settle();
+    const live = tabs.tabs.find((t) => t.id === tab.id) as WorkspaceTab;
+    const oldId = live.session?.id ?? '';
+    await tabs.reconnect(tab.id);
+    await settle();
+    const newId = live.session?.id ?? '';
+    expect(newId).not.toBe(oldId);
+    vi.mocked(closeSession).mockClear();
+    const lostConnection = { kind: 'session', error: { kind: 'driver', error: { kind: 'connection_lost', message: 'gone', code: null, detail: null, hint: null, position: null } } };
+
+    // The call was sent on the old session: its failure is parsed for display and the tab keeps the new session.
+    expect(tabs.reportTabError(tab.id, lostConnection, oldId).kind).toBe('session');
+    tabs.reportTabError(tab.id, { kind: 'reconnectRequired', message: 'The connection was edited.' }, oldId);
+    // A "session not found" names its session, so it is recognised without the caller passing the id.
+    tabs.reportTabError(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: oldId } });
+    tabs.markLost(tab.id, { kind: 'session', error: { kind: 'notFound', sessionId: oldId } });
+    expect(live.status).toBe('ready');
+    expect(live.session?.id).toBe(newId);
+    expect(live.reconnectNeeded).toBeNull();
+    expect(live.connectError).toBeNull();
+    expect(vi.mocked(closeSession)).not.toHaveBeenCalled();
+
+    // The same errors on the tab's own session do count.
+    tabs.reportTabError(tab.id, { kind: 'reconnectRequired', message: 'The connection was edited.' }, newId);
+    expect(live.reconnectNeeded).not.toBeNull();
+    tabs.reportTabError(tab.id, lostConnection, newId);
+    expect(live.status).toBe('error');
+    expect(live.session).toBeNull();
+    expect(vi.mocked(closeSession)).toHaveBeenCalledWith(newId);
+
+    // Already lost: a second late answer of that session changes nothing while the tab connects again.
+    const again = tabs.reconnect(tab.id);
+    expect(live.status).toBe('connecting');
+    tabs.reportTabError(tab.id, lostConnection, newId);
+    expect(live.status).toBe('connecting');
+    await again;
+    await settle();
+    expect(live.status).toBe('ready');
+    await tabs.closeTab(tab.id);
   });
 
   it('switches an open key browser to the database asked for', async () => {

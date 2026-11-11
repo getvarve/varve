@@ -24,10 +24,24 @@ export interface VarveAppOptions {
 }
 
 /**
+ * The platform, as `data-platform` on the root element (`mac`, `windows`
+ * or `linux`), for styles that differ per platform: only macOS draws its
+ * window buttons over the app's own title bar.
+ */
+function platform(): 'mac' | 'windows' | 'linux' {
+  const name = `${globalThis.navigator?.platform ?? ''} ${globalThis.navigator?.userAgent ?? ''}`;
+  if (/Mac/i.test(name)) return 'mac';
+  if (/Win/i.test(name)) return 'windows';
+  return 'linux';
+}
+
+/**
  * Creates the Varve app. A frontend entry calls this with its extensions and
  * mounts the result.
  */
 export function createVarveApp(options: VarveAppOptions = {}): App {
+  document.documentElement.dataset.platform = platform();
+
   const registry = new ExtensionRegistry(extInvoke);
   registry.install(options.extensions ?? []);
 

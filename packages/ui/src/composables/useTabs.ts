@@ -1,4 +1,5 @@
-import { computed, markRaw, reactive, ref, watch } from 'vue';
+import { computed, inject, markRaw, reactive, readonly, ref, shallowRef, watch } from 'vue';
+import type { InjectionKey, Ref, ShallowRef } from 'vue';
 import { displayName, kindLabel, objectIdentity } from '../api/catalog';
 import type { Container, ObjectKind, ObjectRef } from '../api/catalog';
 import { driverErrorOf, toCmdError } from '../api/errors';
@@ -12,7 +13,8 @@ import { partialAsOutput } from '../lib/partialRun';
 import { KeyIndex } from '../lib/keyIndex';
 import type { KeyIndexApi } from '../lib/keyIndex';
 import { runWithConfirmation } from '../lib/destructive';
-import { selectedDbAfterRun } from '../lib/redisMode';
+import { NO_MULTI, runEffect } from '../lib/redisMode';
+import type { MultiState } from '../lib/redisMode';
 import { LIVE_PANEL_LABELS } from '../lib/tree';
 import type { LivePanel } from '../lib/tree';
 import { withConnectPrompts } from './useConnect';
@@ -47,6 +49,13 @@ interface TabBase {
   connectError: CmdError | null;
   /** Redis logical database of the session; `null` for SQL engines. */
   db: number | null;
+  /**
+   * Redis `MULTI` block the console runs so far left open on the session
+   * (`NO_MULTI` without one, and for SQL engines). A `SELECT` queued in it
+   * changes `db` only when a later run sends `EXEC`. Belongs to the session:
+   * a new or retired session starts without a block.
+   */
+  multi: MultiState;
   /**
    * PostgreSQL database the tab's session is opened on (`open_database_session`);
    * `null` for the profile's own database and for the other engines.
@@ -256,7 +265,23 @@ let runIds = 0;
 /** The newest connect attempt per tab; an older attempt that finishes later is discarded. */
 const connecting = new Map<string, number>();
 
-/** Opens the session of a tab (one session per tab), asking for secrets as needed. */
+/** Takes the session away from a tab and closes it in the background. */
+function retireSession(tab: WorkspaceTab): void {
+  const old = tab.session;
+  // A block left open by console runs ends with the session it was opened on.
+  tab.multi = NO_MULTI;
+  if (!old) return;
+  tab.session = null;
+  void closeSession(old.id).catch(() => undefined);
+}
+
+/**
+ * Opens the session of a tab (one session per tab), asking for secrets as
+ * needed. A session the tab still has (a reconnect) stays in place until the
+ * new one is ready and is replaced in one step, so the tab's view stays
+ * mounted and sees one session change; when no new session can be opened,
+ * the old one is closed and the tab offers to connect again.
+ */
 async function connect(id: string): Promise<void> {
   const tab = find(id);
   if (!tab) return;
@@ -264,6 +289,7 @@ async function connect(id: string): Promise<void> {
   if (!profile) {
     tab.status = 'error';
     tab.connectError = { kind: 'notFound', message: 'This connection no longer exists.' };
+    retireSession(tab);
     return;
   }
   tab.status = 'connecting';
@@ -278,7 +304,10 @@ async function connect(id: string): Promise<void> {
     const stale = connecting.get(id) !== generation;
     const current = stale ? undefined : find(id);
     if (!info) {
-      if (current) current.status = 'cancelled';
+      if (current) {
+        current.status = 'cancelled';
+        retireSession(current);
+      }
       return;
     }
     if (!current) {
@@ -303,11 +332,14 @@ async function connect(id: string): Promise<void> {
         return;
       }
     }
+    const previous = current.session;
     current.session = info;
     current.db = db;
+    current.multi = NO_MULTI;
     current.reconnectNeeded = null;
     if (current.kind === 'keys') resetKeys(current);
     current.status = 'ready';
+    if (previous && previous.id !== info.id) void closeSession(previous.id).catch(() => undefined);
     if (current.database === null) rememberDefaultDatabase(profile, info.database);
     if (current.kind === 'overview' && info.engine === 'postgres') mergeOverview(current);
   } catch (error: unknown) {
@@ -315,6 +347,7 @@ async function connect(id: string): Promise<void> {
     if (current) {
       current.status = 'error';
       current.connectError = toCmdError(error);
+      retireSession(current);
     }
   }
 }
@@ -395,6 +428,16 @@ function sessionDatabase(profile: ConnectionProfile, database: string | null): s
   return profile.engine === 'postgres' ? database : null;
 }
 
+/**
+ * The database a query tab's session is opened on. Unlike the other tabs,
+ * whose statements name their database, a query runs on the session's
+ * default database: MySQL and MariaDB sessions open with it as their default
+ * schema, PostgreSQL sessions on it. Redis numbers its databases (`db`).
+ */
+function queryDatabase(profile: ConnectionProfile, database: string | null): string | null {
+  return profile.engine === 'redis' ? null : database;
+}
+
 /** Fields every tab starts with. */
 function base(profile: ConnectionProfile, title: string, database: string | null, db: number | null = null): TabBase {
   return {
@@ -405,6 +448,7 @@ function base(profile: ConnectionProfile, title: string, database: string | null
     session: null,
     connectError: null,
     db: profile.engine === 'redis' ? (db ?? profile.options.redisDb) : null,
+    multi: NO_MULTI,
     database: sessionDatabase(profile, database),
     reconnectNeeded: null,
     unsaved: false,
@@ -412,16 +456,18 @@ function base(profile: ConnectionProfile, title: string, database: string | null
 }
 
 /**
- * Opens a query (or Redis console) tab on a connection. `database` opens a
- * PostgreSQL tab on another database than the profile's.
+ * Opens a query (or Redis console) tab on a connection. `database` opens the
+ * tab's session on another database than the profile's (PostgreSQL), or with
+ * it as the default schema (MySQL, MariaDB); a reconnect keeps it.
  */
 function openQueryTab(profile: ConnectionProfile, saved: SavedQuery | null = null, sql = '', database: string | null = null): WorkspaceTab {
   // An open tab of the same saved query is activated by `add` (`tabIdentity`).
   const sameConnection = tabs.filter((t) => t.connectionId === profile.id && t.kind === 'query').length;
-  const onDatabase = sessionDatabase(profile, database);
+  const onDatabase = queryDatabase(profile, database);
   const label = profile.engine === 'redis' ? `Console · ${profile.name}` : onDatabase !== null ? `${profile.name} · ${onDatabase}` : profile.name;
   return add({
-    ...base(profile, saved ? saved.name : sameConnection > 0 ? `${label} (${sameConnection + 1})` : label, database),
+    ...base(profile, saved ? saved.name : sameConnection > 0 ? `${label} (${sameConnection + 1})` : label, null),
+    database: onDatabase,
     kind: 'query',
     sql: saved ? saved.sql : sql,
     savedQuery: saved,
@@ -462,6 +508,7 @@ function openKeysTab(profile: ConnectionProfile, db: number | null = null): Work
     session: null,
     connectError: null,
     db: startDb,
+    multi: NO_MULTI,
     database: null,
     reconnectNeeded: null,
     unsaved: false,
@@ -582,17 +629,39 @@ function openPubSubTab(profile: ConnectionProfile): WorkspaceTab {
 }
 
 /**
+ * The session an error is about, when that is known: the id the caller sent
+ * the failed call on, else the id a "session not found" error names.
+ */
+function errorSession(error: CmdError, sessionId: string | undefined): string | undefined {
+  if (sessionId !== undefined) return sessionId;
+  return error.kind === 'session' && error.error.kind === 'notFound' ? error.error.sessionId : undefined;
+}
+
+/**
+ * True when an error belongs to a session the tab no longer uses: the answer
+ * of a call that was still running when a reconnect replaced the session (or
+ * when the session was already marked lost). Such an error says nothing
+ * about the tab's present session and must not change the tab.
+ */
+function fromReplacedSession(tab: WorkspaceTab, error: CmdError, sessionId: string | undefined): boolean {
+  const from = errorSession(error, sessionId);
+  return from !== undefined && tab.session?.id !== from;
+}
+
+/**
  * Handles an error from a call made on a tab's session and returns it parsed
  * for display: a lost session marks the tab lost (it offers "Connect again"),
  * `reconnectRequired` makes it offer "Reconnect". Views call this from every
- * catch so all tabs react the same way.
+ * catch so all tabs react the same way. `sessionId` is the session the failed
+ * call was sent on (read before the await): an error of a session the tab
+ * has replaced since is only parsed, the tab is left alone.
  */
-function reportTabError(id: string, error: unknown): CmdError {
+function reportTabError(id: string, error: unknown, sessionId?: string): CmdError {
   const cmd = toCmdError(error);
-  if (isLostSession(cmd)) markLost(id, cmd);
+  if (isLostSession(cmd)) markLost(id, cmd, sessionId);
   else if (cmd.kind === 'reconnectRequired') {
     const tab = find(id);
-    if (tab) tab.reconnectNeeded = cmd;
+    if (tab && !fromReplacedSession(tab, cmd, sessionId)) tab.reconnectNeeded = cmd;
   }
   return cmd;
 }
@@ -649,15 +718,15 @@ async function closeConnectionTabs(connectionId: string): Promise<void> {
   for (const tab of tabs.filter((t) => t.connectionId === connectionId)) await closeTab(tab.id);
 }
 
-/** Opens a new session for a tab whose session failed or closed. */
+/**
+ * Opens a new session for a tab whose session failed, closed or must be
+ * replaced (the connection was edited, another database). The old session
+ * stays until the new one is ready (see `connect`): the tab's view is not
+ * torn down, so a typed form, edited DDL or staged edits survive. While it
+ * connects the tab is not `ready`, and runs on it are refused.
+ */
 async function reconnect(id: string): Promise<void> {
-  const tab = find(id);
-  if (!tab) return;
-  if (tab.session) {
-    const old = tab.session.id;
-    tab.session = null;
-    await closeSession(old).catch(() => undefined);
-  }
+  if (!find(id)) return;
   await connect(id);
 }
 
@@ -681,7 +750,8 @@ async function switchTabDatabase(id: string, database: string | null): Promise<v
  */
 async function runQuery(id: string, text: string, offset: number): Promise<void> {
   const tab = find(id);
-  if (!tab || tab.kind !== 'query' || !tab.session || tab.running || text.trim() === '') return;
+  // Not while a reconnect replaces the session: the run would land on the session being closed.
+  if (!tab || tab.kind !== 'query' || !tab.session || tab.status !== 'ready' || tab.running || text.trim() === '') return;
   const profile = useWorkspace().connection(tab.connectionId);
   const sessionId = tab.session.id;
   tab.running = true;
@@ -715,7 +785,7 @@ async function runQuery(id: string, text: string, offset: number): Promise<void>
       current.run = markRaw({ output, error: driverError ?? cmd, offset, text, doc, id: runId, startedAt });
       // Commands before the failing one did run: a SELECT among them still switched the database.
       if (driverError) followSelect(current, text, driverError);
-      if (isLostSession(cmd)) markLost(id, cmd);
+      if (isLostSession(cmd)) markLost(id, cmd, sessionId);
     }
   } finally {
     const current = find(id);
@@ -723,37 +793,46 @@ async function runQuery(id: string, text: string, offset: number): Promise<void>
   }
 }
 
-/** Keeps the Redis database switcher in step with a `SELECT n` that ran in the console. */
+/**
+ * Keeps the Redis database switcher in step with a `SELECT n` that ran in
+ * the console, and remembers the `MULTI` block the run left open: a `SELECT`
+ * queued in one run takes effect when a later run sends `EXEC`, and never
+ * after `DISCARD`.
+ */
 function followSelect(tab: WorkspaceTab, ranText: string, error: DriverError | null): void {
   if (tab.db === null) return;
-  const db = selectedDbAfterRun(ranText, error);
-  if (db !== null) tab.db = db;
+  const effect = runEffect(ranText, error, tab.multi);
+  if (effect.db !== null) tab.db = effect.db;
+  tab.multi = effect.multi;
 }
 
 /**
  * Marks a tab whose session is gone (the connection dropped, or the backend
  * no longer knows the session). The tab then offers "Connect again".
+ * `sessionId` is the session the failed call was sent on; without it the id
+ * in a "session not found" error is used. When that is not the tab's session
+ * any more (a reconnect replaced it while the call was running), nothing
+ * happens: the new session is not the one that was lost.
  */
-function markLost(id: string, error: CmdError): void {
+function markLost(id: string, error: CmdError, sessionId?: string): void {
   const tab = find(id);
-  if (!tab) return;
-  const old = tab.session;
-  tab.session = null;
+  if (!tab || fromReplacedSession(tab, error, sessionId)) return;
   tab.status = 'error';
   tab.connectError = error;
-  if (old) void closeSession(old.id).catch(() => undefined);
+  retireSession(tab);
 }
 
 /** Switches the Redis database of a tab's session; failures are rethrown for the caller to show. */
 async function selectDb(id: string, db: number): Promise<void> {
   const tab = find(id);
-  if (!tab?.session) return;
+  // While a reconnect runs, the new session switches to `db` itself (`openKeysTab` sets it).
+  if (!tab?.session || tab.status !== 'ready') return;
   const sessionId = tab.session.id;
   try {
     await redisSelectDb(sessionId, db);
   } catch (error: unknown) {
     const cmd = toCmdError(error);
-    if (isLostSession(cmd)) markLost(id, cmd);
+    if (isLostSession(cmd)) markLost(id, cmd, sessionId);
     throw error;
   }
   const current = find(id);
@@ -797,6 +876,76 @@ function loadText(id: string, sql: string): void {
 
 function activate(id: string): void {
   if (find(id)) activeId.value = id;
+}
+
+/**
+ * True while the workspace page is on screen. `WorkspaceView` sets it: it
+ * stays mounted (hidden) while Activity or Settings is shown, and so do the
+ * views of all open tabs.
+ */
+const workspaceShown = ref(false);
+
+function setWorkspaceShown(shown: boolean): void {
+  workspaceShown.value = shown;
+}
+
+/**
+ * Whether `WorkspaceView` shows a tab's own view: query tabs and the key
+ * browser always (they show their connection state themselves), the other
+ * views only while the tab is connected. Before that, and while a reconnect
+ * runs, the view (once mounted) stays mounted but hidden behind the
+ * connection state.
+ */
+export function showsView(tab: WorkspaceTab): boolean {
+  return tab.kind === 'query' || tab.kind === 'keys' || tab.status === 'ready';
+}
+
+/**
+ * Whether a tab's view is on screen: the workspace page is shown, the tab is
+ * the active one and its view is not hidden behind the connection state.
+ * Views of the other tabs stay mounted with `display: none`, so they must not
+ * take focus, should pause polling, and measure 0 px until they are shown.
+ */
+function isTabVisible(id: string): boolean {
+  if (!workspaceShown.value || activeId.value !== id) return false;
+  const tab = find(id);
+  return tab !== undefined && showsView(tab);
+}
+
+/** Provided by `WorkspaceView` to each tab's view: `isTabVisible` of that tab. */
+export const TAB_VISIBLE_KEY: InjectionKey<Readonly<Ref<boolean>>> = Symbol('varve.tabVisible');
+
+const alwaysVisible = readonly(ref(true));
+
+/**
+ * In a tab's view (and anything inside it): whether that tab is on screen
+ * (`isTabVisible`). Watch it to pause timers while hidden, to refresh sizes
+ * (virtual lists, grids, editors) and restore scroll positions when shown,
+ * and to focus only while shown. A view mounted outside the workspace (on its
+ * own, as in a component test) is always on screen.
+ */
+export function useTabVisible(): Readonly<Ref<boolean>> {
+  return inject(TAB_VISIBLE_KEY, alwaysVisible);
+}
+
+/**
+ * In a tab's view: the tab's session, or while it has none (the session was
+ * lost, a reconnect failed or was cancelled) the last one it had. A view that
+ * renders its editor with this instead of `v-if="tab.session"` is not torn
+ * down when the session goes, so typed forms, edited DDL and staged edits
+ * survive until the tab connects again; `WorkspaceView` hides the view behind
+ * the connection state meanwhile. Calls must still go through `tab.session`
+ * (or check it), never through a session that is gone.
+ */
+export function useLastSession(tab: () => Pick<WorkspaceTab, 'session'>): Readonly<ShallowRef<SessionInfo | null>> {
+  const last = shallowRef<SessionInfo | null>(tab().session);
+  watch(
+    () => tab().session,
+    (session) => {
+      if (session) last.value = session;
+    },
+  );
+  return last;
 }
 
 // A remembered default database belongs to one version of a connection: an edit or delete drops it.
@@ -860,6 +1009,8 @@ export function useTabs() {
     cancelQuery,
     loadText,
     activate,
+    isTabVisible,
+    setWorkspaceShown,
   };
 }
 

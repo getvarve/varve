@@ -109,6 +109,8 @@ async function confirmUnsavedTabs(ids: readonly string[]): Promise<boolean> {
   for (const id of ids) {
     const tab = queryTab(id);
     if (!tab || !hasUnsavedEdits(tab)) continue;
+    // Shows the tab asked about. Every tab's view stays mounted (WorkspaceView), so the tab
+    // that was active keeps its unapplied work when the user answers Cancel.
     useTabs().activate(id);
     const choice = await useDialogs().askUnsavedClose({ title: tab.title, saved: tab.savedQuery !== null });
     if (choice === null) return false;
@@ -128,6 +130,7 @@ async function confirmUnsavedEditors(ids: readonly string[]): Promise<boolean> {
   const editors = useTabs().tabs.filter((t) => wanted.has(t.id) && t.kind !== 'query' && t.unsaved);
   const [first] = editors;
   if (!first) return true;
+  // Shows the first tab asked about; switching tabs leaves every view (and its changes) mounted.
   useTabs().activate(first.id);
   const one = editors.length === 1;
   return useDialogs().askConfirm({
