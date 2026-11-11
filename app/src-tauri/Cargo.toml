@@ -64,6 +64,9 @@ serde_json.workspace = true
 tauri.workspace = true
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-fs = "2.7.1"
+# A second launch focuses the running window instead of opening app.db
+# twice (src/lib.rs).
+tauri-plugin-single-instance = "2.5.5"
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }

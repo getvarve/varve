@@ -303,7 +303,12 @@ fn spawn_retention(services: Arc<Services>) {
         let mut daily = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
         loop {
             daily.tick().await;
-            if let Err(error) = services.apply_stored_retention() {
+            // A large prune holds `app.db` for a while: on the blocking
+            // pool, not on an async worker.
+            let services = Arc::clone(&services);
+            if let Err(error) =
+                commands::run_blocking(move || services.apply_stored_retention()).await
+            {
                 tracing::warn!(%error, "could not apply the activity retention period");
             }
         }
@@ -335,7 +340,22 @@ pub fn run(
     let host = build_host(&extensions)?;
     tracing::info!(extensions = host.extensions().len(), "starting Varve");
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // One Varve per user: a second launch focuses the running window and
+    // exits before it opens `app.db` (two processes would race on its
+    // migrations and its locks). First among the plugins, so the second
+    // instance stops before any other setup. A process started with its
+    // own data folder (`VARVE_DATA_DIR`, development and tests) shares no
+    // `app.db` with the installed app and may run beside it. `varve mcp`
+    // never gets here (main.rs), so the bridge runs next to the app.
+    let builder = if std::env::var_os(DATA_DIR_ENV).is_none() {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }))
+    } else {
+        builder
+    };
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());
     // Windows and Linux update through the Tauri updater when the config
@@ -444,6 +464,22 @@ pub fn run(
             }
         });
     Ok(())
+}
+
+/// Brings the main window to the front (a second launch of Varve).
+fn focus_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    for (step, result) in [
+        ("unminimize", window.unminimize()),
+        ("show", window.show()),
+        ("focus", window.set_focus()),
+    ] {
+        if let Err(error) = result {
+            tracing::warn!(%error, step, "could not bring the window to the front");
+        }
+    }
 }
 
 /// Installs the rustls `ring` provider unless the process already chose one.

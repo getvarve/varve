@@ -9,7 +9,7 @@ use varve_catalog::data_edit::{
     ApplyOutcome, ChangeOp, KeyInfo, PlanOptions, RowChange, RowEditPlan, TableTarget,
 };
 use varve_core::Engine;
-use varve_driver::{Dialect, StatementKind, split_statements};
+use varve_driver::{Dialect, LexKind, StatementKind, lex, split_statements};
 
 use super::editors::transaction_effect;
 use super::plans::{Planned, StoredPlan, wrong_kind};
@@ -28,6 +28,17 @@ fn single_kind(sql: &str, dialect: Dialect) -> Option<StatementKind> {
         [span] => Some(span.kind),
         _ => None,
     }
+}
+
+/// True when the first token of `sql` is the keyword `verb`. Comments
+/// before it do not count: the planner writes none.
+fn starts_with_verb(sql: &str, dialect: Dialect, verb: &str) -> bool {
+    lex(sql, dialect, true).first().is_some_and(|first| {
+        first.kind == LexKind::Word
+            && sql
+                .get(first.start..first.end)
+                .is_some_and(|word| word.eq_ignore_ascii_case(verb))
+    })
 }
 
 /// Checks that a plan coming back from the UI only holds what the planner
@@ -56,12 +67,19 @@ pub fn validate_row_plan(plan: &RowEditPlan, engine: Engine) -> CmdResult<()> {
                 index + 1
             ),
         };
-        let expected = match change.op {
-            ChangeOp::Insert => StatementKind::Insert,
-            ChangeOp::Update => StatementKind::Update,
-            ChangeOp::Delete => StatementKind::Delete,
+        let (expected, verb) = match change.op {
+            ChangeOp::Insert => (StatementKind::Insert, "INSERT"),
+            ChangeOp::Update => (StatementKind::Update, "UPDATE"),
+            ChangeOp::Delete => (StatementKind::Delete, "DELETE"),
         };
-        if single_kind(&change.statement, dialect) != Some(expected) {
+        // The classifier gives a statement that wraps or holds a change
+        // the kind of that change (`EXPLAIN ANALYZE DELETE ...`, MariaDB
+        // `ANALYZE DELETE ...`, `COPY (DELETE ...) TO ...`, `WITH ...
+        // DELETE ...`, `(DELETE ...)`); the planner writes the plain
+        // statement, so its first word has to be the operation.
+        if single_kind(&change.statement, dialect) != Some(expected)
+            || !starts_with_verb(&change.statement, dialect, verb)
+        {
             return Err(invalid());
         }
         for select in change.lock.iter().chain(change.refresh.iter()) {
@@ -372,6 +390,84 @@ mod tests {
             )],
         );
         assert!(validate_row_plan(&locked, Engine::Mysql).is_ok());
+    }
+
+    /// A statement that wraps or holds a change has that change's kind for
+    /// the classifier; a grid change is the plain statement only.
+    #[test]
+    fn grid_changes_start_with_their_operation() {
+        let refused = |engine: Engine, op: ChangeOp, statement: &str| {
+            validate_row_plan(&plan(engine, vec![change(op, statement, None)]), engine).is_err()
+        };
+        for (engine, op, statement) in [
+            (
+                Engine::Postgres,
+                ChangeOp::Delete,
+                "EXPLAIN ANALYZE DELETE FROM s.t WHERE id = 1",
+            ),
+            (
+                Engine::Mysql,
+                ChangeOp::Update,
+                "EXPLAIN ANALYZE UPDATE t SET a = 1 WHERE id = 1",
+            ),
+            (
+                Engine::Mariadb,
+                ChangeOp::Delete,
+                "ANALYZE DELETE FROM t WHERE id = 1",
+            ),
+            (
+                Engine::Postgres,
+                ChangeOp::Delete,
+                "COPY (DELETE FROM s.t WHERE id = 1 RETURNING *) TO PROGRAM 'sh'",
+            ),
+            (
+                Engine::Postgres,
+                ChangeOp::Delete,
+                "WITH gone AS (DELETE FROM s.t WHERE id = 1 RETURNING *) SELECT * FROM gone",
+            ),
+            (
+                Engine::Postgres,
+                ChangeOp::Update,
+                "WITH ids AS (SELECT 1 AS id) UPDATE s.t SET a = 1 WHERE id IN (SELECT id FROM ids)",
+            ),
+            (
+                Engine::Postgres,
+                ChangeOp::Insert,
+                "(INSERT INTO s.t (a) VALUES (1))",
+            ),
+            (
+                Engine::Mysql,
+                ChangeOp::Delete,
+                "/* note */ DELETE FROM t WHERE id = 1",
+            ),
+            // The operation of the change, not just any of the three.
+            (
+                Engine::Postgres,
+                ChangeOp::Update,
+                "DELETE FROM s.t WHERE id = 1",
+            ),
+        ] {
+            assert!(refused(engine, op, statement), "{statement}");
+        }
+        for (engine, op, statement) in [
+            (
+                Engine::Postgres,
+                ChangeOp::Insert,
+                "  insert into s.t (a) values (1)",
+            ),
+            (
+                Engine::Mysql,
+                ChangeOp::Update,
+                "UPDATE t SET a = 1 WHERE id = 1",
+            ),
+            (
+                Engine::Mariadb,
+                ChangeOp::Delete,
+                "DELETE FROM t WHERE id = 1 LIMIT 1",
+            ),
+        ] {
+            assert!(!refused(engine, op, statement), "{statement}");
+        }
     }
 
     #[test]

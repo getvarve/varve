@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use varve_catalog::EditPlan;
 use varve_catalog::data_edit::{RowEditPlan, TableTarget};
 use varve_live_stats::redis::CommandPlan;
@@ -39,6 +39,37 @@ pub struct Planned<T> {
     pub plan: T,
 }
 
+/// An editor plan as the `*_plan` commands return it: the plan, and its
+/// statements as the user reads them. The stored plan is what runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditPlanView {
+    /// What will run.
+    #[serde(flatten)]
+    pub plan: EditPlan,
+    /// [`EditPlan::shown`]: the statements to show in the preview and the
+    /// confirmation. A MySQL statement that is built at run time is the
+    /// one `ALTER` or `CREATE` it runs here, where `statements` holds the
+    /// `SET`, `PREPARE` and `EXECUTE` sequence. Equal to `statements` for
+    /// every other plan.
+    pub shown: Vec<String>,
+}
+
+impl From<EditPlan> for EditPlanView {
+    fn from(plan: EditPlan) -> Self {
+        let shown = plan.shown();
+        Self { plan, shown }
+    }
+}
+
+impl std::ops::Deref for EditPlanView {
+    type Target = EditPlan;
+
+    fn deref(&self) -> &EditPlan {
+        &self.plan
+    }
+}
+
 /// What a stored plan is.
 #[derive(Debug, Clone)]
 pub enum StoredPlan {
@@ -52,6 +83,15 @@ pub enum StoredPlan {
         plan: EditPlan,
         /// The database dropped or renamed.
         database: String,
+    },
+    /// An object editor plan that refreshes a PostgreSQL materialized view:
+    /// its `matview.refreshed` activity event names the view.
+    EditRefresh {
+        /// The SQL.
+        plan: EditPlan,
+        /// The view, as `schema.name` (or `name` when the change named no
+        /// schema).
+        target: String,
     },
     /// Grid changes, bound to their table.
     Rows {
@@ -77,7 +117,7 @@ pub enum StoredPlan {
 impl StoredPlan {
     fn kind(&self) -> &'static str {
         match self {
-            Self::Edit(_) | Self::EditDatabase { .. } => "editor",
+            Self::Edit(_) | Self::EditDatabase { .. } | Self::EditRefresh { .. } => "editor",
             Self::Rows { .. } => "grid",
             Self::Variable { .. } => "variable",
             Self::Redis(_) => "Redis",

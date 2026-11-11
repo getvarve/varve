@@ -6,7 +6,6 @@
 use std::time::Instant;
 
 use varve_activity::{ActivityEvent, Category, ErrorDetails, Outcome as EventOutcome};
-use varve_catalog::EditPlan;
 use varve_core::Engine;
 use varve_live_stats::sql::{
     self as live, EditScope, GaleraStatus, KillOutcome, KillTarget, LiveError, ProcessList,
@@ -14,7 +13,7 @@ use varve_live_stats::sql::{
 };
 
 use super::editors::{confirmation_labels, plan_kinds};
-use super::plans::{Planned, StoredPlan, wrong_kind};
+use super::plans::{EditPlanView, Planned, StoredPlan, wrong_kind};
 use super::{elapsed_ms, sql_dialect};
 use crate::commands::{CmdError, Services};
 use crate::sessions::SessionError;
@@ -113,7 +112,7 @@ impl Services {
         session_id: &str,
         name: &str,
         change: &VariableChange,
-    ) -> CmdResult<Planned<EditPlan>> {
+    ) -> CmdResult<Planned<EditPlanView>> {
         let info = self.session_info(session_id)?;
         Self::require_engine(&info, &SQL_ENGINES, "Server variables")?;
         let server = info.server.clone();
@@ -142,7 +141,10 @@ impl Services {
                 scope,
             },
         );
-        Ok(Planned { plan_id, plan })
+        Ok(Planned {
+            plan_id,
+            plan: plan.into(),
+        })
     }
 
     /// Runs a stored variable change plan statement by statement through

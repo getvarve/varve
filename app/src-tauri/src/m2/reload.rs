@@ -12,8 +12,8 @@
 
 use tokio::sync::OwnedMutexGuard;
 
-use crate::commands::Services;
-use crate::sessions::{ReloadReport, ReloadedSession, SessionInfo};
+use crate::commands::{CmdError, Services};
+use crate::sessions::{ReloadReport, ReloadedSession, SessionError, SessionInfo};
 
 /// The user sessions of the previous page, from [`Services::begin_page`].
 pub struct UnloadedPage {
@@ -61,14 +61,21 @@ impl Services {
             }
             let in_transaction = self.sessions.in_transaction_now(&info.id).await;
             match self.close_session(&info.id).await {
-                Ok(()) => closed.push(ReloadedSession {
-                    connection_id: info.connection_id.clone(),
-                    in_transaction,
-                }),
+                Ok(()) => {}
+                // Closed meanwhile by someone else, who reports it.
+                Err(CmdError::Session {
+                    error: SessionError::NotFound { .. },
+                }) => continue,
+                // The session is closed all the same; only the driver's
+                // goodbye failed (a connection that was already lost).
                 Err(error) => {
-                    tracing::warn!(%error, "could not close a session of the unloaded page");
+                    tracing::warn!(%error, "a session of the unloaded page did not close cleanly");
                 }
             }
+            closed.push(ReloadedSession {
+                connection_id: info.connection_id.clone(),
+                in_transaction,
+            });
         }
         let count = closed.len();
         self.sessions.record_reload(closed);

@@ -5775,6 +5775,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-single-instance"
+version = "2.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "726b6da0dd5bd1344f84f4108a622c07d01923baacb5c803a605189672c5352f"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "windows-sys 0.61.2",
+ "zbus",
+]
+
+[[package]]
 name = "tauri-plugin-updater"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6548,6 +6564,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "thiserror 2.0.21",
  "time",
@@ -6611,6 +6628,7 @@ dependencies = [
  "des",
  "md-5",
  "pkcs8",
+ "rustls-native-certs",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -6631,7 +6649,6 @@ dependencies = [
  "pkcs8",
  "rcgen",
  "rustls",
- "rustls-native-certs",
  "serde_json",
  "tokio",
  "tracing",
@@ -6649,7 +6666,6 @@ dependencies = [
  "pkcs8",
  "rcgen",
  "rustls",
- "rustls-native-certs",
  "serde_json",
  "tempfile",
  "tokio",
@@ -6670,7 +6686,6 @@ dependencies = [
  "rcgen",
  "redis",
  "rustls",
- "rustls-native-certs",
  "serde",
  "serde_json",
  "tokio",
@@ -6745,7 +6760,9 @@ name = "varve-secrets"
 version = "0.3.1"
 dependencies = [
  "keyring",
+ "keyring-core",
  "thiserror 2.0.21",
+ "zbus-secret-service-keyring-store",
  "zeroize",
 ]
 

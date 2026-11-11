@@ -176,6 +176,13 @@ impl From<RecordError> for CmdError {
             RecordError::NotFound { .. } => CmdError::NotFound {
                 message: error.to_string(),
             },
+            // As a keychain failure read directly (`From<SecretError>`):
+            // the user sees the keychain's message; typing the secret
+            // still works.
+            RecordError::KeychainUnavailable(message) => CmdError::Keychain {
+                message,
+                profile: None,
+            },
             other => CmdError::Internal {
                 message: other.to_string(),
             },
@@ -538,10 +545,28 @@ impl Services {
         id: &str,
         input: &ConnectionInput,
     ) -> CmdResult<ConnectionProfile> {
+        self.update_connection_checked(id, input, |_, _| Ok(()))
+            .await
+    }
+
+    /// [`Self::update_connection`] that first lets `check` refuse the edit,
+    /// with the profile as stored and the edited one (validated and
+    /// normalized), under the profile's record lock: no other edit can
+    /// land between the check and the write.
+    ///
+    /// # Errors
+    /// What `check` returns (nothing is changed then), and everything
+    /// [`Self::update_connection`] returns.
+    pub async fn update_connection_checked(
+        self: &Arc<Self>,
+        id: &str,
+        input: &ConnectionInput,
+        check: EditCheck,
+    ) -> CmdResult<ConnectionProfile> {
         let this = Arc::clone(self);
         let (owned_id, owned_input) = (id.to_string(), input.clone());
         let stored =
-            run_blocking(move || this.store_connection_edit(&owned_id, &owned_input)).await;
+            run_blocking(move || this.store_connection_edit(&owned_id, &owned_input, check)).await;
         // Earlier failed removals of other connections, without waiting.
         self.retry_keychain_cleanup_in_background();
         let (old, new, problems, version_problem) = stored?;
@@ -580,6 +605,7 @@ impl Services {
         &self,
         id: &str,
         input: &ConnectionInput,
+        check: EditCheck,
     ) -> CmdResult<(
         ConnectionProfile,
         ConnectionProfile,
@@ -594,6 +620,7 @@ impl Services {
             let mut preview = Records::preview_connection(PERSONAL_WORKSPACE, input)?;
             preview.id = old.id.clone();
             preview.saved_secrets = old.saved_secrets.clone();
+            check(&old, &preview)?;
             let keep = reusable_secrets(&old, &preview);
             let dropped: Vec<SecretKindName> = old
                 .saved_secrets
@@ -961,7 +988,51 @@ impl Services {
         ssh_secret: Option<SecretInput>,
         tls_passphrase: Option<SecretInput>,
     ) -> CmdResult<TestResult> {
-        let profile = match target {
+        let profile = self.test_profile(target)?;
+        self.test_profile_with(&profile, password, ssh_secret, tls_passphrase)
+            .await
+    }
+
+    /// [`Self::test_connection`] with the version of a saved profile each
+    /// typed secret was entered for (`typed_for`: the `version` the UI
+    /// showed when the user typed it). A secret is refused when an edit
+    /// since then made secrets of its kind unusable (another server,
+    /// account or route; see [`Self::refuse_outdated_typed`]). Unsaved
+    /// input is tested with the secrets typed in its form.
+    ///
+    /// # Errors
+    /// As [`Self::test_connection`]; `secretRequired` for a typed secret
+    /// entered for older settings.
+    pub async fn test_connection_for(
+        self: &Arc<Self>,
+        target: TestTarget,
+        typed_for: TypedFor,
+        password: Option<SecretInput>,
+        ssh_secret: Option<SecretInput>,
+        tls_passphrase: Option<SecretInput>,
+    ) -> CmdResult<TestResult> {
+        let saved = matches!(target, TestTarget::Saved { .. });
+        let profile = self.test_profile(target)?;
+        if saved {
+            self.refuse_outdated_typed(
+                &profile,
+                TypedVersions::of(
+                    typed_for,
+                    password.is_some(),
+                    ssh_secret.is_some(),
+                    tls_passphrase.is_some(),
+                ),
+            )
+            .await?;
+        }
+        self.test_profile_with(&profile, password, ssh_secret, tls_passphrase)
+            .await
+    }
+
+    /// The profile a test connects with: the saved one, or the editor's
+    /// input with the saved secrets that are safe to reuse for it.
+    fn test_profile(&self, target: TestTarget) -> CmdResult<ConnectionProfile> {
+        Ok(match target {
             TestTarget::Saved { id } => self.records.connection(&id)?,
             TestTarget::Unsaved { input, based_on } => {
                 let mut preview = Records::preview_connection(PERSONAL_WORKSPACE, &input)?;
@@ -975,20 +1046,33 @@ impl Services {
                 }
                 preview
             }
-        };
-        let lease = self
-            .tunnels
-            .lease_for(
-                &profile,
-                self.secrets.as_ref(),
-                ssh_secret.map(SecretInput::into_secret),
+        })
+    }
+
+    /// Tests `profile` with the typed secrets, or the saved ones.
+    async fn test_profile_with(
+        &self,
+        profile: &ConnectionProfile,
+        password: Option<SecretInput>,
+        ssh_secret: Option<SecretInput>,
+        tls_passphrase: Option<SecretInput>,
+    ) -> CmdResult<TestResult> {
+        let ssh = self
+            .tunnel_secret(profile, ssh_secret.map(SecretInput::into_secret))
+            .await?;
+        let lease = self.tunnels.lease_for(profile, &ReadAlready, ssh).await?;
+        let (password, tls) = self
+            .server_secrets(
+                profile,
+                password.map(SecretInput::into_secret),
+                tls_passphrase.map(SecretInput::into_secret),
             )
             .await?;
         let params = connect_params(
-            &profile,
-            self.secrets.as_ref(),
-            password.map(SecretInput::into_secret),
-            tls_passphrase.map(SecretInput::into_secret),
+            profile,
+            &ReadAlready,
+            password,
+            tls,
             lease.as_ref().map(|l| l.endpoint()),
         )?;
         let tested = self
@@ -997,14 +1081,14 @@ impl Services {
                 &profile.id,
                 profile.engine,
                 &params,
-                crate::sessions::TunnelRoute::of(&profile).as_ref(),
+                crate::sessions::TunnelRoute::of(profile).as_ref(),
             )
             .await;
         // The test session is closed: a decrypted TLS client key (and the
         // passphrase it is keyed by) stays cached only while a session of
         // the profile uses it.
         if !self.has_open_sessions(&profile.id) {
-            crate::m2::metadata::forget_tls_key(&profile);
+            crate::m2::metadata::forget_tls_key(profile);
         }
         let (server, latency_ms) = tested.map_err(|error| secret_required(error.into()))?;
         Ok(TestResult { server, latency_ms })
@@ -1035,6 +1119,186 @@ impl Services {
             .await
     }
 
+    /// [`Self::open_session`] with the version of the profile each typed
+    /// secret was entered for (`typed_for`: the `version` the UI showed
+    /// when the user typed it).
+    ///
+    /// # Errors
+    /// As [`Self::open_session`]; `secretRequired` for a typed secret
+    /// entered for older settings (see [`Self::refuse_outdated_typed`]).
+    pub async fn open_session_for(
+        self: &Arc<Self>,
+        id: &str,
+        typed_for: TypedFor,
+        password: Option<SecretInput>,
+        ssh_secret: Option<SecretInput>,
+        tls_passphrase: Option<SecretInput>,
+    ) -> CmdResult<SessionInfo> {
+        let profile = self.records.connection(id)?;
+        self.refuse_outdated_typed(
+            &profile,
+            TypedVersions::of(
+                typed_for,
+                password.is_some(),
+                ssh_secret.is_some(),
+                tls_passphrase.is_some(),
+            ),
+        )
+        .await?;
+        self.open_profile_session(&profile, password, ssh_secret, tls_passphrase)
+            .await
+    }
+
+    /// Refuses typed secrets that were entered for older settings of
+    /// `profile`. Every secret is checked on its own: it is outdated when
+    /// an edit after the version it was typed for made secrets of its kind
+    /// unusable (another server, account or route; the marks
+    /// `save_secret_for` checks too). Such a secret was typed for the old
+    /// settings: sending it would hand it to whoever runs the new server.
+    /// This does not depend on the window having dropped it after the
+    /// edit. A secret typed before an edit that left its kind usable (a
+    /// database password, when only the SSH key file changed) is sent.
+    ///
+    /// A typed secret that came without a version cannot be placed before
+    /// or after such an edit. It is refused when the profile has a mark
+    /// for its kind (an edit ever made that kind unusable), and sent when
+    /// it has none: then no edit could have outdated it.
+    ///
+    /// # Errors
+    /// `secretRequired` for the first outdated kind, so the UI asks for
+    /// that one again for the new settings; `internal` when the marks
+    /// cannot be read (fail closed: nothing is sent).
+    pub(crate) async fn refuse_outdated_typed(
+        self: &Arc<Self>,
+        profile: &ConnectionProfile,
+        typed: TypedVersions,
+    ) -> CmdResult<()> {
+        let mut kinds = Vec::new();
+        if let Some(entered_for) = typed.password {
+            kinds.push((SecretKindName::DbPassword, entered_for));
+        }
+        if let Some(entered_for) = typed.ssh
+            && let Some(kind) = ssh_secret_kind(profile)
+        {
+            let kind = match kind {
+                SecretKind::SshKeyPassphrase => SecretKindName::SshKeyPassphrase,
+                _ => SecretKindName::SshPassword,
+            };
+            kinds.push((kind, entered_for));
+        }
+        if let Some(entered_for) = typed.tls {
+            kinds.push((SecretKindName::TlsKeyPassphrase, entered_for));
+        }
+        if kinds.is_empty() {
+            return Ok(());
+        }
+        let this = Arc::clone(self);
+        let id = profile.id.clone();
+        run_blocking(move || {
+            for (kind, entered_for) in kinds {
+                let since =
+                    this.secret_invalidated_at(&id, kind)
+                        .map_err(|error| CmdError::Internal {
+                            message: format!(
+                                "Varve cannot check whether the typed secrets still belong to this \
+                             connection, so they were not sent: {error}"
+                            ),
+                        })?;
+                let Some(since) = since else {
+                    continue;
+                };
+                if entered_for.is_none_or(|entered_for| entered_for < since) {
+                    return Err(CmdError::SecretRequired { secret: kind });
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// The SSH secret the tunnel of `profile` uses: the typed one, or the
+    /// saved one read from the keychain on the blocking pool (a keychain
+    /// read can wait for a permission prompt for minutes; no async worker
+    /// may wait with it). Pass it to `lease_for` with [`ReadAlready`], so
+    /// that does not read the keychain again.
+    ///
+    /// # Errors
+    /// Keychain errors, as `lease_for` reports them.
+    pub(crate) async fn tunnel_secret(
+        &self,
+        profile: &ConnectionProfile,
+        typed: Option<Secret>,
+    ) -> CmdResult<Option<Secret>> {
+        if typed.is_some() || !profile.ssh.enabled {
+            return Ok(typed);
+        }
+        let kind = match profile.ssh.auth {
+            SshAuthMethod::Password => SecretKindName::SshPassword,
+            SshAuthMethod::KeyFile => SecretKindName::SshKeyPassphrase,
+            SshAuthMethod::Agent => return Ok(None),
+        };
+        if !profile.saved_secrets.contains(&kind) {
+            return Ok(None);
+        }
+        let secrets = Arc::clone(&self.secrets);
+        let id = profile.id.clone();
+        run_blocking(move || {
+            let key = SecretKey::new(id, SecretKind::from(kind))?;
+            Ok(secrets.get(&key)?)
+        })
+        .await
+    }
+
+    /// The database password and TLS key passphrase a connection of
+    /// `profile` uses: the typed ones, or the saved ones it needs, read
+    /// from the keychain on the blocking pool (see [`Self::tunnel_secret`];
+    /// read only once the tunnel is up, as before). Pass them to
+    /// `connect_params` with [`ReadAlready`].
+    ///
+    /// # Errors
+    /// Keychain errors, as `connect_params` reports them.
+    pub(crate) async fn server_secrets(
+        &self,
+        profile: &ConnectionProfile,
+        password: Option<Secret>,
+        tls: Option<Secret>,
+    ) -> CmdResult<(Option<Secret>, Option<Secret>)> {
+        let uses_client_key = profile.tls.mode != varve_driver::TlsMode::Disable
+            && profile.tls.client_key_path.is_some();
+        let read_password =
+            password.is_none() && profile.saved_secrets.contains(&SecretKindName::DbPassword);
+        let read_tls = tls.is_none()
+            && uses_client_key
+            && profile
+                .saved_secrets
+                .contains(&SecretKindName::TlsKeyPassphrase);
+        if !(read_password || read_tls) {
+            return Ok((password, tls));
+        }
+        let secrets = Arc::clone(&self.secrets);
+        let id = profile.id.clone();
+        let (saved_password, saved_tls) = run_blocking(move || {
+            let read = |kind: SecretKind| -> CmdResult<Option<Secret>> {
+                let key = SecretKey::new(id.clone(), kind)
+                    .map_err(|e| CmdError::from(RecordError::Invalid(e.to_string())))?;
+                secrets.get(&key).map_err(saved_secret_error)
+            };
+            let password = if read_password {
+                read(SecretKind::DbPassword)?
+            } else {
+                None
+            };
+            let tls = if read_tls {
+                read(SecretKind::TlsKeyPassphrase)?
+            } else {
+                None
+            };
+            Ok((password, tls))
+        })
+        .await?;
+        Ok((password.or(saved_password), tls.or(saved_tls)))
+    }
+
     /// Opens a session for `profile` (a saved profile, possibly with fields
     /// overridden), through its SSH tunnel when it has one.
     pub(crate) async fn open_profile_session(
@@ -1053,7 +1317,21 @@ impl Services {
         // typed secrets when its last user session closes.
         let profile_lock = self.metadata.profile_lock(&profile.id);
         let _profile = profile_lock.lock().await;
-        let opened = self.open_with_retry(profile, typed).await;
+        let mut opened = self.open_with_retry(profile, typed).await;
+        // Deleted while it connected: the delete closes the profile's
+        // sessions once this lock is free, but only those it can list. A
+        // session opened for a profile that is gone is closed here.
+        if let Ok(info) = &opened
+            && let Err(RecordError::NotFound { .. }) = self.records.connection(&profile.id)
+        {
+            if let Err(error) = self.sessions.close(&info.id).await {
+                tracing::debug!(%error, "closing a session of a deleted profile");
+            }
+            self.metadata.forget_typed(&profile.id);
+            opened = Err(CmdError::NotFound {
+                message: "The connection was deleted while it connected.".into(),
+            });
+        }
         // A decrypted TLS client key is kept only while sessions of the
         // profile use it (see `varve_driver::tls_key`).
         if opened.is_err() && !self.has_open_sessions(&profile.id) {
@@ -1132,15 +1410,16 @@ impl Services {
         profile: &ConnectionProfile,
         typed: Typed,
     ) -> CmdResult<SessionInfo> {
-        let lease = self
-            .tunnels
-            .lease_for(profile, self.secrets.as_ref(), typed.ssh)
+        let ssh = self.tunnel_secret(profile, typed.ssh).await?;
+        let lease = self.tunnels.lease_for(profile, &ReadAlready, ssh).await?;
+        let (password, tls) = self
+            .server_secrets(profile, typed.password, typed.tls)
             .await?;
         let params = connect_params(
             profile,
-            self.secrets.as_ref(),
-            typed.password,
-            typed.tls,
+            &ReadAlready,
+            password,
+            tls,
             lease.as_ref().map(|l| l.endpoint()),
         )?;
         let guard: Option<crate::sessions::SessionGuard> =
@@ -1200,15 +1479,18 @@ impl Services {
         let closed = self.sessions.close(session_id).await;
         // Nothing runs on a closed session any more.
         self.m2.forget_cancels(session_id);
-        closed?;
         // The last user session of a profile takes its metadata sessions
-        // (object browser) with it.
-        if let Some(info) = info
+        // (object browser) and typed secrets with it. Also when the
+        // driver's close failed (a connection that was already lost): the
+        // session left the manager before the driver was asked to close.
+        let gone = !matches!(closed, Err(SessionError::NotFound { .. }));
+        if gone
+            && let Some(info) = info
             && info.purpose == crate::sessions::SessionPurpose::User
         {
             self.release_metadata_if_unused(&info.connection_id).await;
         }
-        Ok(())
+        Ok(closed?)
     }
 
     /// Records an SSH host key for a host and port typed in the editor but
@@ -1633,6 +1915,102 @@ fn secret_required(error: CmdError) -> CmdError {
     }
 }
 
+/// A failed read of a saved database password or TLS key passphrase, as
+/// `connect_params` reports it: an unreachable keychain is a keychain
+/// error, anything else is invalid.
+fn saved_secret_error(error: varve_secrets::SecretError) -> CmdError {
+    CmdError::from(match error {
+        varve_secrets::SecretError::Unavailable(_) => {
+            RecordError::KeychainUnavailable(error.to_string())
+        }
+        other => RecordError::Invalid(other.to_string()),
+    })
+}
+
+/// A check [`Services::update_connection_checked`] runs on the stored
+/// profile and the edited one before anything is written.
+pub type EditCheck = fn(&ConnectionProfile, &ConnectionProfile) -> Result<(), CmdError>;
+
+/// The profile version each typed secret of a connect call was entered
+/// for: the `version` the UI showed when the user typed it. The UI sends
+/// one for every secret it passes. Each kind is checked against the last
+/// edit that made that kind unusable, so a database password typed before
+/// an SSH setting changed still goes out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TypedFor {
+    /// The database password.
+    #[serde(default)]
+    pub password: Option<i64>,
+    /// The SSH password or key passphrase.
+    #[serde(default)]
+    pub ssh_secret: Option<i64>,
+    /// The TLS client key passphrase.
+    #[serde(default)]
+    pub tls_passphrase: Option<i64>,
+}
+
+impl TypedFor {
+    /// Every secret was typed for `version`.
+    #[must_use]
+    pub fn all(version: i64) -> Self {
+        Self {
+            password: Some(version),
+            ssh_secret: Some(version),
+            tls_passphrase: Some(version),
+        }
+    }
+}
+
+/// The typed secrets of a connect call, for
+/// [`Services::refuse_outdated_typed`]: `None` for a secret that was not
+/// given, otherwise the version it was typed for (`Some(None)` when the
+/// caller sent none).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct TypedVersions {
+    /// A database password.
+    pub password: Option<Option<i64>>,
+    /// An SSH password or key passphrase.
+    pub ssh: Option<Option<i64>>,
+    /// A TLS client key passphrase.
+    pub tls: Option<Option<i64>>,
+}
+
+impl TypedVersions {
+    /// The versions in `typed_for` of the secrets that were given.
+    pub(crate) fn of(typed_for: TypedFor, password: bool, ssh: bool, tls: bool) -> Self {
+        Self {
+            password: password.then_some(typed_for.password),
+            ssh: ssh.then_some(typed_for.ssh_secret),
+            tls: tls.then_some(typed_for.tls_passphrase),
+        }
+    }
+}
+
+/// The secret store `lease_for` and `connect_params` get after
+/// [`Services::tunnel_secret`] and [`Services::server_secrets`] read the
+/// saved secrets off the async runtime: it holds nothing, so neither reads
+/// the keychain again.
+pub(crate) struct ReadAlready;
+
+impl SecretStore for ReadAlready {
+    fn set(&self, _key: &SecretKey, _secret: &Secret) -> Result<(), varve_secrets::SecretError> {
+        Err(varve_secrets::SecretError::Keychain(
+            "secrets are not saved while connecting".into(),
+        ))
+    }
+
+    fn get(&self, _key: &SecretKey) -> Result<Option<Secret>, varve_secrets::SecretError> {
+        Ok(None)
+    }
+
+    fn delete(&self, _key: &SecretKey) -> Result<(), varve_secrets::SecretError> {
+        Err(varve_secrets::SecretError::Keychain(
+            "secrets are not removed while connecting".into(),
+        ))
+    }
+}
+
 /// The secrets of `saved` that may be used for `edited`: the database
 /// password only while engine, host, port and user are unchanged, the SSH
 /// route is the same and TLS is not weaker, SSH
@@ -1824,6 +2202,29 @@ mod tests {
             })?,
             json!({ "kind": "invalid", "message": "Enter the host name or IP address." })
         );
+        // An unreachable keychain is a keychain error with its message,
+        // whether `connect_params` or `server_secrets` read the secret.
+        let unavailable = CmdError::from(RecordError::KeychainUnavailable(
+            "the keychain is not available: no Secret Service".into(),
+        ));
+        assert_eq!(
+            serde_json::to_value(&unavailable)?,
+            json!({
+                "kind": "keychain",
+                "message": "the keychain is not available: no Secret Service"
+            })
+        );
+        let read = saved_secret_error(varve_secrets::SecretError::Unavailable(
+            "no Secret Service".into(),
+        ));
+        assert!(
+            matches!(&read, CmdError::Keychain { message, profile: None } if message.contains("no Secret Service")),
+            "{read:?}"
+        );
+        assert!(matches!(
+            saved_secret_error(varve_secrets::SecretError::Keychain("denied".into())),
+            CmdError::Invalid { .. }
+        ));
         let session = serde_json::to_value(CmdError::Session {
             error: SessionError::NotFound {
                 session_id: "s1".into(),

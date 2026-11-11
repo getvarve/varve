@@ -470,11 +470,21 @@ mod tauri_updater {
         // only an install that worked restarts the app.
         #[cfg(windows)]
         super::prepare_restart(app);
-        if let Err(error) = update.install(bytes) {
+        if let Err(error) = update.install(&bytes) {
             #[cfg(windows)]
             if let Some(gate) = app.try_state::<crate::quit::QuitGate>() {
                 // Still running: quitting asks about unsaved work again.
                 gate.unconfirm();
+            }
+            // The download stays, so "Install and restart" can try again
+            // without downloading it once more (unless a check meanwhile
+            // found another version or a new download replaced it).
+            let state = state(app)?;
+            let mut pending = state.lock();
+            if pending.bytes.is_none()
+                && pending.update.as_ref().map(|u| &u.version) == Some(&update.version)
+            {
+                pending.bytes = Some(bytes);
             }
             return Err(internal(error));
         }

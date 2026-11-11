@@ -457,6 +457,214 @@ async fn bad_input_is_refused_with_a_reason() -> TestResult {
 }
 
 #[tokio::test]
+async fn init_sql_and_looser_safety_options_are_left_to_the_user() -> TestResult {
+    let f = fixture("safety")?;
+    let (running, token) = f.serve().await?;
+    let client = client(&running.url(), &token).await?;
+
+    let planted = fails(
+        &client,
+        "create_connection",
+        json!({ "connection": { "name": "X", "engine": "postgres", "host": "h", "options": { "initSql": "DROP TABLE orders" } } }),
+    )
+    .await?;
+    assert!(planted.contains("Init SQL"), "{planted}");
+    let unconfirmed = fails(
+        &client,
+        "create_connection",
+        json!({ "connection": { "name": "X", "engine": "postgres", "host": "h", "options": { "confirmDestructive": false } } }),
+    )
+    .await?;
+    assert!(unconfirmed.contains("stricter"), "{unconfirmed}");
+
+    let created = ok(
+        &client,
+        "create_connection",
+        json!({ "connection": { "name": "Live", "engine": "postgres", "host": "h", "environment": "staging", "options": { "readOnly": true } } }),
+    )
+    .await?;
+    let profile_id = id(&created)?;
+    for changes in [
+        json!({ "options": { "initSql": "DROP TABLE orders" } }),
+        json!({ "options": { "readOnly": false } }),
+        json!({ "options": { "confirmDestructive": false } }),
+        json!({ "environment": "development" }),
+        json!({ "environment": "production", "options": { "readOnly": false } }),
+    ] {
+        let refused = fails(
+            &client,
+            "update_connection",
+            json!({ "id": profile_id, "changes": changes }),
+        )
+        .await?;
+        assert!(refused.contains("in Varve"), "{changes}: {refused}");
+    }
+    let unchanged = ok(&client, "get_connection", json!({ "id": profile_id })).await?;
+    assert_eq!(unchanged["environment"], "staging");
+    assert_eq!(unchanged["options"]["readOnly"], true);
+    assert_eq!(unchanged["options"]["initSql"], Value::Null);
+
+    // Stricter is fine.
+    let stricter = ok(
+        &client,
+        "update_connection",
+        json!({ "id": profile_id, "changes": { "environment": "production" } }),
+    )
+    .await?;
+    assert_eq!(stricter["environment"], "production");
+
+    // Init SQL the user set in Varve stays, and other fields still change.
+    let input: varve_records::ConnectionInput = serde_json::from_value(json!({
+        "name": "Live", "engine": "postgres", "host": "h", "environment": "production",
+        "options": { "readOnly": true, "initSql": "SET search_path = app" }
+    }))?;
+    f.services.update_connection(&profile_id, &input).await?;
+    let renamed = ok(
+        &client,
+        "update_connection",
+        json!({ "id": profile_id, "changes": { "name": "Live (eu)" } }),
+    )
+    .await?;
+    assert_eq!(renamed["options"]["initSql"], "SET search_path = app");
+    let cleared = fails(
+        &client,
+        "update_connection",
+        json!({ "id": profile_id, "changes": { "options": { "initSql": null } } }),
+    )
+    .await?;
+    assert!(cleared.contains("Init SQL"), "{cleared}");
+
+    client.cancel().await?;
+    running.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_move_without_its_target_is_refused() -> TestResult {
+    let f = fixture("move-target")?;
+    let (running, token) = f.serve().await?;
+    let client = client(&running.url(), &token).await?;
+
+    let parent = ok(&client, "create_folder", json!({ "name": "Clients" })).await?;
+    let child = ok(
+        &client,
+        "create_folder",
+        json!({ "name": "Acme", "parentId": id(&parent)? }),
+    )
+    .await?;
+    // Left out: the tool answers, and says which field it needs.
+    let missing = fails(&client, "move_folder", json!({ "id": id(&child)? })).await?;
+    assert!(missing.contains("invalid"), "{missing}");
+    assert!(missing.contains("`parentId`"), "{missing}");
+    assert!(missing.contains("top level"), "{missing}");
+    // A misspelt target is an unknown field: refused before the tool runs
+    // (invalid parameters) or by the tool.
+    let misspelt = json!({ "id": id(&child)?, "parent_id": null });
+    let refused = match call(&client, "move_folder", misspelt.clone()).await {
+        Err(_) => true,
+        Ok(result) => result.is_error == Some(true),
+    };
+    assert!(refused, "{misspelt}");
+    // The schema still lists the target as required.
+    let tools = client.peer().list_all_tools().await?;
+    for (tool, field) in [("move_folder", "parentId"), ("move_connection", "folderId")] {
+        let schema = tools
+            .iter()
+            .find(|t| t.name == tool)
+            .map(|t| Value::Object((*t.input_schema).clone()))
+            .ok_or("the move tool is not listed")?;
+        let required = schema["required"].as_array().cloned().unwrap_or_default();
+        assert!(required.contains(&json!(field)), "{tool}: {schema}");
+        assert!(required.contains(&json!("id")), "{tool}: {schema}");
+        // `null` (the top level) is a value the schema allows, and no
+        // default suggests the field may be left out.
+        let target = &schema["properties"][field];
+        assert_eq!(
+            target["type"],
+            json!(["string", "null"]),
+            "{tool}: {schema}"
+        );
+        assert_eq!(target.get("default"), None, "{tool}: {schema}");
+    }
+    let folder = ok(&client, "get_folder", json!({ "id": id(&child)? })).await?;
+    assert_eq!(
+        folder["folder"]["parentId"], parent["id"],
+        "it did not move"
+    );
+    let top = ok(
+        &client,
+        "move_folder",
+        json!({ "id": id(&child)?, "parentId": null }),
+    )
+    .await?;
+    assert_eq!(top["parentId"], Value::Null);
+
+    // The same for a connection.
+    let conn = ok(
+        &client,
+        "create_connection",
+        json!({ "connection": { "name": "Cache", "engine": "redis", "host": "localhost" } }),
+    )
+    .await?;
+    ok(
+        &client,
+        "move_connection",
+        json!({ "id": id(&conn)?, "folderId": id(&parent)? }),
+    )
+    .await?;
+    let missing = fails(&client, "move_connection", json!({ "id": id(&conn)? })).await?;
+    assert!(missing.contains("`folderId`"), "{missing}");
+    let kept = ok(&client, "get_connection", json!({ "id": id(&conn)? })).await?;
+    assert_eq!(kept["folderId"], parent["id"], "it did not move");
+
+    client.cancel().await?;
+    running.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn idle_connections_cannot_use_up_the_server() -> TestResult {
+    let f = fixture("conn-cap")?;
+    let (running, token) = f.serve().await?;
+    let mut idle = Vec::new();
+    for _ in 0..server::MAX_CONNECTIONS {
+        idle.push(tokio::net::TcpStream::connect(running.addr()).await?);
+    }
+    // One more is closed at once, without a request.
+    let extra = tokio::net::TcpStream::connect(running.addr()).await?;
+    let closed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut buf = [0_u8; 1];
+        loop {
+            if extra.readable().await.is_err() {
+                return true;
+            }
+            match extra.try_read(&mut buf) {
+                Ok(read) => return read == 0,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => return true,
+            }
+        }
+    })
+    .await?;
+    assert!(closed, "the connection over the limit stayed open");
+    // The silent ones go; then clients get in again.
+    drop(idle);
+    let mut served = false;
+    for _ in 0..50 {
+        if let Ok(client) = client(&running.url(), &token).await {
+            ok(&client, "get_workspace", json!({})).await?;
+            client.cancel().await?;
+            served = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(served, "no client got in after the idle connections closed");
+    running.stop().await;
+    Ok(())
+}
+
+#[tokio::test]
 async fn connections_and_queries_move_copy_and_go() -> TestResult {
     let f = fixture("crud")?;
     let (running, token) = f.serve().await?;
