@@ -23,11 +23,17 @@ const make = (): Promise<Planned<RedisPlanView>> => {
   return Promise.resolve({ planId: `p${planned}`, plan: view });
 };
 
+let sessionId = 's1';
+const reported: (string | null)[] = [];
+
 function setup() {
   return useRedisPlan(
-    () => ({ id: 's1' }) as SessionInfo,
+    () => ({ id: sessionId }) as SessionInfo,
     () => 'Cache',
-    (e) => toCmdError(e),
+    (e, sentOn) => {
+      reported.push(sentOn);
+      return toCmdError(e);
+    },
   );
 }
 
@@ -35,6 +41,8 @@ beforeEach(() => {
   applyAnswer = null;
   applied.length = 0;
   planned = 0;
+  sessionId = 's1';
+  reported.length = 0;
 });
 
 describe('useRedisPlan', () => {
@@ -54,5 +62,26 @@ describe('useRedisPlan', () => {
     expect(await plans.apply()).toEqual([]);
     expect(applied).toEqual(['p1', 'p2']);
     expect(plans.canReplan.value).toBe(false);
+  });
+
+  it('reports a failure with the session the call was sent on, not the one the panel has by then', async () => {
+    const plans = setup();
+    const planOn: string[] = [];
+    // The session is replaced (a reconnect) while the plan call is running.
+    const failing = (sentOn: string): Promise<Planned<RedisPlanView>> => {
+      planOn.push(sentOn);
+      sessionId = 's2';
+      return Promise.reject(new Error('gone'));
+    };
+    expect(await plans.plan('Set maxmemory', failing)).toBe(false);
+    expect(planOn).toEqual(['s1']);
+    expect(reported).toEqual(['s1']);
+
+    expect(await plans.plan('Set maxmemory', make)).toBe(true);
+    applyAnswer = new Error('gone');
+    const applying = plans.apply();
+    sessionId = 's3';
+    expect(await applying).toBeNull();
+    expect(reported).toEqual(['s1', 's2']);
   });
 });

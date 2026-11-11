@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, useId, watch } from 'vue';
 import type { CmdError } from '../../api/errors';
 import { redisConfig, redisConfigPlan } from '../../api/live';
 import type { ConfigEntry } from '../../api/live';
@@ -31,6 +31,12 @@ const props = defineProps<{
   tabId?: string | null;
 }>();
 const emit = defineEmits<{ reconnect: [] }>();
+// Per instance: two config tabs can be mounted at once.
+const uid = useId();
+
+function inputId(name: string): string {
+  return `${uid}-cfg-${name.replace(/[^\w-]/g, '_')}`;
+}
 const report = useReporter(() => props.tabId);
 const toasts = useToasts();
 const plans = useRedisPlan(
@@ -45,16 +51,22 @@ const loading = ref(false);
 
 async function load(): Promise<void> {
   loading.value = true;
+  const sessionId = props.session.id;
   try {
-    entries.value = await redisConfig(props.session.id);
+    entries.value = await redisConfig(sessionId);
     error.value = null;
   } catch (e: unknown) {
-    error.value = report(e);
+    error.value = report(e, sessionId);
   } finally {
     loading.value = false;
   }
 }
 void load();
+// The panel stays mounted across a reconnect: what it shows was read on the old session, so read it again.
+watch(
+  () => props.session.id,
+  () => void load(),
+);
 
 const text = ref('');
 const riskyOnly = ref(false);
@@ -93,12 +105,12 @@ function touched(): void {
 }
 
 async function previewSet(e: ConfigEntry): Promise<void> {
-  await plans.plan(`Set ${e.name}`, () => redisConfigPlan(props.session.id, { kind: 'set', changes: [{ name: e.name, value: draft.value }] }));
+  await plans.plan(`Set ${e.name}`, (sessionId) => redisConfigPlan(sessionId, { kind: 'set', changes: [{ name: e.name, value: draft.value }] }));
 }
 
 async function previewRewrite(): Promise<void> {
   editing.value = null;
-  await plans.plan('Write the running configuration to the configuration file', () => redisConfigPlan(props.session.id, { kind: 'rewrite' }));
+  await plans.plan('Write the running configuration to the configuration file', (sessionId) => redisConfigPlan(sessionId, { kind: 'rewrite' }));
 }
 
 async function apply(): Promise<void> {
@@ -272,10 +284,10 @@ async function apply(): Promise<void> {
                   <div class="edit-line">
                     <label
                       class="visually-hidden"
-                      :for="`cfg-${e.name}`"
+                      :for="inputId(e.name)"
                     >New value of {{ e.name }}</label>
                     <input
-                      :id="`cfg-${e.name}`"
+                      :id="inputId(e.name)"
                       v-model="draft"
                       class="input value-input mono"
                       :type="e.sensitive ? 'password' : 'text'"

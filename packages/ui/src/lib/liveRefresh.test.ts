@@ -126,15 +126,72 @@ describe('AutoRefresh', () => {
   it('skips ticks while hidden without losing the schedule', async () => {
     const timers = fakeTimers();
     const fetch = vi.fn(async () => undefined);
-    let visible = false;
+    let visible = true;
     const loop = new AutoRefresh({ fetch, intervalMs: 1000, timers, visible: () => visible });
     await loop.start();
+    visible = false;
     timers.fire();
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(timers.pending()).toEqual([1000]);
     visible = true;
     timers.fire();
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('wake loads once when a tick was skipped while hidden, and not otherwise', async () => {
+    const timers = fakeTimers();
+    const fetch = vi.fn(async () => undefined);
+    let visible = true;
+    const loop = new AutoRefresh({ fetch, intervalMs: 1000, timers, visible: () => visible });
+    await loop.start();
+    // Shown again before a tick was due: nothing to make up for.
+    visible = false;
+    visible = true;
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    visible = false;
+    timers.fire();
+    timers.fire();
+    // Still hidden: wake does nothing.
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    visible = true;
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timers.pending()).toEqual([1000]);
+    // Made up for once only.
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('started while hidden, the first load waits for wake', async () => {
+    const timers = fakeTimers();
+    const fetch = vi.fn(async () => undefined);
+    let visible = false;
+    const loop = new AutoRefresh({ fetch, intervalMs: null, timers, visible: () => visible });
+    await loop.start();
+    expect(fetch).not.toHaveBeenCalled();
+    visible = true;
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('paused, a tick skipped while hidden is made up for on resume, not on wake', async () => {
+    const timers = fakeTimers();
+    const fetch = vi.fn(async () => undefined);
+    let visible = true;
+    const loop = new AutoRefresh({ fetch, intervalMs: 1000, timers, visible: () => visible });
+    await loop.start();
+    visible = false;
+    timers.fire();
+    loop.pause();
+    visible = true;
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    loop.resume();
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timers.pending()).toEqual([1000]);
   });
 
   it('after dispose a running fetch schedules nothing and reports nothing', async () => {
@@ -154,5 +211,41 @@ describe('AutoRefresh', () => {
     expect(timers.pending()).toEqual([]);
     await loop.refreshNow();
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reload loads once with auto refresh off or paused, and keeps both as they are', async () => {
+    const timers = fakeTimers();
+    const fetch = vi.fn(async () => undefined);
+    const off = new AutoRefresh({ fetch, intervalMs: null, timers });
+    await off.start();
+    await off.reload();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(timers.pending()).toEqual([]);
+
+    const paused = new AutoRefresh({ fetch, intervalMs: 1000, timers });
+    await paused.start();
+    paused.pause();
+    await paused.reload();
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(paused.snapshot().paused).toBe(true);
+    expect(timers.pending()).toEqual([]);
+  });
+
+  it('reload while hidden waits for wake, also when paused', async () => {
+    const timers = fakeTimers();
+    const fetch = vi.fn(async () => undefined);
+    let visible = true;
+    const loop = new AutoRefresh({ fetch, intervalMs: null, timers, visible: () => visible });
+    await loop.start();
+    loop.pause();
+    visible = false;
+    await loop.reload();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    visible = true;
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    // Made up for once; a paused loop then waits for Resume again.
+    await loop.wake();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });

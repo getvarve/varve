@@ -26,18 +26,19 @@ const galera = shallowRef<GaleraStatus | null>(null);
 const error = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const result = await galeraStatus(props.session.id);
+  async (sessionId) => {
+    const result = await galeraStatus(sessionId);
     if (!refresh.alive()) return;
     galera.value = result;
     error.value = null;
   },
   5000,
-  (e) => {
-    error.value = report(e);
+  (e, sessionId) => {
+    error.value = report(e, sessionId);
     // A node without Galera stays without it: polling again only repeats the error.
     if (stopsPolling(error.value)) refresh.pause();
   },
+  () => props.session.id,
 );
 </script>
 

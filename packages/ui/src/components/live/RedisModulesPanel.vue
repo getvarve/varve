@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef } from 'vue';
+import { computed, ref, shallowRef, watch } from 'vue';
 import type { CmdError } from '../../api/errors';
 import { anyDriverErrorOf } from '../../api/errors';
 import { redisModules, redisSearchIndex, redisSearchIndexes } from '../../api/redis';
@@ -53,16 +53,17 @@ const searchAvailable = computed(() => modules.value?.features.some((f) => f.fea
 async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
+  const sessionId = props.session.id;
   try {
-    const report = await redisModules(props.session.id);
+    const report = await redisModules(sessionId);
     modules.value = report;
-    indexes.value = report.features.some((f) => f.feature === 'search' && f.available) ? await redisSearchIndexes(props.session.id) : null;
+    indexes.value = report.features.some((f) => f.feature === 'search' && f.available) ? await redisSearchIndexes(sessionId) : null;
     if (selected.value && !(indexes.value ?? []).includes(selected.value)) {
       selected.value = null;
       index.value = null;
     }
   } catch (e: unknown) {
-    error.value = report(e);
+    error.value = report(e, sessionId);
   } finally {
     loading.value = false;
   }
@@ -74,13 +75,14 @@ async function open(name: string): Promise<void> {
   index.value = null;
   indexMissing.value = false;
   loadingIndex.value = true;
+  const sessionId = props.session.id;
   try {
-    const found = await redisSearchIndex(props.session.id, name);
+    const found = await redisSearchIndex(sessionId, name);
     if (!requests.isCurrent(token)) return;
     index.value = found;
     indexMissing.value = found === null;
   } catch (e: unknown) {
-    if (requests.isCurrent(token)) error.value = report(e);
+    if (requests.isCurrent(token)) error.value = report(e, sessionId);
   } finally {
     if (requests.isCurrent(token)) loadingIndex.value = false;
   }
@@ -111,6 +113,15 @@ const shownError = computed(() => {
 });
 
 void load();
+// The panel stays mounted across a reconnect: what it shows was read on the old session, so read it again,
+// and the open index with it (when the new session still has it).
+watch(
+  () => props.session.id,
+  async () => {
+    await load();
+    if (selected.value !== null) void open(selected.value);
+  },
+);
 </script>
 
 <template>

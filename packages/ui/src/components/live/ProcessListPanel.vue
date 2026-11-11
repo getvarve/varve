@@ -52,16 +52,17 @@ const list = shallowRef<ProcessList | null>(null);
 const error = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const result = await processList(props.session.id);
+  async (sessionId) => {
+    const result = await processList(sessionId);
     if (!refresh.alive()) return;
     list.value = result;
     error.value = null;
   },
   5000,
-  (e) => {
-    error.value = report(e);
+  (e, sessionId) => {
+    error.value = report(e, sessionId);
   },
+  () => props.session.id,
 );
 
 // Filters
@@ -206,12 +207,13 @@ async function kill(p: Process, target: KillTarget): Promise<void> {
   });
   if (!yes) return;
   busy.value = true;
+  const sessionId = props.session.id;
   try {
-    const outcome = await killProcess(props.session.id, p.id, target);
+    const outcome = await killProcess(sessionId, p.id, target);
     if (outcome.signalled) toasts.push('success', `${actionLabel(target)}: ${p.id}`, outcome.statement);
     else toasts.push('warning', `Nothing to stop for ${p.id}`, outcome.message ?? 'The process has ended or cannot be signalled.');
   } catch (e: unknown) {
-    toasts.pushError(report(e), `Could not ${actionLabel(target).toLowerCase()} ${p.id}`);
+    toasts.pushError(report(e, sessionId), `Could not ${actionLabel(target).toLowerCase()} ${p.id}`);
   } finally {
     busy.value = false;
   }

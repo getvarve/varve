@@ -40,16 +40,17 @@ const info = shallowRef<RedisInfo | null>(null);
 const infoError = shallowRef<CmdError | null>(null);
 
 const refresh = useAutoRefresh(
-  async () => {
-    const result = await redisInfo(props.session.id);
+  async (sessionId) => {
+    const result = await redisInfo(sessionId);
     if (!refresh.alive()) return;
     info.value = result;
     infoError.value = null;
   },
   null,
-  (e) => {
-    infoError.value = report(e);
+  (e, sessionId) => {
+    infoError.value = report(e, sessionId);
   },
+  () => props.session.id,
 );
 
 const memory = computed(() => info.value?.memory ?? null);
@@ -118,11 +119,12 @@ async function stopAnalysis(): Promise<void> {
   const id = runId.value;
   if (!running.value || id === null || stopping.value) return;
   stopping.value = true;
+  const sessionId = props.session.id;
   try {
-    await redisMemoryAnalysisStop(props.session.id, id);
+    await redisMemoryAnalysisStop(sessionId, id);
   } catch (e: unknown) {
     stopping.value = false;
-    if (alive) analysisError.value = report(e);
+    if (alive) analysisError.value = report(e, sessionId);
   }
 }
 
@@ -140,13 +142,14 @@ async function runAnalysis(): Promise<void> {
   ticker = setInterval(() => {
     now.value = Date.now();
   }, 250);
+  const sessionId = props.session.id;
   try {
-    const out = await redisMemoryAnalysis(props.session.id, result.options, id);
+    const out = await redisMemoryAnalysis(sessionId, result.options, id);
     if (!alive) return;
     analysis.value = out;
     finishedAt.value = Date.now();
   } catch (e: unknown) {
-    if (alive) analysisError.value = report(e);
+    if (alive) analysisError.value = report(e, sessionId);
   } finally {
     if (ticker !== null) clearInterval(ticker);
     ticker = null;
@@ -226,7 +229,7 @@ async function exportBigKeys(): Promise<void> {
     await writeTextFile(path, toCsv(columns, rows));
     toasts.push('success', `Exported ${formatCount(rows.length)} keys`, path);
   } catch (e: unknown) {
-    toasts.pushError(report(e), 'Export failed');
+    toasts.pushError(report(e, null), 'Export failed');
   }
 }
 </script>
