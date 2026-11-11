@@ -193,6 +193,12 @@ export interface PgName {
   name: string;
 }
 
+/**
+ * `CollationName`: a bare name, resolved through the session's `search_path`,
+ * or a name with its schema (needed for a collation outside the `search_path`).
+ */
+export type PgCollationName = string | PgName;
+
 /** `StorageParam`. */
 export interface PgStorageParam {
   name: string;
@@ -233,7 +239,7 @@ export interface PgColumnDef {
   default?: string | null;
   identity?: PgIdentity | null;
   generated?: PgGenerated | null;
-  collation?: string | null;
+  collation?: PgCollationName | null;
   comment?: string | null;
 }
 
@@ -321,7 +327,7 @@ export type PgTableOperation =
   | { op: 'addColumn'; column: PgColumnDef }
   | { op: 'dropColumn'; name: string; behavior?: PgDropBehavior }
   | { op: 'renameColumn'; name: string; newName: string }
-  | { op: 'alterColumnType'; name: string; dataType: string; collation?: string | null; using?: string | null }
+  | { op: 'alterColumnType'; name: string; dataType: string; collation?: PgCollationName | null; using?: string | null }
   | { op: 'setDefault'; column: string; expression: string }
   | { op: 'dropDefault'; column: string }
   | { op: 'setNotNull'; column: string }
@@ -624,7 +630,11 @@ export type MyRowFormat = 'default' | 'dynamic' | 'fixed' | 'compressed' | 'redu
 /** `TableOptions` (the fields the designer sets); fields left out are not written. */
 export interface MyTableOptions {
   engine?: string | null;
-  autoIncrement?: number | null;
+  /**
+   * Next `AUTO_INCREMENT` value: a number up to 2^53 - 1, decimal text above
+   * (a JavaScript number would round it; the backend reads both).
+   */
+  autoIncrement?: number | string | null;
   charset?: string | null;
   collation?: string | null;
   comment?: string | null;
@@ -916,8 +926,8 @@ export interface MyTableInfo {
   engine: string | null;
   /** `ROW_FORMAT` as the server writes it (`Dynamic`). */
   rowFormat: string | null;
-  /** Next `AUTO_INCREMENT` value. */
-  autoIncrement: number | null;
+  /** Next `AUTO_INCREMENT` value. The backend sends decimal text (an unsigned 64-bit counter can pass 2^53 - 1); a number is read too. */
+  autoIncrement: number | string | null;
   collation: string | null;
   charset: string | null;
   rowEstimate: number | null;

@@ -11,14 +11,16 @@ import type {
   ValueSetterParams,
 } from 'ag-grid-community';
 import { AgGridVue } from 'ag-grid-vue3';
-import { computed, markRaw, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
 import { describeTable, editableKey, rowEditApply, rowEditPlan, runGridQuery, tableRef } from '../../api/grid';
 import type { CellValue, ColumnInfo, KeyInfo, RowEditPlan, TableTarget } from '../../api/grid';
 import type { ObjectRef } from '../../api/catalog';
 import { openTransactionOf, presentError, toCmdError } from '../../api/errors';
 import type { SessionInfo, Value } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
+import { useKeepGridScroll, useSizeColumnsWhenShown } from '../../composables/useSizeColumnsWhenShown';
 import { useToasts } from '../../composables/useToasts';
+import { latestOnly } from '../../lib/async';
 import { runWithConfirmation } from '../../lib/destructive';
 import {
   addInsert,
@@ -47,7 +49,7 @@ import type { ViewRow } from '../../lib/gridRows';
 import { countSql, dialectOf, FILTER_OPERATORS, operatorNeedsValue, selectPageSql } from '../../lib/gridSql';
 import type { FilterCondition, GridFilter, SortKey } from '../../lib/gridSql';
 import { cachedEditText, opensInDialog, previewText, tooltipText } from '../../lib/gridPreview';
-import { columnAccess, keyRefusal, parseCellText, pendingCellText, tableReadOnlyReason } from '../../lib/gridValues';
+import { columnAccess, emptyMeansNull, keyRefusal, parseCellText, pendingCellText, tableReadOnlyReason } from '../../lib/gridValues';
 import { cellClass, formatCount, formatDuration } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { TypedHeader } from '../query/typedHeader';
@@ -74,8 +76,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** The view has pending changes (true) or none (false). */
   dirty: [dirty: boolean];
-  /** A backend call failed; the parent reports it (lost sessions, reconnect needed). */
-  error: [error: unknown];
+  /**
+   * A backend call failed; the parent reports it (lost sessions, reconnect
+   * needed). `sessionId` is the session the call was sent on, so a late
+   * failure on a session that was replaced meanwhile is not held against the new one.
+   */
+  error: [error: unknown, sessionId: string];
   /** Rows were written. */
   changed: [];
 }>();
@@ -127,7 +133,9 @@ const exactCount = ref<number | null>(null);
 const loading = ref(false);
 const loadError = ref<string | null>(null);
 const elapsedMs = ref<number | null>(null);
+/** Rows per page of the rows on screen; `pageSizeChoice` is the select, which becomes `pageSize` once that page loaded. */
 const pageSize = ref(200);
+const pageSizeChoice = ref(200);
 const offset = ref(0);
 const hasNext = ref(false);
 const sort = ref<SortKey[]>([]);
@@ -150,6 +158,10 @@ const counts = computed(() => {
   return changeCounts(cs);
 });
 watch(() => counts.value.total > 0, (d) => emit('dirty', d));
+// Staged edits go with the grid: the tab must not keep showing the unsaved dot for them.
+onBeforeUnmount(() => {
+  if (counts.value.total > 0) emit('dirty', false);
+});
 
 // --- filter editing ---
 
@@ -165,6 +177,8 @@ const filterDirty = computed(() => {
 function addCondition(): void {
   if (!editing.column) return;
   conditions.value = [...conditions.value, { ...editing }];
+  // The next condition starts without a column, so "Apply filter" does not add this one again (IS NULL needs no value).
+  editing.column = '';
   editing.value = '';
 }
 
@@ -174,10 +188,8 @@ function removeCondition(at: number): void {
 
 async function applyFilter(): Promise<void> {
   if (filterMode.value === 'builder' && editing.column && (editing.value !== '' || !operatorNeedsValue(editing.op))) addCondition();
-  applied.value = filterMode.value === 'raw' ? { mode: 'raw', sql: rawFilter.value } : { mode: 'builder', conditions: [...conditions.value] };
-  offset.value = 0;
-  exactCount.value = null;
-  await loadPage();
+  const filter: GridFilter = filterMode.value === 'raw' ? { mode: 'raw', sql: rawFilter.value } : { mode: 'builder', conditions: [...conditions.value] };
+  if ((await loadPage({ ...shownPage(), filter, offset: 0 })) === 'shown') exactCount.value = null;
 }
 
 function conditionText(c: FilterCondition): { op: string; value: string } {
@@ -211,9 +223,10 @@ async function init(): Promise<void> {
   key.value = null;
   keyReason.value = null;
   if (isTable.value) {
+    const sessionId = props.session.id;
     const [k, d] = await Promise.allSettled([
-      editableKey(props.session.id, target.value),
-      describeTable(props.session.id, tableRef(target.value, props.object.kind)),
+      editableKey(sessionId, target.value),
+      describeTable(sessionId, tableRef(target.value, props.object.kind)),
     ]);
     if (k.status === 'fulfilled') {
       key.value = k.value;
@@ -222,7 +235,7 @@ async function init(): Promise<void> {
         columns.value = k.value.tableColumns;
       }
     } else {
-      emit('error', k.reason);
+      emit('error', k.reason, sessionId);
       keyReason.value = `Varve could not find the key of this table, so its rows are read only: ${presentError(toCmdError(k.reason)).message}`;
     }
     if (d.status === 'fulfilled') {
@@ -239,8 +252,31 @@ async function init(): Promise<void> {
   await loadPage();
 }
 
-async function loadPage(): Promise<void> {
-  loading.value = true;
+/** What a page load reads. */
+interface PageRequest {
+  filter: GridFilter;
+  sort: SortKey[];
+  offset: number;
+  pageSize: number;
+}
+
+/** The request for the page on screen (to read it again). */
+function shownPage(): PageRequest {
+  return { filter: applied.value, sort: sort.value, offset: offset.value, pageSize: pageSize.value };
+}
+
+/** Only the newest page load may show its rows: a slower answer to an earlier sort, filter or page is dropped. */
+const pageLoads = latestOnly();
+/** True while the newest page load is waiting for its answer. */
+let pageLoadRunning = false;
+
+/**
+ * Reads the page `req` asks for. The filter, sort, offset and page size on
+ * screen change together with the rows, and only when the page was read:
+ * after a failure the previous page stays as it was, with the error shown.
+ * `superseded` means a newer load started meanwhile and decides instead.
+ */
+async function loadPage(req: PageRequest = shownPage()): Promise<'shown' | 'failed' | 'superseded'> {
   loadError.value = null;
   let sql: string;
   try {
@@ -248,63 +284,99 @@ async function loadPage(): Promise<void> {
       dialect: dialect.value,
       target: target.value,
       columns: columns.value.map((c) => c.name),
-      filter: applied.value,
-      sort: sort.value,
+      filter: req.filter,
+      sort: req.sort,
       tiebreak: key.value?.columns ?? [],
-      limit: pageSize.value + 1,
-      offset: offset.value,
+      limit: req.pageSize + 1,
+      offset: req.offset,
     });
   } catch (error: unknown) {
+    // Nothing was sent, so the page on screen stays the page asked for: a load that is still
+    // running describes it and goes on to show its rows, next to this error.
+    if (!pageLoadRunning) loading.value = false;
     loadError.value = error instanceof Error ? error.message : String(error);
-    loading.value = false;
-    return;
+    syncShownChoices();
+    return 'failed';
   }
+  const token = pageLoads.next();
+  const sessionId = props.session.id;
+  loading.value = true;
+  pageLoadRunning = true;
   try {
-    const out = await runGridQuery(props.session.id, sql, pageSize.value + 1);
+    const out = await runGridQuery(sessionId, sql, req.pageSize + 1);
+    if (!pageLoads.isCurrent(token)) return 'superseded';
     const result = out.results.find((r) => r.kind === 'rows');
-    elapsedMs.value = out.elapsedMs;
     if (!result || result.kind !== 'rows') throw new Error('The query returned no rows result.');
+    elapsedMs.value = out.elapsedMs;
     if (columns.value.length === 0) columns.value = synthColumns(result.columns);
-    hasNext.value = result.rows.length > pageSize.value;
-    const page = result.rows.slice(0, pageSize.value);
+    applied.value = req.filter;
+    sort.value = req.sort;
+    offset.value = req.offset;
+    pageSize.value = req.pageSize;
+    hasNext.value = result.rows.length > req.pageSize;
+    const page = result.rows.slice(0, req.pageSize);
     if (key.value && !keyReason.value) {
       rows.value = markRaw(toGridRows(key.value, columns.value, page));
       const fresh = rows.value;
       rowVersions.bump(refreshSnapshots(cs, dialect.value, columns.value, fresh));
       csVersion.value += 1;
     } else {
-      rows.value = markRaw(page.map((values, i) => ({ id: `r${offset.value + i}`, values })));
+      rows.value = markRaw(page.map((values, i) => ({ id: `r${req.offset + i}`, values })));
     }
+    syncShownChoices();
+    return 'shown';
   } catch (error: unknown) {
-    emit('error', error);
+    if (!pageLoads.isCurrent(token)) return 'superseded';
+    emit('error', error, sessionId);
     loadError.value = presentError(toCmdError(error)).message;
+    syncShownChoices();
+    return 'failed';
   } finally {
-    loading.value = false;
+    if (pageLoads.isCurrent(token)) {
+      loading.value = false;
+      pageLoadRunning = false;
+    }
   }
+}
+
+/** Puts the page size select and the grid's sort arrows back on the page on screen (after a failed or replaced load). */
+function syncShownChoices(): void {
+  pageSizeChoice.value = pageSize.value;
+  const api = gridApi.value;
+  if (!api || JSON.stringify(gridSort(api)) === JSON.stringify(sort.value)) return;
+  api.applyColumnState({
+    state: sort.value.flatMap((s, n) => {
+      const at = columns.value.findIndex((c) => c.name === s.column);
+      return at < 0 ? [] : [{ colId: `c${at}`, sort: s.descending ? ('desc' as const) : ('asc' as const), sortIndex: n }];
+    }),
+    defaultState: { sort: null },
+  });
 }
 
 onMounted(init);
 
 async function countExactly(): Promise<void> {
+  const filter = applied.value;
+  const sessionId = props.session.id;
   try {
-    const out = await runGridQuery(props.session.id, countSql(dialect.value, target.value, applied.value), 1);
+    const out = await runGridQuery(sessionId, countSql(dialect.value, target.value, filter), 1);
+    // Another filter was applied meanwhile: this count is not of the rows on screen.
+    if (applied.value !== filter) return;
     const r = out.results.find((x) => x.kind === 'rows');
     const v = r && r.kind === 'rows' ? r.rows[0]?.[0] : undefined;
     exactCount.value = v && (v.t === 'int' || v.t === 'uInt' || v.t === 'decimal') ? Number(v.v) : null;
   } catch (error: unknown) {
-    emit('error', error);
+    emit('error', error, sessionId);
     toasts.pushError(error, 'Could not count the rows');
   }
 }
 
 function page(by: 1 | -1): void {
-  offset.value = Math.max(0, offset.value + by * pageSize.value);
-  void loadPage();
+  void loadPage({ ...shownPage(), offset: Math.max(0, offset.value + by * pageSize.value) });
 }
 
-watch(pageSize, () => {
-  offset.value = 0;
-  void loadPage();
+watch(pageSizeChoice, (size) => {
+  if (size !== pageSize.value) void loadPage({ ...shownPage(), offset: 0, pageSize: size });
 });
 
 // --- grid ---
@@ -444,6 +516,11 @@ const columnDefs = computed<ColDef<ViewRow>[]>(() => [
 ]);
 
 const gridApi = shallowRef<GridApi<ViewRow> | null>(null);
+const gridRoot = ref<HTMLElement | null>(null);
+// A page that arrives while the tab is hidden is sized when the tab is shown.
+useSizeColumnsWhenShown(() => gridApi.value, [viewRows, columnDefs]);
+// The scroll position survives another tab or page (Activity, Settings) being shown.
+const scroll = useKeepGridScroll(() => gridApi.value, () => gridRoot.value);
 
 const gridOptions: GridOptions<ViewRow> = {
   getRowId: (p) => p.data.id,
@@ -469,6 +546,7 @@ const gridOptions: GridOptions<ViewRow> = {
   onSortChanged: (e: SortChangedEvent<ViewRow>) => onSortChanged(e),
   onCellFocused: (e: CellFocusedEvent<ViewRow>) => onCellFocused(e),
   onCellDoubleClicked: (e: CellDoubleClickedEvent<ViewRow>) => onCellDoubleClicked(e),
+  onBodyScroll: (e) => scroll.noteScroll(e.top, e.left),
 };
 
 watch([problemRow, written], () => gridApi.value?.redrawRows());
@@ -477,18 +555,20 @@ function columnIndexOf(colId: string | null | undefined): number {
   return colId && colId.startsWith('c') ? Number(colId.slice(1)) : -1;
 }
 
-function onSortChanged(e: SortChangedEvent<ViewRow>): void {
-  const state = e.api
+/** The sort the grid's column headers show. */
+function gridSort(api: GridApi<ViewRow>): SortKey[] {
+  return api
     .getColumnState()
     .filter((s) => s.sort && s.colId.startsWith('c'))
-    .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
-  const next = state
+    .sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0))
     .map((s) => ({ column: columns.value[columnIndexOf(s.colId)]?.name ?? '', descending: s.sort === 'desc' }))
     .filter((s) => s.column !== '');
+}
+
+function onSortChanged(e: SortChangedEvent<ViewRow>): void {
+  const next = gridSort(e.api);
   if (JSON.stringify(next) === JSON.stringify(sort.value)) return;
-  sort.value = next;
-  offset.value = 0;
-  void loadPage();
+  void loadPage({ ...shownPage(), sort: next, offset: 0 });
 }
 
 function onCellFocused(e: CellFocusedEvent<ViewRow>): void {
@@ -531,12 +611,14 @@ function setFor(rowId: string, column: string, cell: CellValue | null): void {
 function commitText(row: ViewRow, i: number, text: string): void {
   const column = columns.value[i];
   if (!column) return;
-  const parsed = parseCellText(dialect.value, column, text);
+  const newRow = row.kind === 'insert';
+  const parsed = parseCellText(dialect.value, column, text, newRow);
   if (!parsed.ok) {
     toasts.push('warning', 'Not changed', parsed.message);
     return;
   }
-  setFor(row.id, column.name, parsed.cell);
+  // A new row's emptied cell of a type without an empty value is not set again: the server fills in the default.
+  setFor(row.id, column.name, newRow && parsed.cell.kind === 'default' ? null : parsed.cell);
 }
 
 const focusedRow = computed(() => viewRows.value.find((r) => r.id === focus.value?.rowId) ?? null);
@@ -545,6 +627,29 @@ const focusedColumn = computed(() => columns.value.find((c) => c.name === focus.
 function addRow(): void {
   const id = mutate([], () => addInsert(cs));
   focus.value = { rowId: id, column: null };
+  void showInGrid(id, null, false);
+}
+
+/**
+ * Scrolls the grid to a row and moves the grid's focused cell there (the
+ * cell of `column`, or the first visible column), so the grid and the
+ * record view show the same row. With `keepFocus` the keyboard focus stays
+ * where it is (the record view's previous and next buttons).
+ */
+async function showInGrid(rowId: string, column: string | null, keepFocus: boolean): Promise<void> {
+  // The grid takes new rows after Vue has passed them on.
+  await nextTick();
+  const api = gridApi.value;
+  const node = api?.getRowNode(rowId);
+  if (!api || !node || node.rowIndex === null) return;
+  const at = column === null || hidden.value.has(column) ? -1 : columns.value.findIndex((c) => c.name === column);
+  const colId = at >= 0 ? `c${at}` : api.getAllDisplayedColumns().find((c) => c.getColId().startsWith('c'))?.getColId();
+  api.ensureNodeVisible(node);
+  if (!colId) return;
+  api.ensureColumnVisible(colId);
+  const active = keepFocus ? document.activeElement : null;
+  api.setFocusedCell(node.rowIndex, colId);
+  if (active instanceof HTMLElement) active.focus();
 }
 
 function toggleDeleteFocused(): void {
@@ -623,19 +728,56 @@ function recordInput(i: number, event: Event): void {
   commitText(r, i, (event.target as HTMLInputElement | HTMLTextAreaElement).value);
 }
 
+/**
+ * The record field opened for typing while its value is still NULL: NULL
+ * was unticked on a column whose type has no empty value, so the cell
+ * stays NULL until a value is typed.
+ */
+const recordTyping = ref<{ rowId: string; column: string } | null>(null);
+watch(
+  () => focus.value?.rowId,
+  () => {
+    recordTyping.value = null;
+  },
+);
+
+function typingInto(i: number): boolean {
+  const t = recordTyping.value;
+  return t !== null && t.rowId === focus.value?.rowId && t.column === columns.value[i]?.name;
+}
+
 function recordNull(i: number, event: Event): void {
   const r = focusedRow.value;
   const c = columns.value[i];
   if (!r || !c) return;
-  if ((event.target as HTMLInputElement).checked) setFor(r.id, c.name, { kind: 'value', value: { t: 'null' } });
-  else setFor(r.id, c.name, { kind: 'value', value: { t: 'text', v: '' } });
+  const box = event.target as HTMLInputElement;
+  if (box.checked) {
+    recordTyping.value = null;
+    setFor(r.id, c.name, { kind: 'value', value: { t: 'null' } });
+    return;
+  }
+  // Text keeps the empty string; the other types have none, so they wait for a typed value.
+  if (!emptyMeansNull(dialect.value, c)) {
+    setFor(r.id, c.name, { kind: 'value', value: { t: 'text', v: '' } });
+    return;
+  }
+  const pending = r.pending[c.name];
+  if (pending?.kind === 'value' && pending.value.t === 'null') setFor(r.id, c.name, null);
+  if (!recordValue(i).isNull) return;
+  // Still NULL (the row holds NULL): keep the box ticked and open the field for a value.
+  box.checked = true;
+  recordTyping.value = { rowId: r.id, column: c.name };
+  void nextTick(() => document.getElementById(`${uid}-r${i}`)?.focus());
 }
 
 function moveRecord(by: 1 | -1): void {
   const list = viewRows.value;
   const at = list.findIndex((r) => r.id === focus.value?.rowId);
   const next = list[at + by];
-  if (next) focus.value = { rowId: next.id, column: focus.value?.column ?? null };
+  if (!next) return;
+  const column = focus.value?.column ?? null;
+  focus.value = { rowId: next.id, column };
+  void showInGrid(next.id, column, true);
 }
 
 const focusedIndex = computed(() => viewRows.value.findIndex((r) => r.id === focus.value?.rowId));
@@ -653,20 +795,27 @@ const review = reactive<{
   message: { tone: 'danger' | 'warning'; text: string } | null;
 }>({ open: false, plan: null, planId: null, refs: [], labels: [], checkOriginal: true, busy: false, message: null });
 
+/** Only the newest plan is kept: toggling the concurrency check twice quickly must not leave the first plan under the second setting. */
+const plans = latestOnly();
+
 async function plan(): Promise<void> {
   if (!key.value) return;
+  const token = plans.next();
   const { changes, refs } = buildRowChanges(cs, columns.value);
   review.refs = refs;
   review.labels = changeLabels(refs);
   review.plan = null;
   review.planId = null;
   review.message = null;
+  const sessionId = props.session.id;
   try {
-    const planned = await rowEditPlan(props.session.id, target.value, changes, { checkOriginal: review.checkOriginal, key: key.value });
+    const planned = await rowEditPlan(sessionId, target.value, changes, { checkOriginal: review.checkOriginal, key: key.value });
+    if (!plans.isCurrent(token)) return;
     review.plan = planned.plan;
     review.planId = planned.planId;
   } catch (error: unknown) {
-    emit('error', error);
+    if (!plans.isCurrent(token)) return;
+    emit('error', error, sessionId);
     const p = presentError(toCmdError(error));
     review.message = { tone: 'danger', text: `${p.message}${p.detail ? ` ${p.detail}` : ''}` };
   }
@@ -694,11 +843,12 @@ watch(
 async function apply(): Promise<void> {
   if (!review.planId || !key.value) return;
   const planId = review.planId;
+  const sessionId = props.session.id;
   review.busy = true;
   review.message = null;
   try {
     const outcome = await runWithConfirmation(
-      (confirmed) => rowEditApply(props.session.id, planId, confirmed),
+      (confirmed) => rowEditApply(sessionId, planId, confirmed),
       (request) => dialogs.askDestructive({ connectionName: props.connectionName, environment: request.environment, statements: request.statements }),
     );
     if (outcome === null) {
@@ -708,6 +858,8 @@ async function apply(): Promise<void> {
     review.open = false;
     review.planId = null;
     if (outcome.status === 'applied') {
+      // Inserts and deletes change the count: it is counted again on request.
+      exactCount.value = null;
       const k = key.value;
       const merged = mutate('all', () => mergeApplied(cs, k, columns.value, rows.value, review.refs, outcome.rows));
       rows.value = markRaw(merged.rows);
@@ -737,7 +889,7 @@ async function apply(): Promise<void> {
       }
       return;
     }
-    emit('error', error);
+    emit('error', error, sessionId);
     const p = presentError(cmd);
     review.open = false;
     problem.value = { ref: null, conflict: false, title: p.title, message: `${p.message}${p.detail ? ` ${p.detail}` : ''}` };
@@ -782,6 +934,34 @@ async function discard(): Promise<void> {
 async function refresh(): Promise<void> {
   exactCount.value = null;
   await loadPage();
+}
+
+const columnsButton = ref<HTMLButtonElement | null>(null);
+const columnsMenu = ref<HTMLElement | null>(null);
+
+/** Closes the columns menu on a press outside it (the button toggles it itself). */
+function onPointerOutsideColumns(event: PointerEvent): void {
+  const t = event.target as Node | null;
+  if (t && (columnsMenu.value?.contains(t) || columnsButton.value?.contains(t))) return;
+  showColumns.value = false;
+}
+
+watch(showColumns, (open) => {
+  if (open) {
+    document.addEventListener('pointerdown', onPointerOutsideColumns, true);
+    void nextTick(() => columnsMenu.value?.querySelector<HTMLInputElement>('input')?.focus());
+  } else {
+    document.removeEventListener('pointerdown', onPointerOutsideColumns, true);
+  }
+});
+onBeforeUnmount(() => document.removeEventListener('pointerdown', onPointerOutsideColumns, true));
+
+/** Escape closes the open columns menu and returns focus to its button. */
+function onColumnsEscape(event: KeyboardEvent): void {
+  if (!showColumns.value) return;
+  event.stopPropagation();
+  showColumns.value = false;
+  columnsButton.value?.focus();
 }
 
 function toggleColumn(name: string): void {
@@ -938,8 +1118,12 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
         class="small muted"
         title="Click a column header to sort; Shift+click adds a column"
       >Sort: <span class="mono">{{ sortText }}</span></span>
-      <div class="cols-menu">
+      <div
+        class="cols-menu"
+        @keydown.esc="onColumnsEscape"
+      >
         <button
+          ref="columnsButton"
           type="button"
           class="btn compact"
           :aria-expanded="showColumns"
@@ -949,6 +1133,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
         </button>
         <div
           v-if="showColumns"
+          ref="columnsMenu"
           class="menu"
           role="group"
           aria-label="Visible columns"
@@ -1087,6 +1272,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
     <div class="main">
       <div class="grid-wrap">
         <div
+          ref="gridRoot"
           class="grid"
           role="region"
           :aria-label="`${qualified} rows`"
@@ -1141,7 +1327,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <label :for="`${uid}-page`">Page size</label>
           <select
             :id="`${uid}-page`"
-            v-model.number="pageSize"
+            v-model.number="pageSizeChoice"
             class="page-size"
           >
             <option :value="100">
@@ -1268,9 +1454,9 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
                 :id="`${uid}-r${i}`"
                 class="input compact mono"
                 :value="recordValue(i).text"
-                :placeholder="recordValue(i).isNull ? 'NULL' : ''"
+                :placeholder="recordValue(i).isNull ? (typingInto(i) ? 'Type a value' : 'NULL') : ''"
                 :readonly="!recordWritable(i)"
-                :disabled="recordValue(i).isNull && recordWritable(i)"
+                :disabled="recordValue(i).isNull && recordWritable(i) && !typingInto(i)"
                 @change="recordInput(i, $event)"
               >
             </template>

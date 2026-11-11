@@ -100,6 +100,8 @@ function move(by: -1 | 1): void {
   if (current.value) moveColumn(ctx.draft, current.value.id, by);
 }
 
+/** PostgreSQL cannot reorder the columns of an existing table; a new table is created with them in any order. */
+const fixedOrder = computed(() => pg.value && !ctx.draft.isNew);
 const atTop = computed(() => !current.value || ctx.draft.columns.indexOf(current.value) === 0);
 const atBottom = computed(() => !current.value || ctx.draft.columns.indexOf(current.value) === ctx.draft.columns.length - 1);
 
@@ -146,7 +148,7 @@ function disabled(c: ColumnDraft): boolean {
         type="button"
         class="icon-btn"
         aria-label="Move column up"
-        :disabled="ctx.readOnly || pg || atTop"
+        :disabled="ctx.readOnly || fixedOrder || atTop"
         @click="move(-1)"
       >
         <Icon
@@ -158,15 +160,17 @@ function disabled(c: ColumnDraft): boolean {
         type="button"
         class="icon-btn"
         aria-label="Move column down"
-        :disabled="ctx.readOnly || pg || atBottom"
+        :disabled="ctx.readOnly || fixedOrder || atBottom"
         @click="move(1)"
       >
         <Icon name="chevronDown" />
       </button>
       <span class="subtle note">{{
-        pg
-          ? 'PostgreSQL appends new columns at the end and cannot reorder them.'
-          : 'Moved columns are written with FIRST or AFTER; moving can rebuild the table.'
+        ctx.draft.isNew
+          ? 'The table is created with its columns in this order.'
+          : pg
+            ? 'PostgreSQL appends new columns at the end and cannot reorder them.'
+            : 'Moved columns are written with FIRST or AFTER; moving can rebuild the table.'
       }}</span>
     </div>
 

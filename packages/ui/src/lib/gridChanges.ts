@@ -280,6 +280,33 @@ function rowFrom(columns: readonly ColumnInfo[], written: [string, Value][], fal
   });
 }
 
+/**
+ * A written row the server could not read back (`AppliedChange.row` is
+ * `null`), as the user typed it: the row as read with the typed cells over
+ * it (an update), or the typed cells of a new row. Cells set to DEFAULT or
+ * an expression keep what the row held (NULL for a new row): only the server
+ * knows what they became, and the reload that follows shows it.
+ */
+function typedRow(cs: ChangeSet, columns: readonly ColumnInfo[], ref: ChangeRef, base: readonly Value[] | null): Value[] | null {
+  const cells = ref.kind === 'insert' ? cs.inserts.find((r) => r.id === ref.id)?.cells : cs.updates[ref.id]?.set;
+  if (!cells) return null;
+  return columns.map((c, i) => {
+    const cell = cells[c.name];
+    if (cell?.kind === 'value') return cell.value;
+    return base?.[i] ?? { t: 'null' };
+  });
+}
+
+/** The id of a merged row: its key, or `fallback` when the values do not hold a usable key. */
+function mergedId(key: KeyInfo, columns: readonly ColumnInfo[], values: readonly Value[], fallback: string): string {
+  try {
+    return keyId(rowKeyOf(key, columns, values));
+  } catch {
+    // A key the server fills in (a sequence, AUTO_INCREMENT) is still NULL in typed values.
+    return fallback;
+  }
+}
+
 /** The grid after a successful apply. */
 export interface MergeResult {
   rows: GridRowData[];
@@ -291,8 +318,9 @@ export interface MergeResult {
 
 /**
  * Merges an applied outcome into the page: deleted rows leave, updated
- * rows take the values the server stored, new rows are appended. Clears
- * the change set.
+ * rows take the values the server stored, new rows are appended. A written
+ * row the server could not read back keeps the values the user typed, and
+ * `needsReload` asks for the page to be read again. Clears the change set.
  */
 export function mergeApplied(
   cs: ChangeSet,
@@ -314,6 +342,13 @@ export function mergeApplied(
     }
     if (!change.row) {
       needsReload = true;
+      const at = change.op === 'update' ? out.findIndex((r) => r.id === ref.id) : -1;
+      const values = typedRow(cs, columns, ref, at >= 0 ? (out[at] as GridRowData).values : null);
+      if (!values) continue;
+      const id = mergedId(key, columns, values, ref.id);
+      if (at >= 0) out[at] = { id, values };
+      else if (change.op === 'insert') out.push({ id, values });
+      written.push(id);
       continue;
     }
     if (change.op === 'update') {

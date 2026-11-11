@@ -4,7 +4,7 @@ import type { CellValue, ColumnInfo } from '../../api/grid';
 import type { Value } from '../../api/sessions';
 import { checkExpression } from '../../lib/gridSql';
 import type { GridDialect } from '../../lib/gridSql';
-import { columnAccess, editText, parseCellText } from '../../lib/gridValues';
+import { columnAccess, editText, emptyOutcome, parseCellText } from '../../lib/gridValues';
 import { charCount, prettyJson } from '../../lib/values';
 import Modal from '../common/Modal.vue';
 
@@ -45,12 +45,15 @@ const isJson = computed(() => ['json', 'jsonb'].includes(props.column.typeName))
 const problem = computed(() => {
   if (mode.value === 'expression') return checkExpression(props.dialect, text.value);
   if (mode.value === 'value') {
-    const parsed = parseCellText(props.dialect, props.column, text.value);
+    const parsed = parseCellText(props.dialect, props.column, text.value, props.insert);
     if (!parsed.ok) return parsed.message;
   }
   if (mode.value === 'null' && !props.column.nullable) return `${props.column.name} is NOT NULL.`;
   return null;
 });
+
+/** What saving an empty Value field does, said before the change is kept; `null` when there is nothing to say. */
+const emptyNote = computed(() => (mode.value === 'value' && text.value === '' && writable.value ? emptyOutcome(props.dialect, props.column, props.insert) : null));
 
 function format(): void {
   const pretty = prettyJson(text.value);
@@ -64,7 +67,7 @@ function save(): void {
   else if (mode.value === 'default') out = { kind: 'default' };
   else if (mode.value === 'expression') out = { kind: 'expression', value: text.value };
   else {
-    const parsed = parseCellText(props.dialect, props.column, text.value);
+    const parsed = parseCellText(props.dialect, props.column, text.value, props.insert);
     if (!parsed.ok) return;
     out = parsed.cell;
   }
@@ -155,6 +158,10 @@ function save(): void {
           >
             Format JSON
           </button>
+          <span
+            v-if="emptyNote"
+            class="subtle"
+          >{{ emptyNote }}</span>
           <span
             v-if="mode === 'expression'"
             class="subtle"

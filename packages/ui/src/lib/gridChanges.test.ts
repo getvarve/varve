@@ -177,6 +177,29 @@ describe('change tracking', () => {
     const { refs } = buildRowChanges(cs, columns);
     expect(mergeApplied(cs, key, columns, page(), refs, [{ change: 0, op: 'insert', row: null }]).needsReload).toBe(true);
   });
+
+  it('keeps the typed values of written rows that cannot be read back', () => {
+    const cs = emptyChanges();
+    const rows = page();
+    const [r1, r2] = rows;
+    if (!r1 || !r2) throw new Error('no rows');
+    setCell(cs, 'postgres', key, columns, r1, 'note', { kind: 'value', value: text('typed') });
+    const insert = addInsert(cs);
+    setInsertCell(cs, columns, insert, 'status', { kind: 'value', value: text('new') });
+    const { refs } = buildRowChanges(cs, columns);
+    const merged = mergeApplied(cs, key, columns, rows, refs, [
+      { change: 0, op: 'update', row: null },
+      { change: 1, op: 'insert', row: null },
+    ]);
+    expect(merged.needsReload).toBe(true);
+    // The updated row: as read, with the typed cell over it.
+    expect(merged.rows[0]).toEqual({ id: r1.id, values: [int(1), text('paid'), text('typed'), int(2), NULL] });
+    expect(merged.rows[1]).toEqual(r2);
+    // The new row: its typed cells, NULL for the rest; without a key value (identity) it keeps its pending id.
+    expect(merged.rows[2]).toEqual({ id: insert, values: [NULL, text('new'), NULL, NULL, NULL] });
+    expect(merged.written).toEqual([r1.id, insert]);
+    expect(changeCounts(cs).total).toBe(0);
+  });
 });
 
 describe('conflicts', () => {

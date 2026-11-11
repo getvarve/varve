@@ -35,6 +35,7 @@ import type {
   MyTypeName,
   PgBoundValue,
   PgChange,
+  PgCollationName,
   PgColumnDef,
   PgConstraintKind,
   PgIndexElement,
@@ -51,6 +52,7 @@ import type {
   DesignerDetails,
 } from '../api/grid';
 import type { Value } from '../api/sessions';
+import { parseBigInteger, UINT64_MAX } from './ddlPlan';
 import { checkExpression } from './gridSql';
 
 // ---------------------------------------------------------------------------
@@ -80,7 +82,14 @@ export interface ColumnDraft {
   /** Generation expression; empty for none. */
   generated: string;
   generatedStored: boolean;
+  /** The collation's name; empty for the default. */
   collation: string;
+  /**
+   * PostgreSQL: the collation as read, with its schema. While `collation`
+   * still shows its name it is sent with that schema, so a collation from a
+   * schema outside the `search_path` keeps resolving.
+   */
+  collationRead: PgName | null;
   comment: string;
   /** PostgreSQL: `USING` for a type change. */
   using: string;
@@ -382,6 +391,7 @@ export function newColumn(engine: 'postgres' | 'mysql', name: string): ColumnDra
     generated: '',
     generatedStored: true,
     collation: '',
+    collationRead: null,
     comment: '',
     using: '',
     onUpdate: '',
@@ -487,6 +497,7 @@ function pgColumnDraft(c: PgTableInfo['columns'][number]): ColumnDraft {
     generated,
     generatedStored: c.generated?.stored ?? true,
     collation: c.collation?.name ?? '',
+    collationRead: c.collation,
     comment: c.comment ?? '',
     locked: c.inheritedCount > 0 && !c.local ? 'Inherited from a parent table; change it there.' : null,
   };
@@ -1165,13 +1176,28 @@ function constraintErrors(dialect: 'postgres' | 'mysql', k: ConstraintDraft): st
   return errors;
 }
 
+/**
+ * The `COLLATE` of a PostgreSQL column. The collation as read goes with its
+ * schema while the field still shows its name (one in `pg_catalog`, always
+ * on the `search_path`, as a bare name); a name typed is sent bare and
+ * resolves through the session's `search_path`.
+ */
+function pgCollation(c: ColumnDraft): PgCollationName | null {
+  const text = c.collation.trim();
+  if (!text) return null;
+  const read = c.collationRead;
+  if (read && read.name === text && read.schema && read.schema !== 'pg_catalog') return { schema: read.schema, name: read.name };
+  return text;
+}
+
 function pgColumnDef(c: ColumnDraft): PgColumnDef {
   const def: PgColumnDef = { name: c.name.trim(), dataType: c.dataType.trim() };
   if (!c.nullable) def.notNull = true;
   if (c.defaultKind === 'expression' && c.defaultText.trim()) def.default = c.defaultText.trim();
   if (c.identity !== 'none') def.identity = { generation: c.identity };
   if (c.generated.trim()) def.generated = { expression: c.generated.trim(), storage: c.generatedStored ? 'stored' : 'virtual' };
-  if (c.collation.trim()) def.collation = c.collation.trim();
+  const collation = pgCollation(c);
+  if (collation !== null) def.collation = collation;
   if (c.comment !== '') def.comment = c.comment;
   return def;
 }
@@ -1297,7 +1323,7 @@ function pgDiff(original: TableDraft, draft: TableDraft): DraftChanges {
         op: 'alterColumnType',
         name,
         dataType: c.dataType.trim(),
-        collation: c.collation.trim() || null,
+        collation: pgCollation(c),
         using: c.using.trim() || null,
       });
       if (c.using.trim()) {
@@ -1573,9 +1599,12 @@ function myOptions(draft: TableDraft, only: Set<keyof TablePropsDraft> | null, e
     else options.rowFormat = f;
   }
   if (want('autoIncrement') && b.autoIncrement.trim()) {
-    const n = Number(b.autoIncrement.trim());
-    if (!/^\d+$/.test(b.autoIncrement.trim()) || !Number.isSafeInteger(n) || n < 1) errors.push('AUTO_INCREMENT must be a whole number from 1 up.');
-    else options.autoIncrement = n;
+    // The counter is an unsigned 64-bit number: checked exactly, and sent as text when a JavaScript number would round it.
+    const text = b.autoIncrement.trim();
+    const n = /^\d+$/.test(text) ? BigInt(text) : null;
+    if (n === null || n < 1n) errors.push('AUTO_INCREMENT must be a whole number from 1 up.');
+    else if (parseBigInteger(text, 1n, UINT64_MAX) === null) errors.push(`AUTO_INCREMENT can be at most ${UINT64_MAX.toString()}.`);
+    else options.autoIncrement = n <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(n) : n.toString();
   }
   if (want('charset') && b.charset.trim()) options.charset = b.charset.trim();
   if (want('collation') && b.collation.trim()) options.collation = b.collation.trim();
@@ -2199,7 +2228,7 @@ function createChanges(draft: TableDraft, serverMajor: number): DraftChanges {
   return { changes, errors };
 }
 
-/** Moves a column up (-1) or down (+1) in a MySQL / MariaDB draft. PostgreSQL cannot reorder columns. */
+/** Moves a column up (-1) or down (+1): in a MySQL / MariaDB draft, or a new table of either engine. PostgreSQL cannot reorder the columns of an existing table. */
 export function moveColumn(draft: TableDraft, id: string, by: -1 | 1): void {
   const at = draft.columns.findIndex((c) => c.id === id);
   const to = at + by;
@@ -2208,6 +2237,250 @@ export function moveColumn(draft: TableDraft, id: string, by: -1 | 1): void {
   if (!c) return;
   c.moved = true;
   draft.columns.splice(to, 0, c);
+}
+
+// ---------------------------------------------------------------------------
+// A save that stopped part way
+// ---------------------------------------------------------------------------
+
+/** A step of a save, and whether it ran on the server. */
+export interface SaveStep {
+  change: EngineChange;
+  applied: boolean;
+}
+
+/** PostgreSQL table operations that set a property (the rest change columns and constraints). */
+const PG_PROP_OPS: Readonly<Record<string, keyof TablePropsDraft>> = {
+  owner: 'owner',
+  setLogged: 'unlogged',
+  setStorageParams: 'storageParams',
+  resetStorageParams: 'storageParams',
+  setTablespace: 'tablespace',
+  inherit: 'inherits',
+  noInherit: 'inherits',
+  rename: 'name',
+  setSchema: 'schema',
+};
+
+/** PostgreSQL table operations that give a rebuilt index its role back (REPLICA IDENTITY, CLUSTER ON); they belong to the index. */
+const PG_RESTORE_OPS = new Set(['replicaIdentityUsingIndex', 'clusterOn']);
+
+/** MySQL / MariaDB table options and the property each one sets. */
+const MY_OPTION_PROPS: Readonly<Record<string, keyof TablePropsDraft>> = {
+  engine: 'engine',
+  rowFormat: 'rowFormat',
+  autoIncrement: 'autoIncrement',
+  charset: 'charset',
+  collation: 'collation',
+  comment: 'comment',
+};
+
+/** What of a save reached the server, from its steps. */
+interface SaveProgress {
+  /** The statement with the column and constraint changes (MySQL / MariaDB: also the index changes) did not run. */
+  mainPending: boolean;
+  /** Table properties whose step did not run. */
+  pendingProps: Set<keyof TablePropsDraft>;
+  /** PostgreSQL: column and constraint comments (by name) whose step did not run. */
+  pendingComments: { column: Set<string>; constraint: Set<string> };
+  /** PostgreSQL: index names a step that ran created, or renamed an index to. */
+  createdIndexes: Set<string>;
+  /** PostgreSQL: index names a step that ran dropped. */
+  droppedIndexes: Set<string>;
+  /** PostgreSQL: for each index created without a name (the server names it), in order, whether it was created. */
+  unnamedCreates: boolean[];
+}
+
+function saveProgress(steps: readonly SaveStep[]): SaveProgress {
+  const p: SaveProgress = {
+    mainPending: false,
+    pendingProps: new Set(),
+    pendingComments: { column: new Set(), constraint: new Set() },
+    createdIndexes: new Set(),
+    droppedIndexes: new Set(),
+    unnamedCreates: [],
+  };
+  for (const { change, applied } of steps) {
+    if (change.engine === 'mysql') {
+      const m = change.change;
+      if (m.change === 'createTable') {
+        if (!applied) p.mainPending = true;
+      } else if (m.change === 'alterTable' && !applied) {
+        for (const op of m.operations as { op: string; options?: MyTableOptions }[]) {
+          if (op.op === 'setOptions') {
+            for (const key of Object.keys(op.options ?? {})) {
+              const prop = MY_OPTION_PROPS[key];
+              if (prop) p.pendingProps.add(prop);
+            }
+          } else if (op.op === 'convertCharset') {
+            for (const prop of ['charset', 'collation', 'convertCharset'] as const) p.pendingProps.add(prop);
+          } else if (op.op === 'rename') {
+            p.pendingProps.add('name');
+          } else {
+            p.mainPending = true;
+          }
+        }
+      }
+      continue;
+    }
+    const c = change.change;
+    if (c.object === 'table') {
+      // The DEFAULT partition of a new table is a table of its own.
+      if (c.action === 'create' && !c.partitionOf && !applied) p.mainPending = true;
+      if (c.action === 'alter' && !applied) {
+        for (const { op } of c.operations as { op: string }[]) {
+          if (PG_RESTORE_OPS.has(op)) continue;
+          const prop = PG_PROP_OPS[op];
+          if (prop) p.pendingProps.add(prop);
+          else p.mainPending = true;
+        }
+      }
+    } else if (c.object === 'index') {
+      if (c.action === 'create') {
+        if (!c.name) p.unnamedCreates.push(applied);
+        else if (applied) p.createdIndexes.add(c.name);
+      } else if (c.action === 'drop' && applied) {
+        p.droppedIndexes.add(c.name.name);
+      } else if (c.action === 'alter' && applied) {
+        for (const op of c.operations) if (op.op === 'rename') p.createdIndexes.add(op.newName);
+      }
+    } else if (c.object === 'comment' && !applied) {
+      const kind = c.target.kind;
+      if (kind === 'table') p.pendingProps.add('comment');
+      else if (kind === 'column' || kind === 'constraint') p.pendingComments[kind].add(c.target.name);
+    }
+  }
+  return p;
+}
+
+function copyOf<T>(item: T): T {
+  return JSON.parse(JSON.stringify(item)) as T;
+}
+
+/**
+ * The draft's items when their statement did not run: each item that
+ * exists is matched to the table as read now by its name as read and takes
+ * that item's id, so it is still compared with the same column, index or
+ * constraint; dropped items stay as they are. A new item stays new, unless
+ * the table as read has an item of its name that no existing item is
+ * matched to: the statement ran in part and created it, so it is compared
+ * with that item instead of being added a second time. Items the server
+ * has that the draft does not know of are added unchanged.
+ */
+function keepPending<T extends { id: string; origName: string | null; name: string }>(items: readonly T[], read: readonly T[], same: (a: string, b: string) => boolean): T[] {
+  const claimed = new Set<string>();
+  // Existing items first: an item read under a name belongs to the draft item that was read under it, not to a new one given that name.
+  const matched = new Map<T, T>();
+  for (const item of items) {
+    if (item.origName === null) continue;
+    const origName = item.origName;
+    const now = read.find((r) => !claimed.has(r.id) && same(r.name, origName));
+    if (!now) continue;
+    claimed.add(now.id);
+    matched.set(item, now);
+  }
+  const out: T[] = [];
+  for (const item of items) {
+    if (item.origName === null) {
+      const name = item.name.trim();
+      const now = name === '' ? undefined : read.find((r) => !claimed.has(r.id) && same(r.name, name));
+      if (now) {
+        claimed.add(now.id);
+        out.push({ ...copyOf(item), id: now.id, origName: now.name });
+      } else out.push(copyOf(item));
+      continue;
+    }
+    const now = matched.get(item);
+    // Gone from the table meanwhile: nothing is left to change.
+    if (!now) continue;
+    out.push({ ...copyOf(item), id: now.id, origName: now.name });
+  }
+  for (const r of read) if (!claimed.has(r.id)) out.push(copyOf(r));
+  return out;
+}
+
+/** Puts back the comments typed for items (by final name) whose comment step did not run. */
+function keepComments<T extends { name: string; dropped: boolean; comment: string }>(items: T[], draft: readonly T[], names: ReadonlySet<string>, same: (a: string, b: string) => boolean): void {
+  for (const name of names) {
+    const typed = draft.find((d) => !d.dropped && same(d.name.trim(), name));
+    const now = items.find((i) => same(i.name, name));
+    if (typed && now) now.comment = typed.comment;
+  }
+}
+
+/**
+ * PostgreSQL indexes after a save that stopped part way: each index is
+ * dropped, created and renamed in steps of its own. An index whose new
+ * definition or name reached the server is taken as read; one whose old
+ * index was dropped but whose new one was not created becomes a new index
+ * with the draft's definition; otherwise the draft's change stays pending.
+ */
+function pgIndexesAfter(draft: TableDraft, read: readonly IndexDraft[], p: SaveProgress): IndexDraft[] {
+  const claimed = new Set<string>();
+  const take = (name: string): IndexDraft | undefined => {
+    const now = read.find((r) => !claimed.has(r.id) && r.name === name);
+    if (now) claimed.add(now.id);
+    return now;
+  };
+  const unnamed = [...p.unnamedCreates];
+  const out: IndexDraft[] = [];
+  for (const i of draft.indexes) {
+    const was = i.origName;
+    const name = i.name.trim();
+    if (i.dropped) {
+      if (was === null || p.droppedIndexes.has(was)) continue;
+      const now = take(was);
+      if (now) out.push({ ...copyOf(i), id: now.id, origName: now.name });
+      continue;
+    }
+    if (was === null || i.changed) {
+      const created = name ? p.createdIndexes.has(name) : (unnamed.shift() ?? false);
+      if (created) {
+        // An index the server named is among the indexes read, added below.
+        const now = name ? take(name) : undefined;
+        if (now) out.push(copyOf(now));
+        continue;
+      }
+      const now = was !== null && !p.droppedIndexes.has(was) ? take(was) : undefined;
+      out.push(now ? { ...copyOf(i), id: now.id, origName: now.name } : { ...copyOf(i), origName: null, changed: false, definition: '', sizeBytes: null });
+      continue;
+    }
+    const renamed = name !== was && p.createdIndexes.has(name);
+    const now = take(renamed ? name : was);
+    // Gone with a constraint that was dropped.
+    if (!now) continue;
+    out.push(renamed ? copyOf(now) : { ...copyOf(i), id: now.id, origName: now.name });
+  }
+  for (const r of read) if (!claimed.has(r.id)) out.push(copyOf(r));
+  return out;
+}
+
+/**
+ * The draft to go on with after a save that stopped part way (a step
+ * failed after earlier ones ran). `read` is the table as read after the
+ * save and becomes the designer's original; the result is `read` plus the
+ * draft's changes whose steps did not run, so saving again plans only those
+ * and nothing that already ran is done twice. `steps` are the save's steps
+ * in order; at least one of them ran.
+ */
+export function rebaseDraft(draft: TableDraft, read: TableDraft, steps: readonly SaveStep[]): TableDraft {
+  const p = saveProgress(steps);
+  const out = cloneDraft(read);
+  const same = (a: string, b: string): boolean => (read.engine === 'mysql' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  // Columns and constraints change in one statement (ALTER TABLE, or CREATE TABLE): all of them ran, or none.
+  if (p.mainPending) {
+    out.columns = keepPending(draft.columns, read.columns, same);
+    out.constraints = keepPending(draft.constraints, read.constraints, same);
+    if (read.engine === 'mysql') out.indexes = keepPending(draft.indexes, read.indexes, same);
+  } else {
+    keepComments(out.columns, draft.columns, p.pendingComments.column, same);
+    keepComments(out.constraints, draft.constraints, p.pendingComments.constraint, same);
+  }
+  if (read.engine === 'postgres') out.indexes = pgIndexesAfter(draft, read.indexes, p);
+  const props = out.props as unknown as Record<keyof TablePropsDraft, unknown>;
+  for (const key of p.pendingProps) props[key] = copyOf(draft.props[key]);
+  out.props.databaseTablespace = draft.props.databaseTablespace;
+  return out;
 }
 
 // ---------------------------------------------------------------------------
