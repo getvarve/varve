@@ -1,7 +1,6 @@
 //! Opening connections: options, TLS, engine detection and session setup.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
 use mysql_async::prelude::Queryable;
@@ -9,10 +8,11 @@ use mysql_async::{
     ClientIdentity, Conn, DriverError as MyDriverError, Error as MyError, Opts, OptsBuilder,
     SslOpts,
 };
-use tokio::sync::OnceCell;
 use tokio::time::{Instant, timeout_at};
 use varve_core::Engine;
-use varve_driver::{ConnectParams, DriverError, ErrorKind, ServerInfo, TlsMode, parse_version};
+use varve_driver::{
+    ConnectParams, DriverError, ErrorKind, ServerInfo, TlsMode, native_roots, parse_version,
+};
 
 use crate::error::{connect_error, session_error};
 use crate::guard;
@@ -348,41 +348,20 @@ async fn with_roots(ssl: SslOpts, ca_path: Option<&str>) -> Result<SslOpts, Driv
             .with_root_certs(vec![ca.into()])
             .with_disable_built_in_roots(true));
     }
+    // Loaded once and shared, off the async worker threads; its problems
+    // are logged once per load.
     let native = native_roots().await;
-    if native.is_empty() {
+    for error in native.unreported_errors() {
+        tracing::warn!(%error, "could not load part of the OS trust store");
+    }
+    if native.certs.is_empty() {
         // Keep the Mozilla roots built into `mysql_async`.
         Ok(ssl)
     } else {
         Ok(ssl
-            .with_root_certs(native.iter().map(|der| der.clone().into()).collect())
+            .with_root_certs(native.certs.iter().map(|der| der.clone().into()).collect())
             .with_disable_built_in_roots(true))
     }
-}
-
-/// The OS trust store, loaded once per process (DER encoded).
-async fn native_roots() -> Arc<Vec<Vec<u8>>> {
-    static ROOTS: OnceCell<Arc<Vec<Vec<u8>>>> = OnceCell::const_new();
-    ROOTS
-        .get_or_init(|| async {
-            let loaded = tokio::task::spawn_blocking(|| {
-                let result = rustls_native_certs::load_native_certs();
-                for error in &result.errors {
-                    tracing::warn!(%error, "could not load part of the OS trust store");
-                }
-                result
-                    .certs
-                    .into_iter()
-                    .map(|cert| cert.as_ref().to_vec())
-                    .collect::<Vec<_>>()
-            })
-            .await;
-            Arc::new(loaded.unwrap_or_else(|error| {
-                tracing::warn!(%error, "loading the OS trust store failed");
-                Vec::new()
-            }))
-        })
-        .await
-        .clone()
 }
 
 /// Tells MySQL and MariaDB apart from `VERSION()` and `@@version_comment`.
