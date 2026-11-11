@@ -1396,7 +1396,11 @@ async fn typed_secrets_do_not_follow_a_profile_to_another_identity() -> TestResu
     s.delete_connection(&profile.id).await?;
     assert!(!s.metadata.has_typed(&profile.id));
     assert!(s.sessions.list_all().iter().all(|i| i.id != meta));
-    s.close_session(&again.id).await?;
+    // Deleting the profile closes its open sessions as well, the tab's included.
+    assert!(
+        s.sessions.list_all().iter().all(|i| i.id != again.id),
+        "the deleted profile's session is still open"
+    );
     Ok(())
 }
 
