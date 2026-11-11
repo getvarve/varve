@@ -188,6 +188,21 @@ pub enum TunnelError {
         partial_success: bool,
     },
 
+    /// The server takes no password directly and asks, through
+    /// keyboard-interactive authentication, for something that is not the
+    /// password (a one-time code, a user name, several answers at once).
+    /// Varve has only the password to answer with.
+    #[error(
+        "SSH authentication of user `{username}` with a password failed: the server asks for \
+         something else ({prompt}), which Varve cannot answer; use a key file or the SSH agent"
+    )]
+    AuthPrompt {
+        /// The user name that was tried.
+        username: String,
+        /// What the server asked for, as it worded it.
+        prompt: String,
+    },
+
     /// The private key file cannot be used.
     #[error("cannot use the SSH key file {}: {problem}", path.display())]
     KeyFile {
@@ -300,7 +315,7 @@ impl TunnelError {
     pub fn kind(&self) -> TunnelErrorKind {
         match self {
             TunnelError::Connect { .. } => TunnelErrorKind::Connect,
-            TunnelError::Auth { .. } => TunnelErrorKind::Auth,
+            TunnelError::Auth { .. } | TunnelError::AuthPrompt { .. } => TunnelErrorKind::Auth,
             TunnelError::KeyFile { .. } => TunnelErrorKind::KeyFile,
             TunnelError::InvalidPublicKey => TunnelErrorKind::InvalidPublicKey,
             TunnelError::Agent { .. } => TunnelErrorKind::Agent,
