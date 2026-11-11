@@ -124,8 +124,14 @@ pub enum SecretError {
     /// The profile id cannot be used in a keychain account name.
     #[error("invalid profile id `{0}` for a keychain entry")]
     InvalidProfileId(String),
-    /// The OS credential store failed or is not available.
+    /// The OS credential store cannot be reached: none is running (Linux
+    /// without a Secret Service), it is locked, or the login session has
+    /// none. Asking for the secret instead is the way out.
     #[error("the system keychain is not available: {0}")]
+    Unavailable(String),
+    /// The OS credential store was reached but refused or failed the
+    /// request, for example when the user denied access.
+    #[error("the system keychain could not complete the request: {0}")]
     Keychain(String),
     /// The in-memory store mutex was poisoned.
     #[error("the secret store is unusable after a panic in another thread")]
@@ -158,32 +164,160 @@ pub trait SecretStore: Send + Sync {
 pub struct KeychainStore;
 
 impl KeychainStore {
+    #[cfg(not(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )))]
     fn entry(key: &SecretKey) -> Result<keyring::Entry, SecretError> {
-        keyring::Entry::new(SERVICE, &key.account())
-            .map_err(|e| SecretError::Keychain(e.to_string()))
+        keyring::Entry::new(SERVICE, &key.account()).map_err(keychain_error)
+    }
+
+    /// On Linux and the BSDs `keyring::Entry` builds the Secret Service
+    /// store once per process and keeps a failure for good, so a Secret
+    /// Service that was not up at the first access would leave the keychain
+    /// unavailable until Varve restarts. The store is built here instead,
+    /// on every access until it succeeds.
+    #[cfg(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    ))]
+    fn entry(key: &SecretKey) -> Result<keyring_core::Entry, SecretError> {
+        secret_service::ensure_store()?;
+        keyring_core::Entry::new(SERVICE, &key.account()).map_err(keychain_error)
+    }
+
+    /// Runs `op` on the keychain entry of `key`.
+    #[cfg(not(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )))]
+    fn with_entry<T>(
+        key: &SecretKey,
+        op: impl Fn(&keyring::Entry) -> Result<T, keyring::Error>,
+    ) -> Result<T, SecretError> {
+        op(&Self::entry(key)?).map_err(keychain_error)
+    }
+
+    /// Runs `op` on the keychain entry of `key`. The Secret Service store
+    /// holds one D-Bus session for as long as it lives; when the Secret
+    /// Service restarts, every call on that store fails as a platform
+    /// failure. So after such a failure the store is forgotten, built again
+    /// and `op` runs once more ([`retry_after_platform_failure`]).
+    #[cfg(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    ))]
+    fn with_entry<T>(
+        key: &SecretKey,
+        op: impl Fn(&keyring_core::Entry) -> Result<T, keyring::Error>,
+    ) -> Result<T, SecretError> {
+        retry_after_platform_failure(|| Ok(op(&Self::entry(key)?)), secret_service::forget_store)
+    }
+}
+
+/// Runs `attempt`; when the store reports a platform failure, calls
+/// `forget` (which drops the store, so the next attempt builds a new one)
+/// and runs `attempt` once more. A second platform failure means the store
+/// cannot be reached: [`SecretError::Unavailable`], so the caller asks for
+/// the secret instead of failing. The outer error of `attempt` is one from
+/// building the store or the entry and is returned as it is.
+#[cfg(any(
+    test,
+    all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )
+))]
+fn retry_after_platform_failure<T>(
+    mut attempt: impl FnMut() -> Result<Result<T, keyring::Error>, SecretError>,
+    forget: impl FnOnce(),
+) -> Result<T, SecretError> {
+    match attempt()? {
+        Err(keyring::Error::PlatformFailure(_)) => {
+            forget();
+            match attempt()? {
+                Err(error @ keyring::Error::PlatformFailure(_)) => {
+                    Err(SecretError::Unavailable(error.to_string()))
+                }
+                other => other.map_err(keychain_error),
+            }
+        }
+        other => other.map_err(keychain_error),
+    }
+}
+
+/// The Secret Service store behind [`KeychainStore`] on Linux and the BSDs
+/// (the platforms `keyring` serves with it).
+#[cfg(all(
+    unix,
+    not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+))]
+mod secret_service {
+    use std::sync::Mutex;
+
+    use super::SecretError;
+
+    /// Serializes building the store, so two first accesses do not both
+    /// build one.
+    static BUILDING: Mutex<()> = Mutex::new(());
+
+    /// Makes the Secret Service store the default `keyring_core` store,
+    /// unless an earlier access already did. A failure is not kept: the
+    /// next access tries again, so the keychain works once the Secret
+    /// Service is up.
+    pub(super) fn ensure_store() -> Result<(), SecretError> {
+        if keyring_core::get_default_store().is_some() {
+            return Ok(());
+        }
+        let _building = BUILDING.lock().map_err(|_| SecretError::Poisoned)?;
+        if keyring_core::get_default_store().is_some() {
+            return Ok(());
+        }
+        // Whatever stops the store from being built, the keychain cannot
+        // be reached: asking for the secret is the way out.
+        let store = zbus_secret_service_keyring_store::Store::new()
+            .map_err(|error| SecretError::Unavailable(error.to_string()))?;
+        keyring_core::set_default_store(store);
+        Ok(())
+    }
+
+    /// Drops the default store, so the next [`ensure_store`] builds a new
+    /// one with a new D-Bus session. Entries made from the old store keep
+    /// it alive until they are dropped.
+    pub(super) fn forget_store() {
+        drop(keyring_core::unset_default_store());
+    }
+}
+
+/// Sorts a keyring error into "cannot reach the store" and "the store
+/// refused or failed".
+fn keychain_error(error: keyring::Error) -> SecretError {
+    match error {
+        keyring::Error::NoDefaultStore | keyring::Error::NoStorageAccess(_) => {
+            SecretError::Unavailable(error.to_string())
+        }
+        other => SecretError::Keychain(other.to_string()),
     }
 }
 
 impl SecretStore for KeychainStore {
     fn set(&self, key: &SecretKey, secret: &Secret) -> Result<(), SecretError> {
-        Self::entry(key)?
-            .set_password(secret.expose())
-            .map_err(|e| SecretError::Keychain(e.to_string()))
+        Self::with_entry(key, |entry| entry.set_password(secret.expose()))
     }
 
     fn get(&self, key: &SecretKey) -> Result<Option<Secret>, SecretError> {
-        match Self::entry(key)?.get_password() {
+        Self::with_entry(key, |entry| match entry.get_password() {
             Ok(value) => Ok(Some(Secret::new(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(SecretError::Keychain(e.to_string())),
-        }
+            Err(e) => Err(e),
+        })
     }
 
     fn delete(&self, key: &SecretKey) -> Result<(), SecretError> {
-        match Self::entry(key)?.delete_credential() {
+        Self::with_entry(key, |entry| match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(SecretError::Keychain(e.to_string())),
-        }
+            Err(e) => Err(e),
+        })
     }
 }
 
@@ -867,6 +1001,100 @@ mod tests {
         assert!(!printed.contains("hunter2"), "{printed}");
         assert!(printed.contains("cached: 1"), "{printed}");
         Ok(())
+    }
+
+    #[test]
+    fn a_platform_failure_rebuilds_the_store_and_tries_once_more() {
+        use std::cell::Cell;
+
+        let platform =
+            || keyring::Error::PlatformFailure(Box::new(std::io::Error::other("no session")));
+        // Runs the scripted attempts; returns the result, the number of
+        // attempts and how often the store was forgotten.
+        let run = |script: Vec<Result<Result<u8, keyring::Error>, SecretError>>| {
+            let attempts = Cell::new(0_usize);
+            let forgotten = Cell::new(0_usize);
+            let mut script = script.into_iter();
+            let result = retry_after_platform_failure(
+                || {
+                    attempts.set(attempts.get() + 1);
+                    script
+                        .next()
+                        .unwrap_or_else(|| Err(SecretError::Keychain("script ran out".into())))
+                },
+                || forgotten.set(forgotten.get() + 1),
+            );
+            (result, attempts.get(), forgotten.get())
+        };
+
+        // The usual case: one attempt, the store stays.
+        let (result, attempts, forgotten) = run(vec![Ok(Ok(7))]);
+        assert!(matches!(result, Ok(7)), "{result:?}");
+        assert_eq!((attempts, forgotten), (1, 0));
+        // The Secret Service restarted: the second attempt, on a new
+        // store, works.
+        let (result, attempts, forgotten) = run(vec![Ok(Err(platform())), Ok(Ok(7))]);
+        assert!(matches!(result, Ok(7)), "{result:?}");
+        assert_eq!((attempts, forgotten), (2, 1));
+        // It is still gone: unavailable, so the caller asks for the secret.
+        let (result, attempts, forgotten) = run(vec![Ok(Err(platform())), Ok(Err(platform()))]);
+        assert!(
+            matches!(&result, Err(SecretError::Unavailable(m)) if m.contains("no session")),
+            "{result:?}"
+        );
+        assert_eq!((attempts, forgotten), (2, 1));
+        // The new store cannot be built: that error is returned as it is.
+        let (result, attempts, forgotten) = run(vec![
+            Ok(Err(platform())),
+            Err(SecretError::Unavailable("no bus".into())),
+        ]);
+        assert!(
+            matches!(&result, Err(SecretError::Unavailable(m)) if m == "no bus"),
+            "{result:?}"
+        );
+        assert_eq!((attempts, forgotten), (2, 1));
+        // Any other error is not retried and keeps its sorting.
+        let (result, attempts, forgotten) =
+            run(vec![Ok(Err(keyring::Error::TooLong("user".into(), 512)))]);
+        assert!(
+            matches!(result, Err(SecretError::Keychain(_))),
+            "{result:?}"
+        );
+        assert_eq!((attempts, forgotten), (1, 0));
+        let (result, attempts, forgotten) = run(vec![
+            Ok(Err(platform())),
+            Ok(Err(keyring::Error::NoStorageAccess(Box::new(
+                std::io::Error::other("collection is locked"),
+            )))),
+        ]);
+        assert!(
+            matches!(result, Err(SecretError::Unavailable(_))),
+            "{result:?}"
+        );
+        assert_eq!((attempts, forgotten), (2, 1));
+    }
+
+    #[test]
+    fn keychain_errors_say_whether_the_store_is_reachable() {
+        let platform =
+            || keyring::Error::PlatformFailure(Box::new(std::io::Error::other("user canceled")));
+        assert!(matches!(
+            keychain_error(keyring::Error::NoDefaultStore),
+            SecretError::Unavailable(_)
+        ));
+        assert!(matches!(
+            keychain_error(keyring::Error::NoStorageAccess(Box::new(
+                std::io::Error::other("collection is locked")
+            ))),
+            SecretError::Unavailable(_)
+        ));
+        let refused = keychain_error(platform());
+        assert!(matches!(refused, SecretError::Keychain(_)));
+        assert!(refused.to_string().contains("user canceled"), "{refused}");
+        assert!(matches!(
+            keychain_error(keyring::Error::TooLong("user".into(), 512)),
+            SecretError::Keychain(_)
+        ));
     }
 
     #[test]
