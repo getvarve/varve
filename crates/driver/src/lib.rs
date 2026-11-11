@@ -20,6 +20,7 @@ use varve_core::Engine;
 use varve_secrets::Secret;
 
 mod classify;
+mod native_roots;
 mod partial;
 pub mod tls_key;
 mod value;
@@ -29,6 +30,7 @@ pub use classify::{
     classify, is_destructive, lex, lex_mysql, mysql_defines_body, read_only_violation,
     split_statements, split_statements_mysql, split_statements_strict,
 };
+pub use native_roots::{NativeRoots, native_roots, refresh_native_roots_after};
 pub use partial::{
     Durability, PartialOutput, RanStatement, TransactionEffect, TransactionTracker,
     transaction_effect, transaction_effect_mysql,

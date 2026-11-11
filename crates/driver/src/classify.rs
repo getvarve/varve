@@ -31,7 +31,8 @@ pub enum Dialect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatementKind {
-    /// `SELECT`, `VALUES`, `TABLE`, or a `WITH` that ends in a select.
+    /// `SELECT`, `VALUES`, `TABLE`, or a `WITH` that ends in a select and
+    /// changes no data in its CTEs.
     Select,
     /// `INSERT`, `REPLACE`.
     Insert,
@@ -57,7 +58,8 @@ pub enum StatementKind {
     Grant,
     /// `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`.
     Transaction,
-    /// `EXPLAIN`, `SHOW`, `DESCRIBE`.
+    /// `EXPLAIN`, `SHOW`, `DESCRIBE`. An `EXPLAIN ANALYZE` of a statement
+    /// that changes data executes it and is classified as that statement.
     Explain,
     /// `SET`, `USE`, `RESET`.
     Session,
@@ -115,7 +117,7 @@ pub struct StatementSpan<'a> {
 /// whitespace and comments are dropped.
 #[must_use]
 pub fn split_statements(sql: &str, dialect: Dialect) -> Vec<StatementSpan<'_>> {
-    spans(sql, scan(sql, dialect))
+    spans(sql, scan(sql, dialect), dialect)
 }
 
 /// The statement boundaries of a MySQL script cannot be known from the text
@@ -259,7 +261,7 @@ pub fn split_statements_mysql<'a>(
     if uncertain {
         return Err(AmbiguousSplit);
     }
-    Ok(spans(sql, scanned))
+    Ok(spans(sql, scanned, Dialect::Mysql))
 }
 
 /// True when a MySQL or MariaDB statement defines a stored body: `CREATE
@@ -292,7 +294,7 @@ pub fn mysql_defines_body(statement: &str, mode: &MysqlMode) -> bool {
     matches!(header_end(&items), HeaderEnd::BodyAt(_))
 }
 
-fn spans(sql: &str, scanned: Vec<Scanned>) -> Vec<StatementSpan<'_>> {
+fn spans(sql: &str, scanned: Vec<Scanned>, dialect: Dialect) -> Vec<StatementSpan<'_>> {
     scanned
         .into_iter()
         .filter(|s| !s.tokens.is_empty())
@@ -302,7 +304,7 @@ fn spans(sql: &str, scanned: Vec<Scanned>) -> Vec<StatementSpan<'_>> {
             StatementSpan {
                 text: raw.trim(),
                 offset: s.start + leading,
-                kind: classify_tokens(&s.tokens),
+                kind: classify_statement(&s, dialect),
             }
         })
         .collect()
@@ -1559,11 +1561,32 @@ struct Token {
     detached: bool,
 }
 
+/// What stands where in a statement, for reading its structure: the CTE
+/// list of a `WITH`, a statement in parentheses, the body of a `COPY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Piece {
+    /// A keyword or unquoted identifier: the index of its [`Token`].
+    Word(usize),
+    /// A quoted identifier (for MySQL also a double-quoted string, which is
+    /// an identifier under `ANSI_QUOTES`).
+    Name,
+    /// `(`.
+    Open,
+    /// `)`.
+    Close,
+    /// `,`.
+    Comma,
+    /// A literal, a parameter or any other punctuation.
+    Other,
+}
+
 /// A statement found by the scanner: byte range and its word tokens.
 struct Scanned {
     start: usize,
     end: usize,
     tokens: Vec<Token>,
+    /// The words, quoted names, parentheses and commas in order.
+    pieces: Vec<Piece>,
     /// Contents of quoted identifiers (and, for MySQL, double-quoted
     /// strings, which are identifiers under `ANSI_QUOTES`), upper-cased.
     /// They are not keywords, but a quoted variable name still names the
@@ -1587,6 +1610,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
         start: 0,
         end: 0,
         tokens: Vec::new(),
+        pieces: Vec::new(),
         quoted: Vec::new(),
     };
     let mut depth: u32 = 0;
@@ -1608,6 +1632,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
             LexKind::Comment | LexKind::ExecutableCommentStart | LexKind::ExecutableCommentEnd => {}
             LexKind::QuotedIdent | LexKind::DoubleQuoted => {
                 current.quoted.push(quoted_inner(text).to_uppercase());
+                current.pieces.push(Piece::Name);
                 detached = true;
                 if mysql {
                     my.quoted();
@@ -1615,6 +1640,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
             }
             LexKind::Punct('(') => {
                 depth += 1;
+                current.pieces.push(Piece::Open);
                 detached = true;
                 if mysql {
                     my.other(Item::Punct('('));
@@ -1622,6 +1648,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
             }
             LexKind::Punct(')') => {
                 depth = depth.saturating_sub(1);
+                current.pieces.push(Piece::Close);
                 detached = true;
                 if mysql {
                     my.other(Item::Punct(')'));
@@ -1634,6 +1661,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
                     pg.semicolon()
                 };
                 if inside {
+                    current.pieces.push(Piece::Other);
                     detached = true;
                 } else {
                     current.end = lexeme.start;
@@ -1642,6 +1670,7 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
                         start: lexeme.end,
                         end: 0,
                         tokens: Vec::new(),
+                        pieces: Vec::new(),
                         quoted: Vec::new(),
                     };
                     detached = false;
@@ -1673,16 +1702,21 @@ fn scan_with(sql: &str, dialect: Dialect, mode: &MysqlMode) -> (Vec<Scanned>, bo
                 } else {
                     pg.word(&token, &current.tokens);
                 }
+                current.pieces.push(Piece::Word(current.tokens.len()));
                 current.tokens.push(token);
                 detached = false;
             }
             LexKind::String | LexKind::DollarString | LexKind::Number | LexKind::Parameter => {
+                current.pieces.push(Piece::Other);
                 detached = true;
                 if mysql {
                     my.other(Item::Literal);
                 }
             }
             LexKind::Punct(c) => {
+                current
+                    .pieces
+                    .push(if c == ',' { Piece::Comma } else { Piece::Other });
                 detached = true;
                 if mysql {
                     my.other(Item::Punct(c));
@@ -2094,40 +2128,136 @@ fn skip_dollar_quoted(chars: &[(usize, char)], i: usize, tag_len: usize) -> usiz
     chars.len()
 }
 
-fn has_top_level(tokens: &[Token], word: &str) -> bool {
-    tokens.iter().any(|t| t.depth == 0 && t.word == word)
+/// A statement, or a part of one, as the classifier reads it: its pieces
+/// and the tokens they point into.
+#[derive(Clone, Copy)]
+struct View<'a> {
+    /// Every token of the statement.
+    tokens: &'a [Token],
+    /// The part being classified.
+    pieces: &'a [Piece],
 }
 
-fn classify_tokens(tokens: &[Token]) -> StatementKind {
-    let Some(first) = tokens.first() else {
-        return StatementKind::Other;
-    };
-    match first.word.as_str() {
-        "WITH" => {
-            // The main statement follows the CTE list at depth 0.
-            let main = tokens.iter().enumerate().skip(1).find(|(_, t)| {
-                t.depth == 0
-                    && matches!(
-                        t.word.as_str(),
-                        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE"
-                    )
-            });
-            match main {
-                Some((position, _)) => classify_tokens(&tokens[position..]),
-                None => StatementKind::Select,
+impl<'a> View<'a> {
+    /// The word at piece `i`, or `None` when that piece is not a word.
+    fn word(&self, i: usize) -> Option<&'a str> {
+        match self.pieces.get(i) {
+            Some(Piece::Word(token)) => Some(self.tokens[*token].word.as_str()),
+            _ => None,
+        }
+    }
+
+    fn slice(&self, from: usize, to: usize) -> View<'a> {
+        let to = to.min(self.pieces.len());
+        View {
+            tokens: self.tokens,
+            pieces: &self.pieces[from.min(to)..to],
+        }
+    }
+
+    /// The view from piece `from` on.
+    fn after(&self, from: usize) -> View<'a> {
+        self.slice(from, self.pieces.len())
+    }
+
+    /// The index of the `)` that closes the `(` at piece `open`, or the end
+    /// of the view when the text stops first.
+    fn group_end(&self, open: usize) -> usize {
+        let mut level = 0u32;
+        for (i, piece) in self.pieces.iter().enumerate().skip(open) {
+            match piece {
+                Piece::Open => level += 1,
+                Piece::Close => {
+                    level = level.saturating_sub(1);
+                    if level == 0 {
+                        return i;
+                    }
+                }
+                _ => {}
             }
         }
+        self.pieces.len()
+    }
+
+    /// The contents of the group that opens at piece `open`.
+    fn group(&self, open: usize) -> View<'a> {
+        self.slice(open + 1, self.group_end(open))
+    }
+
+    /// The words outside every parenthesis of this view, with their piece
+    /// index.
+    fn top_level_words(&self) -> impl Iterator<Item = (usize, &'a str)> + '_ {
+        let mut level = 0u32;
+        self.pieces
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, piece)| match piece {
+                Piece::Open => {
+                    level += 1;
+                    None
+                }
+                Piece::Close => {
+                    level = level.saturating_sub(1);
+                    None
+                }
+                Piece::Word(token) if level == 0 => Some((i, self.tokens[*token].word.as_str())),
+                _ => None,
+            })
+    }
+
+    fn has_top_level(&self, word: &str) -> bool {
+        self.top_level_words().any(|(_, w)| w == word)
+    }
+
+    /// The piece index of the first `word` outside every parenthesis, at or
+    /// after piece `from`.
+    fn top_level_position(&self, from: usize, word: &str) -> Option<usize> {
+        self.top_level_words()
+            .find(|(i, w)| *i >= from && *w == word)
+            .map(|(i, _)| i)
+    }
+}
+
+fn classify_statement(scanned: &Scanned, dialect: Dialect) -> StatementKind {
+    classify_view(
+        View {
+            tokens: &scanned.tokens,
+            pieces: &scanned.pieces,
+        },
+        dialect,
+    )
+}
+
+fn classify_view(view: View<'_>, dialect: Dialect) -> StatementKind {
+    // A statement starts at its first word or parenthesis.
+    let start = view
+        .pieces
+        .iter()
+        .position(|p| matches!(p, Piece::Word(_) | Piece::Open));
+    let Some(start) = start else {
+        return StatementKind::Other;
+    };
+    let view = view.after(start);
+    let Some(first) = view.word(0) else {
+        return classify_parenthesised(view, dialect);
+    };
+    match first {
+        "WITH" => classify_with(view, dialect),
+        "EXPLAIN" | "DESCRIBE" | "DESC" => classify_explain(view, dialect),
+        // MariaDB's `ANALYZE [FORMAT=JSON] statement` is its EXPLAIN ANALYZE:
+        // it runs the statement. `ANALYZE TABLE` is maintenance.
+        "ANALYZE" if dialect == Dialect::Mysql => classify_mariadb_analyze(view, dialect),
         "SELECT" | "VALUES" | "TABLE" => StatementKind::Select,
         "INSERT" | "REPLACE" => StatementKind::Insert,
         "UPDATE" => {
-            if has_top_level(tokens, "WHERE") {
+            if view.has_top_level("WHERE") {
                 StatementKind::Update
             } else {
                 StatementKind::UpdateAll
             }
         }
         "DELETE" => {
-            if has_top_level(tokens, "WHERE") {
+            if view.has_top_level("WHERE") {
                 StatementKind::Delete
             } else {
                 StatementKind::DeleteAll
@@ -2135,7 +2265,7 @@ fn classify_tokens(tokens: &[Token]) -> StatementKind {
         }
         "MERGE" => StatementKind::Merge,
         "ALTER" => {
-            if has_top_level(tokens, "DROP") {
+            if view.has_top_level("DROP") {
                 StatementKind::AlterDrop
             } else {
                 StatementKind::Ddl
@@ -2148,14 +2278,296 @@ fn classify_tokens(tokens: &[Token]) -> StatementKind {
         "BEGIN" | "START" | "COMMIT" | "ROLLBACK" | "SAVEPOINT" | "RELEASE" | "END" | "ABORT" => {
             StatementKind::Transaction
         }
-        "EXPLAIN" | "SHOW" | "DESCRIBE" | "DESC" => StatementKind::Explain,
+        "SHOW" => StatementKind::Explain,
         "SET" | "USE" | "RESET" => StatementKind::Session,
         "CALL" | "DO" | "EXECUTE" => StatementKind::Call,
-        "COPY" | "LOAD" => StatementKind::Copy,
+        "COPY" => classify_copy(view, dialect),
+        "LOAD" => StatementKind::Copy,
         "VACUUM" | "ANALYZE" | "OPTIMIZE" | "REINDEX" | "CLUSTER" | "REFRESH" | "CHECKPOINT" => {
             StatementKind::Maintenance
         }
         _ => StatementKind::Other,
+    }
+}
+
+/// A statement that starts with `(`: `(SELECT 1)`, `(SELECT 1) UNION
+/// (SELECT 2)`, or a whole statement in parentheses, which PostgreSQL reads
+/// as that statement, so `(WITH gone AS (DELETE FROM t RETURNING *) SELECT *
+/// FROM gone)` deletes. It is classified as the contents of its first
+/// group. Later groups that hold a `WITH` or another parenthesis count as
+/// well when they change more: one confirmation too many, never one too
+/// few.
+fn classify_parenthesised(view: View<'_>, dialect: Dialect) -> StatementKind {
+    let mut kind = classify_view(view.group(0), dialect);
+    let mut i = view.group_end(0) + 1;
+    while i < view.pieces.len() {
+        if view.pieces[i] != Piece::Open {
+            i += 1;
+            continue;
+        }
+        let inner = view.group(i);
+        if inner.word(0) == Some("WITH") || inner.pieces.first() == Some(&Piece::Open) {
+            kind = more_severe(kind, classify_view(inner, dialect));
+        }
+        i = view.group_end(i) + 1;
+    }
+    kind
+}
+
+/// A `WITH` statement: the CTE list, then the main statement. A
+/// data-modifying CTE (PostgreSQL runs every one of them, whether the main
+/// statement reads its rows or not) counts as well: the statement is
+/// classified as the most destructive of its CTEs and its main statement,
+/// so `WITH gone AS (DELETE FROM t RETURNING *) SELECT count(*) FROM gone`
+/// is a `DELETE` without a `WHERE`.
+///
+/// The list is walked by its structure, never by searching for a keyword:
+/// `delete`, `update`, `insert` and `merge` are valid CTE names. Text that
+/// does not have the shape of a CTE list is classified as the most
+/// destructive write found anywhere in it.
+fn classify_with(view: View<'_>, dialect: Dialect) -> StatementKind {
+    cte_list(view, dialect).unwrap_or_else(|| most_severe_write(view, dialect))
+}
+
+/// Walks `WITH [RECURSIVE] name [(columns)] AS [[NOT] MATERIALIZED] (body)
+/// [SEARCH ...] [CYCLE ...] [, ...]` and classifies every body and the
+/// statement after the list. `None` when the text has another shape.
+fn cte_list(view: View<'_>, dialect: Dialect) -> Option<StatementKind> {
+    let pieces = view.pieces;
+    let mut i = 1;
+    // `RECURSIVE` is the keyword unless it is itself the name of the CTE.
+    let names_cte = view.word(i + 1) == Some("AS") || pieces.get(i + 1) == Some(&Piece::Open);
+    if view.word(i) == Some("RECURSIVE") && !names_cte {
+        i += 1;
+    }
+    let mut kind = StatementKind::Select;
+    loop {
+        // The name, quoted or not.
+        if !matches!(pieces.get(i)?, Piece::Word(_) | Piece::Name) {
+            return None;
+        }
+        i += 1;
+        // The column list.
+        if pieces.get(i) == Some(&Piece::Open) {
+            i = view.group_end(i) + 1;
+        }
+        if view.word(i)? != "AS" {
+            return None;
+        }
+        i += 1;
+        if view.word(i) == Some("NOT") {
+            i += 1;
+        }
+        if view.word(i) == Some("MATERIALIZED") {
+            i += 1;
+        }
+        if pieces.get(i)? != &Piece::Open {
+            return None;
+        }
+        kind = more_severe(kind, classify_view(view.group(i), dialect));
+        i = view.group_end(i) + 1;
+        // `SEARCH ... SET column` and `CYCLE ... USING column` hold commas
+        // of their own; each ends one name after its last keyword.
+        if view.word(i) == Some("SEARCH") {
+            i = view.top_level_position(i, "SET")? + 2;
+        }
+        if view.word(i) == Some("CYCLE") {
+            i = view.top_level_position(i, "USING")? + 2;
+        }
+        if pieces.get(i) != Some(&Piece::Comma) {
+            break;
+        }
+        i += 1;
+    }
+    let main = view.after(i);
+    // A list without a main statement reads nothing more.
+    let runs = main
+        .pieces
+        .iter()
+        .any(|p| matches!(p, Piece::Word(_) | Piece::Open));
+    if runs {
+        kind = more_severe(classify_view(main, dialect), kind);
+    }
+    Some(kind)
+}
+
+/// The most destructive `INSERT`, `UPDATE`, `DELETE` or `MERGE` anywhere in
+/// the view, each read up to the end of the parenthesis it stands in.
+/// [`StatementKind::Select`] when there is none.
+fn most_severe_write(view: View<'_>, dialect: Dialect) -> StatementKind {
+    let mut kind = StatementKind::Select;
+    for i in 0..view.pieces.len() {
+        if !matches!(view.word(i), Some("INSERT" | "UPDATE" | "DELETE" | "MERGE")) {
+            continue;
+        }
+        let mut level = 0u32;
+        let mut end = view.pieces.len();
+        for (j, piece) in view.pieces.iter().enumerate().skip(i) {
+            match piece {
+                Piece::Open => level += 1,
+                Piece::Close if level == 0 => {
+                    end = j;
+                    break;
+                }
+                Piece::Close => level -= 1,
+                _ => {}
+            }
+        }
+        kind = more_severe(kind, classify_view(view.slice(i, end), dialect));
+    }
+    kind
+}
+
+/// How much a data-changing kind can remove, for picking the most
+/// destructive statement of a `WITH`.
+fn severity(kind: StatementKind) -> u8 {
+    match kind {
+        _ if kind.is_destructive() => 3,
+        StatementKind::Update | StatementKind::Delete | StatementKind::Merge => 2,
+        StatementKind::Insert => 1,
+        _ => 0,
+    }
+}
+
+/// `other` when it changes more than `kind`, else `kind`.
+fn more_severe(kind: StatementKind, other: StatementKind) -> StatementKind {
+    if severity(other) > severity(kind) {
+        other
+    } else {
+        kind
+    }
+}
+
+/// PostgreSQL `COPY (query) TO ...` runs the query, and the query can be an
+/// `INSERT`, `UPDATE`, `DELETE` or `MERGE` with `RETURNING`: `COPY (DELETE
+/// FROM t RETURNING *) TO '/tmp/t.csv'` deletes every row. Such a statement
+/// is classified as the statement it wraps; every other `COPY` is
+/// [`StatementKind::Copy`].
+fn classify_copy(view: View<'_>, dialect: Dialect) -> StatementKind {
+    if dialect != Dialect::Postgres || view.pieces.get(1) != Some(&Piece::Open) {
+        return StatementKind::Copy;
+    }
+    let wrapped = classify_view(view.group(1), dialect);
+    if severity(wrapped) > 0 {
+        wrapped
+    } else {
+        StatementKind::Copy
+    }
+}
+
+/// True when the group that opens at piece `open` holds a statement, not
+/// an option list or an expression: it starts with a query keyword or
+/// another parenthesis.
+fn opens_statement(view: View<'_>, open: usize) -> bool {
+    let inner = view.group(open);
+    matches!(inner.word(0), Some("SELECT" | "WITH" | "VALUES" | "TABLE"))
+        || inner.pieces.first() == Some(&Piece::Open)
+}
+
+/// `EXPLAIN`, `DESCRIBE` and `DESC`. With `ANALYZE` (PostgreSQL
+/// `EXPLAIN ANALYZE`, `EXPLAIN (ANALYZE)`, MySQL `EXPLAIN ANALYZE`,
+/// `DESCRIBE ANALYZE`) the server executes the explained statement, so a
+/// statement that changes data is classified as that statement: `EXPLAIN
+/// ANALYZE DELETE FROM t` deletes every row. Everything else is
+/// [`StatementKind::Explain`].
+fn classify_explain(view: View<'_>, dialect: Dialect) -> StatementKind {
+    // The explained statement starts at the first statement keyword outside
+    // every parenthesis, or at a parenthesis that holds a statement
+    // (`EXPLAIN ANALYZE (WITH ...)`), whichever comes first.
+    let mut level = 0u32;
+    let mut statement = None;
+    for (i, piece) in view.pieces.iter().enumerate().skip(1) {
+        match piece {
+            Piece::Open => {
+                if level == 0 && opens_statement(view, i) {
+                    statement = Some(i);
+                    break;
+                }
+                level += 1;
+            }
+            Piece::Close => level = level.saturating_sub(1),
+            Piece::Word(token) if level == 0 => {
+                if matches!(
+                    view.tokens[*token].word.as_str(),
+                    "SELECT"
+                        | "INSERT"
+                        | "REPLACE"
+                        | "UPDATE"
+                        | "DELETE"
+                        | "MERGE"
+                        | "WITH"
+                        | "VALUES"
+                        | "TABLE"
+                        | "EXECUTE"
+                        | "CREATE"
+                        | "DECLARE"
+                ) {
+                    statement = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(statement) = statement else {
+        return StatementKind::Explain;
+    };
+    let options = view.slice(1, statement);
+    let mut level = 0u32;
+    let mut analyze = false;
+    for (i, piece) in options.pieces.iter().enumerate() {
+        match piece {
+            Piece::Open => level += 1,
+            Piece::Close => level = level.saturating_sub(1),
+            Piece::Word(_) if matches!(options.word(i), Some("ANALYZE" | "ANALYSE")) => {
+                // Inside the option list a boolean can follow: `ANALYZE
+                // FALSE` and `ANALYZE OFF` turn it off. A number or a string
+                // after it is not a word, so `ANALYZE 0` counts as on: one
+                // confirmation too many, never one too few.
+                let off = level > 0 && matches!(options.word(i + 1), Some("FALSE" | "OFF"));
+                analyze |= !off;
+            }
+            _ => {}
+        }
+    }
+    if !analyze {
+        return StatementKind::Explain;
+    }
+    let kind = classify_view(view.after(statement), dialect);
+    if kind.writes() {
+        kind
+    } else {
+        StatementKind::Explain
+    }
+}
+
+/// MariaDB's `ANALYZE [FORMAT=JSON] statement` executes the statement and
+/// reports the plan with actual values, so a statement that changes data is
+/// classified as that statement. `ANALYZE TABLE` (and `ANALYZE LOCAL` or
+/// `NO_WRITE_TO_BINLOG TABLE`) is maintenance.
+fn classify_mariadb_analyze(view: View<'_>, dialect: Dialect) -> StatementKind {
+    let mut statement = 1;
+    if view.word(statement) == Some("FORMAT") {
+        // `FORMAT=JSON`: the keyword, the sign and its value.
+        statement += 1;
+        if view.pieces.get(statement) == Some(&Piece::Other) {
+            statement += 1;
+        }
+        statement += 1;
+    }
+    let explains = matches!(
+        view.word(statement),
+        Some("SELECT" | "INSERT" | "REPLACE" | "UPDATE" | "DELETE" | "WITH" | "VALUES")
+    ) || (view.pieces.get(statement) == Some(&Piece::Open)
+        && opens_statement(view, statement));
+    if !explains {
+        return StatementKind::Maintenance;
+    }
+    let kind = classify_view(view.after(statement), dialect);
+    if kind.writes() {
+        kind
+    } else {
+        StatementKind::Explain
     }
 }
 
@@ -2304,6 +2716,450 @@ mod tests {
             ),
             vec![Delete]
         );
+    }
+
+    #[test]
+    fn data_modifying_ctes_classify_as_their_most_destructive_statement() {
+        assert_eq!(
+            classify(
+                "WITH gone AS (DELETE FROM orders RETURNING *) SELECT count(*) FROM gone",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with u as (update t set x = 0 returning 1) select 1",
+                Postgres
+            ),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify(
+                "with u as (update t set x = 0 where id = 1 returning 1) select 1",
+                Postgres
+            ),
+            vec![Update]
+        );
+        assert_eq!(
+            classify(
+                "with w as (insert into t values (1) returning id) select * from w",
+                Postgres
+            ),
+            vec![Insert]
+        );
+        assert_eq!(
+            classify(
+                "with m as materialized (merge into t using s on t.id = s.id \
+                 when matched then delete returning 1) select 1",
+                Postgres
+            ),
+            vec![Merge]
+        );
+        // The most destructive one wins, wherever it is.
+        assert_eq!(
+            classify(
+                "WITH moved AS (DELETE FROM events WHERE id < 10 RETURNING *), \
+                 wiped AS NOT MATERIALIZED (DELETE FROM audit RETURNING 1) \
+                 INSERT INTO archive SELECT * FROM moved",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with x (a, b) as (delete from t where id = 1 returning a, b) \
+                 delete from u",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // A nested WITH is walked as well.
+        assert_eq!(
+            classify(
+                "with a as (with b as (delete from t returning 1) select * from b) select * from a",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // A WHERE in a subquery of the CTE body is not the body's WHERE.
+        assert_eq!(
+            classify(
+                "with d as (delete from t using (select id from u where x = 1) s returning 1) select 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // Reading CTEs and the words of a CTE column list change nothing.
+        assert_eq!(
+            classify(
+                "with recursive r (n) as (select 1 union all select n + 1 from r where n < 3) select * from r",
+                Postgres
+            ),
+            vec![Select]
+        );
+        assert!(is_destructive(
+            "with gone as (delete from orders returning *) select 1",
+            Postgres
+        ));
+    }
+
+    #[test]
+    fn a_statement_in_parentheses_classifies_as_its_contents() {
+        assert_eq!(
+            classify("(WITH d AS (DELETE FROM t RETURNING 1) SELECT 1)", Postgres),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "((with d as (update t set x = 1 where id = 2 returning 1) select 1))",
+                Postgres
+            ),
+            vec![Update]
+        );
+        for d in [Postgres, Mysql] {
+            assert_eq!(classify("((SELECT 1))", d), vec![Select]);
+            assert_eq!(classify("(SELECT 1) UNION (SELECT 2)", d), vec![Select]);
+            assert_eq!(
+                classify("(select a from t where b in (1, 2)) order by a", d),
+                vec![Select]
+            );
+        }
+        // A later group that holds a WITH counts when it changes more.
+        assert_eq!(
+            classify(
+                "(select 1) union ((with d as (delete from t returning 1) select 1))",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // After EXPLAIN ANALYZE the statement runs; without ANALYZE it does not.
+        assert_eq!(
+            classify(
+                "EXPLAIN ANALYZE (WITH d AS (DELETE FROM t RETURNING 1) SELECT 1)",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "explain (analyze, verbose) (with d as (delete from t returning 1) select 1)",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "explain (with d as (delete from t returning 1) select 1)",
+                Postgres
+            ),
+            vec![Explain]
+        );
+        assert_eq!(
+            classify("explain analyze (select 1) union (select 2)", Postgres),
+            vec![Explain]
+        );
+        // The main statement of a WITH can stand in parentheses too.
+        assert_eq!(
+            classify("with x as (select 1) (select * from x)", Postgres),
+            vec![Select]
+        );
+        assert!(is_destructive(
+            "(with gone as (delete from orders returning *) select * from gone)",
+            Postgres
+        ));
+    }
+
+    #[test]
+    fn cte_names_that_are_keywords_do_not_hide_the_bodies() {
+        assert_eq!(
+            classify(
+                "WITH delete AS (DELETE FROM orders RETURNING *) SELECT * FROM delete WHERE true",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with update as (update t set x = 0 returning 1) select * from update where true",
+                Postgres
+            ),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify(
+                "with insert as (select 1), merge as (delete from t returning 1) select 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with select_ as (select 1), insert (a) as materialized (truncate_me) select 1",
+                Postgres
+            ),
+            vec![Select]
+        );
+        // The name does not become the main statement either.
+        assert_eq!(
+            classify(
+                "with update as (select 1) update t set x = 1 where id = 1",
+                Postgres
+            ),
+            vec![Update]
+        );
+        assert_eq!(
+            classify("with delete as (select 1) select * from delete", Postgres),
+            vec![Select]
+        );
+        // `recursive` as the name of the CTE.
+        assert_eq!(
+            classify(
+                "with recursive as (delete from t returning 1) select 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // Quoted names, with and without a column list.
+        assert_eq!(
+            classify(
+                "WITH \"delete\" AS (DELETE FROM orders RETURNING *) SELECT 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with \"a b\" (\"x\", y) as not materialized (update t set x = 1 returning 1), \
+                 \"c\" as (select 1) select 1",
+                Postgres
+            ),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify("with `delete` as (select 1) select * from `delete`", Mysql),
+            vec![Select]
+        );
+        assert_eq!(
+            classify(
+                "with `x` as (select 1) delete from t where id in (select * from `x`)",
+                Mysql
+            ),
+            vec![Delete]
+        );
+        // Nested parentheses in a column list position, a body and a filter.
+        assert_eq!(
+            classify(
+                "with a as ((select 1)), \
+                 d as (delete from t where id in ((select max(id) from (select 1) s)) returning 1) \
+                 select 1",
+                Postgres
+            ),
+            vec![Delete]
+        );
+        assert_eq!(
+            classify(
+                "with a as ((select (1))), d as ((with e as (delete from t returning 1) select 1)) \
+                 select ((1))",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // SEARCH and CYCLE clauses hold commas of their own.
+        assert_eq!(
+            classify(
+                "with recursive r (id, parent) as (select 1, 2) \
+                 search depth first by id, parent set ordercol \
+                 cycle id, parent set is_cycle to 'y' default 'n' using path, \
+                 gone as (delete from t returning 1) \
+                 select * from r",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "with recursive r (id) as (select 1) cycle id set is_cycle using path \
+                 select * from r",
+                Postgres
+            ),
+            vec![Select]
+        );
+        // Text without the shape of a CTE list: the worst write in it counts.
+        assert_eq!(
+            classify(
+                "with x as materialized not (delete from t returning 1) select 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(classify("with x as select 1", Postgres), vec![Select]);
+    }
+
+    #[test]
+    fn copy_of_a_write_classifies_as_the_write() {
+        assert_eq!(
+            classify(
+                "COPY (DELETE FROM orders RETURNING *) TO '/tmp/orders.csv'",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "copy (update t set x = 1 where id = 2 returning *) to program 'cat'",
+                Postgres
+            ),
+            vec![Update]
+        );
+        assert_eq!(
+            classify(
+                "copy (insert into t values (1) returning id) to stdout",
+                Postgres
+            ),
+            vec![Insert]
+        );
+        assert_eq!(
+            classify(
+                "copy (with d as (delete from t returning 1) select * from d) to stdout",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert!(is_destructive(
+            "copy (delete from orders returning *) to stdout",
+            Postgres
+        ));
+        // Every other COPY stays a copy.
+        assert_eq!(
+            classify("copy (select * from t) to stdout", Postgres),
+            vec![Copy]
+        );
+        assert_eq!(classify("copy t (a, b) from stdin", Postgres), vec![Copy]);
+        assert_eq!(classify("copy t to '/tmp/t.csv'", Postgres), vec![Copy]);
+        assert_eq!(
+            classify("load data infile 'x' into table t", Mysql),
+            vec![Copy]
+        );
+    }
+
+    #[test]
+    fn explain_analyze_classifies_as_the_statement_it_runs() {
+        for d in [Postgres, Mysql] {
+            assert_eq!(
+                classify("EXPLAIN ANALYZE DELETE FROM orders", d),
+                vec![DeleteAll]
+            );
+            assert_eq!(
+                classify("explain analyze update t set x = 1", d),
+                vec![UpdateAll]
+            );
+            assert_eq!(
+                classify("explain analyze delete from t where id = 1", d),
+                vec![Delete]
+            );
+            assert_eq!(
+                classify("explain analyze insert into t values (1)", d),
+                vec![Insert]
+            );
+            // Without ANALYZE nothing runs.
+            assert_eq!(classify("explain delete from orders", d), vec![Explain]);
+            assert_eq!(classify("explain update t set x = 1", d), vec![Explain]);
+            // A read stays an explain.
+            assert_eq!(
+                classify("explain analyze select * from t", d),
+                vec![Explain]
+            );
+        }
+        // PostgreSQL spellings: ANALYSE, VERBOSE, the option list.
+        assert_eq!(
+            classify("EXPLAIN ANALYSE VERBOSE DELETE FROM t", Postgres),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify("EXPLAIN (ANALYZE) UPDATE t SET x = 1", Postgres),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify(
+                "explain (format json, analyze true, buffers) delete from t",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify("explain (analyze, costs off) delete from t", Postgres),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify(
+                "explain (analyze) with gone as (delete from t returning 1) select 1",
+                Postgres
+            ),
+            vec![DeleteAll]
+        );
+        // Turned off in the option list: nothing runs.
+        assert_eq!(
+            classify("explain (analyze false) delete from t", Postgres),
+            vec![Explain]
+        );
+        assert_eq!(
+            classify("EXPLAIN (ANALYZE OFF, VERBOSE) DELETE FROM t", Postgres),
+            vec![Explain]
+        );
+        assert_eq!(
+            classify("explain (verbose) delete from t", Postgres),
+            vec![Explain]
+        );
+        // MySQL spellings: FORMAT, DESCRIBE ANALYZE, multi-table statements.
+        assert_eq!(
+            classify("EXPLAIN ANALYZE FORMAT=TREE DELETE FROM t", Mysql),
+            vec![DeleteAll]
+        );
+        assert_eq!(
+            classify("describe analyze update t set x = 1", Mysql),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify(
+                "explain analyze update t join u on t.id = u.id set t.x = u.x",
+                Mysql
+            ),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify(
+                "explain analyze delete t from t join u on t.id = u.id",
+                Mysql
+            ),
+            vec![DeleteAll]
+        );
+        assert!(is_destructive("explain analyze delete from orders", Mysql));
+        assert!(is_destructive(
+            "EXPLAIN (ANALYZE) DELETE FROM orders",
+            Postgres
+        ));
+    }
+
+    #[test]
+    fn mariadb_analyze_classifies_as_the_statement_it_runs() {
+        assert_eq!(classify("ANALYZE DELETE FROM t", Mysql), vec![DeleteAll]);
+        assert_eq!(
+            classify("analyze format=json update t set x = 1", Mysql),
+            vec![UpdateAll]
+        );
+        assert_eq!(
+            classify("analyze delete from t where id = 1", Mysql),
+            vec![Delete]
+        );
+        assert_eq!(classify("analyze select * from t", Mysql), vec![Explain]);
+        assert_eq!(classify("ANALYZE TABLE t", Mysql), vec![Maintenance]);
+        assert_eq!(
+            classify("analyze no_write_to_binlog table t, u", Mysql),
+            vec![Maintenance]
+        );
+        // PostgreSQL ANALYZE only collects statistics.
+        assert_eq!(classify("analyze verbose t", Postgres), vec![Maintenance]);
     }
 
     #[test]

@@ -577,6 +577,15 @@ impl Shared {
         CancelInFlight(self)
     }
 
+    /// Marks a cancel request the driver sends on its own (not the user's)
+    /// as being sent until the guard is dropped: a call that begins while
+    /// it is in flight waits for it like for any other, but
+    /// [`Self::cancel_requested`] does not change.
+    pub(crate) fn own_cancel_started(&self) -> CancelInFlight<'_> {
+        self.cancels_in_flight.fetch_add(1, Ordering::AcqRel);
+        CancelInFlight(self)
+    }
+
     /// Waits until no cancel request is being sent, so a late request cannot
     /// interrupt the next execution instead of the one it was meant for.
     pub(crate) async fn wait_for_cancels(&self) {

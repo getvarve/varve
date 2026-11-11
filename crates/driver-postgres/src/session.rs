@@ -15,9 +15,9 @@ use tokio_postgres::{AsyncMessage, CancelToken, Client, SimpleQueryMessage};
 use varve_core::Engine;
 use varve_driver::{
     CancelHandle, Column, ConnectParams, Dialect, DriverError, Durability, ErrorKind, ExecOptions,
-    ExecOutput, Notice, PartialOutput, ServerInfo, Session, StatementKind, StatementResult,
-    TransactionEffect, TransactionTracker, Value, parse_version, read_only_violation,
-    split_statements, transaction_effect,
+    ExecOutput, LexKind, Lexeme, Notice, PartialOutput, ServerInfo, Session, StatementKind,
+    StatementResult, TransactionEffect, TransactionTracker, Value, lex, parse_version,
+    read_only_violation, split_statements, transaction_effect,
 };
 
 use crate::convert::{
@@ -950,6 +950,15 @@ impl PostgresSession {
     }
 
     /// Runs `text` (prepared as `typed`) and collects its results.
+    ///
+    /// With `stop_early` the statement is cancelled once a result holds
+    /// `options.max_rows` rows and another one arrives: the rows past the
+    /// limit are never shown, and reading them all would keep the server
+    /// scanning and the network busy until the last one. Only for a
+    /// statement whose cancel can undo nothing (see [`stops_early`]); the
+    /// cancel it causes ends the statement as a truncated result, not as an
+    /// error.
+    #[allow(clippy::too_many_arguments)]
     async fn run_prepared(
         &self,
         inner: &mut Inner,
@@ -957,6 +966,7 @@ impl PostgresSession {
         offset_chars: usize,
         typed: Option<Vec<ColumnType>>,
         options: &ExecOptions,
+        stop_early: bool,
         results: &mut Vec<StatementResult>,
     ) -> Result<(), DriverError> {
         let started = Instant::now();
@@ -978,8 +988,40 @@ impl PostgresSession {
         let mut stream = std::pin::pin!(stream);
         let mut result_index = 0usize;
         let mut current: Option<ResultBuilder> = None;
-        while let Some(message) = stream.next().await {
-            match message.map_err(|e| map(&e))? {
+        // Varve cancelled the statement itself, to stop reading past the
+        // row limit.
+        let mut stopped = false;
+        // The message that ended the wait for that cancel, still to be
+        // handled.
+        let mut held = None;
+        loop {
+            let next = match held.take() {
+                Some(next) => next,
+                None => stream.next().await,
+            };
+            let Some(message) = next else { break };
+            let message = match message {
+                Ok(message) => message,
+                Err(error) => {
+                    let mapped = map(&error);
+                    // The cancel the row limit sent (or a statement timeout
+                    // that came first) ended the statement: what was read is
+                    // the result. A cancel of the user's still reports as one.
+                    if stopped
+                        && !self.shared.cancel_requested()
+                        && is_server_interrupt(&mapped)
+                        && let Some(builder) = current.take()
+                    {
+                        // The transaction status after it is read before
+                        // the next statement looks at it.
+                        self.shared.wait_until_ready(READY_WAIT).await;
+                        results.push(builder.finish());
+                        return Ok(());
+                    }
+                    return Err(mapped);
+                }
+            };
+            match message {
                 SimpleQueryMessage::RowDescription(columns) => {
                     let types = typed
                         .as_ref()
@@ -1010,6 +1052,29 @@ impl PostgresSession {
                         builder.rows.push(values);
                     } else {
                         builder.truncated = true;
+                        if stop_early && !stopped {
+                            stopped = true;
+                            // The connection keeps receiving rows while the
+                            // request is sent, so they are read and dropped
+                            // meanwhile instead of piling up; the loop then
+                            // drops the rest until the server reports the
+                            // cancel. When the request cannot be sent, the
+                            // rest is read as before.
+                            let cancel = async {
+                                if let Err(error) = self.cancel.cancel_own().await {
+                                    tracing::debug!(
+                                        kind = ?error.kind,
+                                        "the cancel request after the row limit was not sent"
+                                    );
+                                }
+                            };
+                            held = drop_rows_while(
+                                stream.as_mut(),
+                                std::pin::pin!(cancel),
+                                |message| matches!(message, Ok(SimpleQueryMessage::Row(_))),
+                            )
+                            .await;
+                        }
                     }
                 }
                 SimpleQueryMessage::CommandComplete(_) => {
@@ -1077,7 +1142,9 @@ impl PostgresSession {
         for (index, (span, words)) in spans.iter().zip(&words).enumerate() {
             chars_before += sql[counted_to..span.offset].chars().count();
             counted_to = span.offset;
-            if span.kind == StatementKind::Copy && uses_client_copy(span.text) {
+            // By its first word, not its kind: a COPY that wraps a write is
+            // classified as that write.
+            if word_is(words, 0, "COPY") && uses_client_copy(span.text) {
                 return Err(DriverError::new(
                     ErrorKind::Unsupported,
                     "COPY FROM STDIN and COPY TO STDOUT are not run in the editor; \
@@ -1157,8 +1224,17 @@ impl PostgresSession {
                     if discard && self.shared.transaction_status() == Some(b'I') {
                         inner.guard.reconnect_owed = Some(DISCARD_ALL_NOTICE);
                     }
+                    let stop_early = stops_early(span.kind, status_before, wrapped, self.read_only);
                     let outcome = self
-                        .run_prepared(inner, span.text, chars_before, typed, options, results)
+                        .run_prepared(
+                            inner,
+                            span.text,
+                            chars_before,
+                            typed,
+                            options,
+                            stop_early,
+                            results,
+                        )
                         .await;
                     if discard && outcome.is_err() {
                         // DISCARD ALL either runs whole or not at all.
@@ -1784,128 +1860,92 @@ const NOT_CALLS: [&str; 34] = [
 
 /// True when `sql` may call a function: a name directly followed by `(`
 /// outside literals and comments (not a keyword such as `IN (` or a table
-/// such as `INSERT INTO t (`). False positives only cost a check.
+/// such as `INSERT INTO t (`). False positives only cost a check (and, for
+/// a query, reading past the row limit). Read with the driver's lexer, so
+/// a literal it cannot misread hides no call.
 fn calls_function(sql: &str) -> bool {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut previous: Option<String> = None;
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c == '\''
-            || c == '$'
-            || (c == '-' && chars.get(i + 1) == Some(&'-'))
-            || (c == '/' && chars.get(i + 1) == Some(&'*'))
+    let lexemes: Vec<Lexeme> = lex(sql, Dialect::Postgres, true)
+        .into_iter()
+        .filter(|lexeme| lexeme.kind != LexKind::Comment)
+        .collect();
+    let text = |lexeme: &Lexeme| &sql[lexeme.start..lexeme.end];
+    let is_name = |lexeme: &Lexeme| matches!(lexeme.kind, LexKind::Word | LexKind::QuotedIdent);
+    lexemes.iter().enumerate().any(|(i, lexeme)| {
+        if !is_name(lexeme) || lexemes.get(i + 1).map(|l| l.kind) != Some(LexKind::Punct('(')) {
+            return false;
+        }
+        // A quoted name is never a keyword.
+        if lexeme.kind == LexKind::Word
+            && NOT_CALLS
+                .iter()
+                .any(|keyword| text(lexeme).eq_ignore_ascii_case(keyword))
         {
-            // Literals and comments: skip them the same way the word scanner
-            // does by scanning from here.
-            let rest: String = chars[i..].iter().collect();
-            let skipped = skip_literal_or_comment(&rest);
-            if skipped > 0 {
-                i += skipped;
-                previous = None;
-                continue;
-            }
+            return false;
         }
-        let start = i;
-        let word = if c == '"' {
-            i += 1;
-            while i < chars.len() && chars[i] != '"' {
-                i += 1;
-            }
-            i += 1;
-            Some(chars[start..i.min(chars.len())].iter().collect::<String>())
-        } else if c.is_alphabetic() || c == '_' {
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
-                i += 1;
-            }
-            Some(chars[start..i].iter().collect::<String>())
-        } else {
-            i += 1;
-            None
-        };
-        if let Some(word) = word {
-            let mut j = i;
-            while j < chars.len() && chars[j].is_whitespace() {
-                j += 1;
-            }
-            let after_table = previous.as_deref().is_some_and(|p| {
-                ["INTO", "TABLE", "ONLY"]
+        // The word before the whole qualified name (`INTO s.t (`).
+        let mut first = i;
+        while first >= 2
+            && lexemes[first - 1].kind == LexKind::Punct('.')
+            && is_name(&lexemes[first - 2])
+        {
+            first -= 2;
+        }
+        let after_table = first.checked_sub(1).is_some_and(|before| {
+            lexemes[before].kind == LexKind::Word
+                && ["INTO", "TABLE", "ONLY"]
                     .iter()
-                    .any(|k| p.eq_ignore_ascii_case(k))
-            });
-            if chars.get(j) == Some(&'(')
-                && !after_table
-                && !NOT_CALLS.iter().any(|k| word.eq_ignore_ascii_case(k))
-            {
-                return true;
-            }
-            previous = Some(word);
-        } else if !c.is_whitespace() && c != '.' {
-            previous = None;
-        }
-    }
-    false
+                    .any(|keyword| text(&lexemes[before]).eq_ignore_ascii_case(keyword))
+        });
+        !after_table
+    })
 }
 
-/// Length in chars of the string literal, dollar-quoted string or comment at
-/// the start of `text`, or 0 when there is none.
-fn skip_literal_or_comment(text: &str) -> usize {
-    let chars: Vec<char> = text.chars().collect();
-    match chars.first() {
-        Some('\'') => {
-            let mut i = 1;
-            while i < chars.len() {
-                if chars[i] == '\'' {
-                    if chars.get(i + 1) == Some(&'\'') {
-                        i += 2;
-                        continue;
-                    }
-                    return i + 1;
+/// True when a statement may be cancelled once its result holds the row
+/// limit ([`PostgresSession::run_prepared`]). A cancel aborts the
+/// statement and rolls back its implicit transaction, so only where that
+/// can undo nothing: a query in a read-only session, outside a transaction
+/// block (inside one the cancel would abort the whole block). The server
+/// refuses every write there, whatever the query calls. In any other
+/// session the text cannot prove that a query writes nothing (a view, an
+/// operator, a cast or a row security policy can run a function that
+/// does), so the statement is read to the end.
+fn stops_early(
+    kind: StatementKind,
+    status_before: Option<u8>,
+    wrapped: bool,
+    read_only: bool,
+) -> bool {
+    read_only && kind == StatementKind::Select && status_before == Some(b'I') && !wrapped
+}
+
+/// Reads `stream` while `sending` runs and drops every item `droppable`
+/// accepts, so what the server keeps sending does not pile up while a
+/// cancel request is on its way. Returns `None` once `sending` is done, or
+/// the first item that is not dropped (`Some(None)` at the end of the
+/// stream), handed back only after `sending` is done: nothing follows such
+/// an item that could pile up, and the caller must not go on before the
+/// request is out.
+async fn drop_rows_while<S, F>(
+    mut stream: std::pin::Pin<&mut S>,
+    mut sending: std::pin::Pin<&mut F>,
+    droppable: impl Fn(&S::Item) -> bool,
+) -> Option<Option<S::Item>>
+where
+    S: futures::Stream,
+    F: Future<Output = ()>,
+{
+    loop {
+        tokio::select! {
+            biased;
+            () = &mut sending => return None,
+            next = stream.next() => {
+                if next.as_ref().is_some_and(&droppable) {
+                    continue;
                 }
-                i += 1;
-            }
-            chars.len()
-        }
-        Some('-') if chars.get(1) == Some(&'-') => {
-            chars.iter().position(|c| *c == '\n').unwrap_or(chars.len())
-        }
-        Some('/') if chars.get(1) == Some(&'*') => {
-            let mut depth = 0usize;
-            let mut i = 0;
-            while i < chars.len() {
-                if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
-                    depth += 1;
-                    i += 2;
-                } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
-                    depth -= 1;
-                    i += 2;
-                    if depth == 0 {
-                        return i;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-            chars.len()
-        }
-        Some('$') => {
-            let end = chars[1..]
-                .iter()
-                .position(|c| !(c.is_alphanumeric() || *c == '_'))
-                .map(|p| p + 1);
-            match end {
-                Some(end) if chars[end] == '$' => {
-                    let tag = &chars[..=end];
-                    let mut i = end + 1;
-                    while i < chars.len() && !chars[i..].starts_with(tag) {
-                        i += 1;
-                    }
-                    (i + tag.len()).min(chars.len())
-                }
-                _ => 0,
+                sending.await;
+                return Some(next);
             }
         }
-        _ => 0,
     }
 }
 
@@ -2067,79 +2107,17 @@ fn uses_client_copy(sql: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case("STDIN") || w.eq_ignore_ascii_case("STDOUT"))
 }
 
-/// The bare words of `sql`, skipping string literals, quoted identifiers,
-/// dollar-quoted strings and comments.
+/// The bare words of `sql`, skipping string literals (also `E''` with its
+/// backslash escapes and continuation strings), quoted identifiers,
+/// dollar-quoted strings and comments. Read with the driver's lexer, the
+/// one that split the script, so both agree on where literals end (a `$`
+/// inside an identifier such as `my$tbl$` does not open a dollar quote).
 fn words_outside_literals(sql: &str) -> Vec<String> {
-    let chars: Vec<char> = sql.chars().collect();
-    let mut words = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        match c {
-            '\'' | '"' => {
-                i += 1;
-                while i < chars.len() {
-                    if chars[i] == c {
-                        if chars.get(i + 1) == Some(&c) {
-                            i += 2;
-                            continue;
-                        }
-                        break;
-                    }
-                    i += 1;
-                }
-                i += 1;
-            }
-            '-' if chars.get(i + 1) == Some(&'-') => {
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-            }
-            '/' if chars.get(i + 1) == Some(&'*') => {
-                let mut depth = 0usize;
-                while i < chars.len() {
-                    if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
-                        depth += 1;
-                        i += 2;
-                    } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
-                        depth -= 1;
-                        i += 2;
-                        if depth == 0 {
-                            break;
-                        }
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-            '$' => {
-                let tag_end = chars[i + 1..]
-                    .iter()
-                    .position(|c| !(c.is_alphanumeric() || *c == '_'))
-                    .map(|p| i + 1 + p);
-                match tag_end {
-                    Some(end) if chars[end] == '$' => {
-                        let tag: Vec<char> = chars[i..=end].to_vec();
-                        i = end + 1;
-                        while i < chars.len() && !chars[i..].starts_with(&tag) {
-                            i += 1;
-                        }
-                        i += tag.len();
-                    }
-                    _ => i += 1,
-                }
-            }
-            c if c.is_alphabetic() || c == '_' => {
-                let start = i;
-                while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
-                    i += 1;
-                }
-                words.push(chars[start..i].iter().collect());
-            }
-            _ => i += 1,
-        }
-    }
-    words
+    lex(sql, Dialect::Postgres, true)
+        .into_iter()
+        .filter(|lexeme| lexeme.kind == LexKind::Word)
+        .map(|lexeme| sql[lexeme.start..lexeme.end].to_owned())
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -2320,6 +2298,22 @@ impl CancelHandle for PostgresCancelHandle {
         // sent: an execution that sees it and returns must find the request
         // in flight and wait for it.
         let _in_flight = self.shared.cancel_started();
+        self.send().await
+    }
+}
+
+impl PostgresCancelHandle {
+    /// Cancels the running statement for the driver itself (to stop
+    /// reading past the row limit): in flight like a user's request, so no
+    /// call starts while it is sent, but not counted as the user's cancel of
+    /// the current call.
+    async fn cancel_own(&self) -> Result<(), DriverError> {
+        let _in_flight = self.shared.own_cancel_started();
+        self.send().await
+    }
+
+    /// Sends the cancel request for the current backend.
+    async fn send(&self) -> Result<(), DriverError> {
         let request = async {
             let socket = open_socket(&self.host, self.port).await?;
             // The cancel connection carries no results: its tap only forwards.
@@ -2433,6 +2427,98 @@ mod tests {
     }
 
     #[test]
+    fn stops_early_only_where_a_cancel_undoes_nothing() {
+        let select = StatementKind::Select;
+        let idle = Some(b'I');
+        // A read-only session: the server refuses every write.
+        assert!(stops_early(select, idle, false, true));
+        // Any other session: a query can write through a function, a view,
+        // an operator or a policy, and the cancel would roll that back.
+        assert!(!stops_early(select, idle, false, false));
+        // Inside a transaction block a cancel aborts the block.
+        assert!(!stops_early(select, Some(b'T'), false, true));
+        assert!(!stops_early(select, Some(b'E'), false, true));
+        assert!(!stops_early(select, None, false, true));
+        // Wrapped in the driver's read-only block.
+        assert!(!stops_early(select, idle, true, true));
+        // Everything that is not a query runs to the end.
+        for kind in [
+            StatementKind::Insert,
+            StatementKind::Update,
+            StatementKind::DeleteAll,
+            StatementKind::Call,
+            StatementKind::Explain,
+            StatementKind::Copy,
+        ] {
+            assert!(!stops_early(kind, idle, false, true));
+        }
+        // A statement that changes data in a CTE or inside parentheses is
+        // not a query.
+        for sql in [
+            "(WITH gone AS (DELETE FROM orders RETURNING *) SELECT * FROM gone)",
+            "WITH delete AS (DELETE FROM orders RETURNING *) SELECT * FROM delete WHERE true",
+        ] {
+            let kind = split_statements(sql, Dialect::Postgres)[0].kind;
+            assert!(!stops_early(kind, idle, false, true), "{sql}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rows_are_dropped_while_the_cancel_is_sent() {
+        // Three rows, then the end of the result. The request is held back
+        // until the test lets it go.
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let (row_tx, row_rx) = futures::channel::mpsc::unbounded::<&str>();
+        let sent = std::sync::atomic::AtomicBool::new(false);
+        for item in ["row", "row", "row", "complete"] {
+            assert!(row_tx.unbounded_send(item).is_ok());
+        }
+        let mut stream = std::pin::pin!(row_rx);
+        {
+            let sending = std::pin::pin!(async {
+                released.await.ok();
+                sent.store(true, AtomicOrdering::SeqCst);
+            });
+            let waiting = drop_rows_while(stream.as_mut(), sending, |item| *item == "row");
+            let mut waiting = std::pin::pin!(waiting);
+            // The request is not out yet: the rows are read and dropped,
+            // and the item after them is held until it is.
+            assert!(futures::poll!(waiting.as_mut()).is_pending());
+            assert!(!sent.load(AtomicOrdering::SeqCst));
+            assert!(row_tx.unbounded_send("late").is_ok());
+            assert!(release.send(()).is_ok());
+            assert_eq!(waiting.await, Some(Some("complete")));
+        }
+        assert!(sent.load(AtomicOrdering::SeqCst));
+        // Nothing after the held item was read.
+        assert_eq!(stream.next().await, Some("late"));
+    }
+
+    #[tokio::test]
+    async fn reading_goes_on_once_the_cancel_is_sent() {
+        let (row_tx, row_rx) = futures::channel::mpsc::unbounded::<&str>();
+        assert!(row_tx.unbounded_send("row").is_ok());
+        let mut stream = std::pin::pin!(row_rx);
+        // The request is out at once: nothing is taken from the stream.
+        let sending = std::pin::pin!(std::future::ready(()));
+        let next = drop_rows_while(stream.as_mut(), sending, |item| *item == "row").await;
+        assert_eq!(next, None);
+        assert_eq!(stream.next().await, Some("row"));
+        // The stream ends while the request is on its way: the end is
+        // handed back once the request is out.
+        drop(row_tx);
+        let (release, released) = tokio::sync::oneshot::channel::<()>();
+        let sending = std::pin::pin!(async {
+            released.await.ok();
+        });
+        let waiting = drop_rows_while(stream.as_mut(), sending, |item| *item == "row");
+        let mut waiting = std::pin::pin!(waiting);
+        assert!(futures::poll!(waiting.as_mut()).is_pending());
+        assert!(release.send(()).is_ok());
+        assert_eq!(waiting.await, Some(None));
+    }
+
+    #[test]
     fn spots_function_calls() {
         assert!(calls_function("SELECT public.evil()"));
         assert!(calls_function("SELECT \"Evil\" (1)"));
@@ -2445,6 +2531,11 @@ mod tests {
             "SELECT * FROM t WHERE a IN (1, 2) AND (b OR c)"
         ));
         assert!(calls_function("INSERT INTO t VALUES (nextval('s'))"));
+        assert!(!calls_function("INSERT INTO s.t (a) VALUES (1)"));
+        assert!(!calls_function("SELECT * FROM ONLY \"S\".t (a)"));
+        // A call after an E'' string with an escaped quote is seen.
+        assert!(calls_function(r"SELECT E'\'', f(1)"));
+        assert!(calls_function("SELECT x$y$ FROM t WHERE g(x$y$)"));
     }
 
     #[test]
@@ -2485,6 +2576,25 @@ mod tests {
             "COPY t TO PROGRAM 'gzip > /tmp/x' /* stdout */"
         ));
         assert!(!uses_client_copy("COPY \"stdin\" FROM '/tmp/x'"));
+        // An escaped quote in an E'' string does not end it early.
+        assert!(uses_client_copy(r"COPY (SELECT E'\'' AS q) TO STDOUT"));
+        // `$` inside an identifier opens no dollar quote.
+        assert!(uses_client_copy("COPY my$tbl$ FROM STDIN"));
+        assert!(uses_client_copy("COPY t FROM STDIN -- note\r"));
+    }
+
+    #[test]
+    fn words_follow_the_driver_lexer() {
+        assert_eq!(
+            words_outside_literals(r"SELECT E'it\'s', 'a''b', $q$ x $q$, x$y$ FROM t /* c */"),
+            vec!["SELECT", "E", "x$y$", "FROM", "t"]
+        );
+        // set_config after such a literal is still seen.
+        assert!(
+            words_outside_literals(r"SELECT E'\'', set_config('a', 'b', false)")
+                .iter()
+                .any(|w| w == "set_config")
+        );
     }
 
     #[test]
