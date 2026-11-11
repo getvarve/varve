@@ -37,6 +37,10 @@ pub enum RecordError {
     /// A stored JSON column could not be read.
     #[error("stored record is corrupt: {0}")]
     Corrupt(String),
+    /// A saved secret cannot be read because the system keychain cannot
+    /// be reached; asking the user for it still works.
+    #[error("{0}")]
+    KeychainUnavailable(String),
 }
 
 impl From<rusqlite::Error> for RecordError {
@@ -199,11 +203,9 @@ fn validate_connection(input: &ConnectionInput) -> Result<ConnectionInput> {
             "A Redis database number only applies to Redis connections.",
         ));
     }
-    if input.engine == Engine::Redis && options.redis_db > 15 {
-        return Err(invalid(
-            "Redis database numbers go from 0 to 15 on a default server.",
-        ));
-    }
+    // Any number up to the u16 bound is accepted: a server configured
+    // with more than the default 16 databases has them, and SELECT reports
+    // a number beyond the server's count when connecting.
     out.options = ConnectionOptions {
         init_sql: opt_text(options.init_sql.as_deref()),
         ..options.clone()
@@ -573,16 +575,19 @@ impl Records {
             let mut deleted = Vec::new();
             match mode {
                 FolderDeleteMode::MoveContentsToParent => {
-                    for table in ["core_connections", "core_saved_queries"] {
+                    // The moved items go after the parent's own items, in
+                    // the order they had inside the deleted folder.
+                    for (table, parent_column) in [
+                        ("core_connections", "folder_id"),
+                        ("core_saved_queries", "folder_id"),
+                        ("core_folders", "parent_id"),
+                    ] {
+                        let base = Self::next_sort_order(&tx, table, parent_column, &folder.workspace_id, folder.parent_id.as_deref())?;
                         tx.execute(
-                            &format!("UPDATE {table} SET folder_id = ?2, updated_at = ?3, version = version + 1 WHERE folder_id = ?1"),
-                            params![id, folder.parent_id, now],
+                            &format!("UPDATE {table} SET {parent_column} = ?2, sort_order = ?4 + sort_order, updated_at = ?3, version = version + 1 WHERE {parent_column} = ?1"),
+                            params![id, folder.parent_id, now, base],
                         )?;
                     }
-                    tx.execute(
-                        "UPDATE core_folders SET parent_id = ?2, updated_at = ?3, version = version + 1 WHERE parent_id = ?1",
-                        params![id, folder.parent_id, now],
-                    )?;
                 }
                 FolderDeleteMode::DeleteContents => {
                     let ids = Self::descendant_folders(&tx, id)?;
@@ -681,14 +686,17 @@ impl Records {
             if let Some(folder) = input.folder_id.as_deref() {
                 Self::folder_exists(conn, &existing.workspace_id, folder)?;
             }
+            // Moved to another folder: last there, like move_connection.
+            let order = Self::next_sort_order(conn, "core_connections", "folder_id", &existing.workspace_id, input.folder_id.as_deref())?;
             conn.execute(
                 "UPDATE core_connections SET folder_id = ?2, name = ?3, color = ?4, engine = ?5, host = ?6, port = ?7, database = ?8,
-                     username = ?9, environment = ?10, tls = ?11, ssh = ?12, options = ?13, updated_at = ?14, version = version + 1
+                     username = ?9, environment = ?10, tls = ?11, ssh = ?12, options = ?13, updated_at = ?14, version = version + 1,
+                     sort_order = CASE WHEN folder_id IS ?2 THEN sort_order ELSE ?15 END
                  WHERE id = ?1",
                 params![
                     id, input.folder_id, input.name, input.color, engine_str(input.engine), input.host,
                     i64::from(input.port.unwrap_or_else(|| default_port(input.engine))), input.database, input.username,
-                    input.environment.as_str(), to_json(&input.tls)?, to_json(&input.ssh)?, to_json(&input.options)?, now_ms()
+                    input.environment.as_str(), to_json(&input.tls)?, to_json(&input.ssh)?, to_json(&input.options)?, now_ms(), order
                 ],
             )?;
             Ok(())
@@ -925,10 +933,13 @@ impl Records {
         let existing = self.query(id)?;
         self.run(|conn| {
             let input = Self::validate_query(conn, &existing.workspace_id, input)?;
+            // Moved to another folder: last there.
+            let order = Self::next_sort_order(conn, "core_saved_queries", "folder_id", &existing.workspace_id, input.folder_id.as_deref())?;
             conn.execute(
                 "UPDATE core_saved_queries SET folder_id = ?2, connection_id = ?3, database = ?4, name = ?5, sql = ?6, tags = ?7,
-                     updated_at = ?8, version = version + 1 WHERE id = ?1",
-                params![id, input.folder_id, input.connection_id, input.database, input.name, input.sql, to_json(&input.tags)?, now_ms()],
+                     updated_at = ?8, version = version + 1, sort_order = CASE WHEN folder_id IS ?2 THEN sort_order ELSE ?9 END
+                 WHERE id = ?1",
+                params![id, input.folder_id, input.connection_id, input.database, input.name, input.sql, to_json(&input.tags)?, now_ms(), order],
             )?;
             Ok(())
         })?;
