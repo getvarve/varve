@@ -8,15 +8,18 @@ import {
   describeEdit,
   EditDraft,
   editTarget,
+  formatBound,
   isStreamId,
   jsonProblem,
   minifyJson,
   outcomeView,
   parseBound,
   parseScore,
+  reconnectNote,
   targetOf,
   textValue,
   ttlMsFromSeconds,
+  versionDrift,
 } from './redisEdit';
 import { keyRenameSchema, keyTtlSchema, newKeyEdits, newKeySchema } from './redisForms';
 import { entryForKey, keyDisplayFromHex, keyHexFromDisplay } from './redisKeys';
@@ -41,6 +44,23 @@ describe('scores and bounds', () => {
     expect(parseBound('+', 'lex')).toEqual({ kind: 'unbounded' });
     expect(parseBound('[a', 'lex')).toEqual({ kind: 'inclusive', value: textValue('a') });
     expect(parseBound('(b c', 'lex')).toEqual({ kind: 'exclusive', value: textValue('b c') });
+  });
+
+  it('writes applied range ends back in Redis syntax', () => {
+    const score = (text: string, end: 'min' | 'max') => formatBound(parseBound(text, 'score') ?? { kind: 'unbounded' }, 'score', end);
+    const lex = (text: string, end: 'min' | 'max') => formatBound(parseBound(text, 'lex') ?? { kind: 'unbounded' }, 'lex', end);
+    expect(score('', 'min')).toBe('-inf');
+    expect(score('+inf', 'max')).toBe('+inf');
+    expect(score('(10', 'min')).toBe('(10');
+    expect(score(' 2.5 ', 'max')).toBe('2.5');
+    expect(lex('-', 'min')).toBe('-');
+    expect(lex('', 'max')).toBe('+');
+    expect(lex('[a', 'min')).toBe('[a');
+    expect(lex('a', 'min')).toBe('[a');
+    // An end with a space, a quote or a backslash is quoted so the command can be pasted.
+    expect(lex('(b c', 'max')).toBe('"(b c"');
+    expect(lex('[say "hi"', 'min')).toBe('"[say \\"hi\\""');
+    expect(lex('a\\b', 'min')).toBe('"[a\\\\b"');
   });
 
   it('checks stream ids and TTLs', () => {
@@ -187,5 +207,34 @@ describe('hexBytes', () => {
   it('turns lowercase hex into raw bytes', () => {
     expect([...hexBytes('ff00e282ac')]).toEqual([0xff, 0x00, 0xe2, 0x82, 0xac]);
     expect([...hexBytes('')]).toEqual([]);
+  });
+});
+
+describe('a key read again after a reconnect', () => {
+  const version = { keyType: 'hash' as const, length: '2', digest: 'd1', digestMissing: null, expireAtMs: null, db: 0 };
+
+  it('tells an unchanged key from a changed one', () => {
+    expect(versionDrift(version, { ...version })).toBe('same');
+    expect(versionDrift(version, { ...version, digest: 'd2' })).toBe('changed');
+    expect(versionDrift(version, { ...version, length: '3' })).toBe('changed');
+    expect(versionDrift(version, { ...version, keyType: 'string' })).toBe('changed');
+    expect(versionDrift(version, { ...version, expireAtMs: '1792500000000' })).toBe('changed');
+    expect(versionDrift(version, { ...version, db: 3 })).toBe('changed');
+    expect(versionDrift({ ...version, keyType: { other: 'TSDB-TYPE' } }, { ...version, keyType: { other: 'TSDB-TYPE' } })).toBe('same');
+  });
+
+  it('does not call a key unchanged when its content cannot be compared', () => {
+    expect(versionDrift(version, null)).toBe('unknown');
+    expect(versionDrift(null, version)).toBe('unknown');
+    expect(versionDrift(version, { ...version, digest: null, digestMissing: 'tooLarge' })).toBe('unknown');
+    // A different length is a change, with or without a digest.
+    expect(versionDrift(version, { ...version, digest: null, digestMissing: 'tooLarge', length: '9' })).toBe('changed');
+  });
+
+  it('says nothing for an unchanged key and warns otherwise', () => {
+    expect(reconnectNote(version, { missing: false, version: { ...version } })).toBeNull();
+    expect(reconnectNote(version, { missing: false, version: { ...version, digest: 'd2' } })?.title).toBe('The key changed on the server');
+    expect(reconnectNote(version, { missing: false, version: null })?.title).toBe('The key could not be compared');
+    expect(reconnectNote(version, { missing: true, version: null })?.title).toBe('The key no longer exists');
   });
 });

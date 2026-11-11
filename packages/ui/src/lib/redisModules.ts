@@ -7,8 +7,10 @@ const MAX_TIMESTAMP = 9223372036854775807n;
 
 /**
  * A timestamp typed by the user as milliseconds (`1718000000000`) or as a
- * date and time (`2026-10-21T13:45:00Z`, `2026-10-21 13:45`, local time when
- * no zone is given). `null` when it is neither; empty input is `undefined`.
+ * date and time (`2026-10-21T13:45:00Z`, `2026-10-21 13:45`, `2026-10-21`).
+ * Without a zone a date and time is read as UTC, like every time the view
+ * shows (`formatTimestamp`), so a shown time typed back means the same
+ * instant. `null` when it is neither; empty input is `undefined`.
  */
 export function parseTimestamp(input: string): string | null | undefined {
   const text = input.trim();
@@ -17,7 +19,11 @@ export function parseTimestamp(input: string): string | null | undefined {
     const n = BigInt(text);
     return n <= MAX_TIMESTAMP ? n.toString() : null;
   }
-  const ms = Date.parse(text.includes('T') || !text.includes(' ') ? text : text.replace(' ', 'T'));
+  const iso = text.includes('T') || !text.includes(' ') ? text : text.replace(' ', 'T');
+  const [, time] = iso.split('T');
+  // Date only: midnight UTC. A time without `Z` or an offset: UTC as well (JavaScript would read it as local).
+  const zoned = time === undefined ? `${iso}T00:00Z` : /(z|[+-]\d{2}(:?\d{2})?)$/i.test(time) ? iso : `${iso}Z`;
+  const ms = Date.parse(zoned);
   return Number.isFinite(ms) && ms >= 0 ? String(ms) : null;
 }
 

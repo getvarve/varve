@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import type { ScoredMember } from '../../api/redis';
 import type { Value } from '../../api/sessions';
 import { canReference, parseScore, scoreText, targetOf, textValue } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
 import { cellClass, cellText, fullText, isPlaceholder, placeholderHelp, plainText } from '../../lib/values';
+import { vFocus } from './vFocus';
 
 /**
  * Sorted set members by rank with their scores: change a score (ZADD XX),
@@ -25,12 +26,27 @@ const props = withDefaults(
 );
 
 const uid = useId();
-const editing = ref<number | null>(null);
+/**
+ * The member whose score is being edited (its `targetOf.member` key, not a
+ * row index, so paging never moves the edit to another member), and its text.
+ */
+const editing = ref<string | null>(null);
 const editText = ref('');
 const editError = ref<string | null>(null);
 const newMember = ref('');
 const newScore = ref('');
 const addError = ref<string | null>(null);
+/** Set when the member field was empty on submit; a second, explicit button adds the empty member. */
+const emptyMember = ref(false);
+
+// Another page or a new read replaces the rows: an edit left open is dropped.
+watch(
+  () => props.members,
+  () => {
+    editing.value = null;
+    editError.value = null;
+  },
+);
 
 function tip(value: Value): string {
   return isPlaceholder(value) ? placeholderHelp(value) : fullText(value);
@@ -47,14 +63,19 @@ function shownScore(m: ScoredMember): Value {
   return pending?.op === 'zsetScore' ? pending.score : m.score;
 }
 
-function startEdit(rank: number, m: ScoredMember): void {
-  editing.value = rank;
+function startEdit(m: ScoredMember): void {
+  editing.value = targetOf.member(m.member);
   editError.value = null;
   editText.value = scoreText(shownScore(m));
 }
 
+function cancelEdit(): void {
+  editing.value = null;
+  editError.value = null;
+}
+
 function commitEdit(m: ScoredMember): void {
-  if (editing.value === null) return;
+  if (editing.value !== targetOf.member(m.member)) return;
   const score = parseScore(editText.value);
   if (!score) {
     editError.value = 'Enter a number, inf or -inf.';
@@ -68,17 +89,26 @@ function commitEdit(m: ScoredMember): void {
 
 const loaded = computed(() => new Set(props.members.map((m) => plainText(m.member))));
 
-function add(): void {
+/** Stages the new member; an empty member name is only added through the explicit "Add empty member" button. */
+function add(allowEmpty = false): void {
   const score = parseScore(newScore.value);
   if (!score) {
     addError.value = 'Enter a score: a number, inf or -inf.';
+    emptyMember.value = false;
+    return;
+  }
+  if (newMember.value === '' && !allowEmpty) {
+    addError.value = 'Enter a member.';
+    emptyMember.value = true;
     return;
   }
   if (loaded.value.has(newMember.value)) {
     addError.value = 'This member is in the set already: change its score in its row.';
+    emptyMember.value = false;
     return;
   }
   addError.value = null;
+  emptyMember.value = false;
   props.draft.stage({ op: 'zsetAdd', member: textValue(newMember.value), score });
   newMember.value = '';
   newScore.value = '';
@@ -132,7 +162,7 @@ function add(): void {
             {{ cellText(m.member) }}
           </td>
           <td
-            v-if="scores && editing === i"
+            v-if="scores && editing === targetOf.member(m.member)"
             class="mono num"
           >
             <label
@@ -142,13 +172,14 @@ function add(): void {
             <input
               :id="`${uid}-score-${i}`"
               v-model="editText"
+              v-focus
               class="input inline mono num"
               spellcheck="false"
-              autofocus
               :aria-invalid="!!editError"
               :aria-describedby="editError ? `${uid}-score-error` : undefined"
               @keydown.enter.prevent="commitEdit(m)"
-              @keydown.escape.prevent.stop="editing = null"
+              @keydown.escape.prevent.stop="cancelEdit"
+              @blur="commitEdit(m)"
             >
             <span
               v-if="editError"
@@ -182,7 +213,7 @@ function add(): void {
                 class="btn ghost compact"
                 :aria-label="`Change the score of ${cellText(m.member)}`"
                 :disabled="!canReference(m.member)"
-                @click="startEdit(i, m)"
+                @click="startEdit(m)"
               >
                 Score
               </button>
@@ -205,7 +236,7 @@ function add(): void {
       v-if="editable"
       class="add"
       novalidate
-      @submit.prevent="add"
+      @submit.prevent="add()"
     >
       <label
         class="visually-hidden"
@@ -217,6 +248,8 @@ function add(): void {
         class="input compact mono grow"
         placeholder="member"
         spellcheck="false"
+        :aria-invalid="emptyMember"
+        :aria-describedby="emptyMember && addError ? `${uid}-add-error` : undefined"
       >
       <label
         class="visually-hidden"
@@ -236,6 +269,14 @@ function add(): void {
         class="btn compact"
       >
         Add member
+      </button>
+      <button
+        v-if="emptyMember && newMember === ''"
+        type="button"
+        class="btn ghost compact"
+        @click="add(true)"
+      >
+        Add empty member
       </button>
       <span
         v-if="addError"

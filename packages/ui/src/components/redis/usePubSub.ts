@@ -10,8 +10,8 @@ import {
   redisPubsubUnsubscribe,
 } from '../../api/redis';
 import type { PubSubEvent, PubSubNameKind, PubSubNames } from '../../api/redis';
-import { MAX_VIEW_MESSAGES, pushCapped } from '../../lib/redisPubSub';
-import type { ReceivedMessage, ViewEntry } from '../../lib/redisPubSub';
+import { countReceived, MAX_VIEW_MESSAGES, pushCapped } from '../../lib/redisPubSub';
+import type { RateBucket, ReceivedMessage, ViewEntry } from '../../lib/redisPubSub';
 import { redisErrorView } from '../../lib/redisErrors';
 import { useTabs } from '../../composables/useTabs';
 
@@ -41,8 +41,8 @@ export interface PubSubPanel {
   /** Messages and gaps that arrived while paused (capped like the view). */
   held: ViewEntry[];
   heldDropped: number;
-  /** Receive times of recent messages, for the rate. */
-  times: number[];
+  /** Messages received per second over the last seconds, for the rate. */
+  rate: RateBucket[];
   startedAt: number | null;
   busy: boolean;
   errors: string[];
@@ -81,7 +81,7 @@ function apply(panel: PubSubPanel, event: PubSubEvent): void {
           m.pattern === null ? (nameOf(panel, 'channel', m.channel) ?? nameOf(panel, 'shardChannel', m.channel)) : nameOf(panel, 'pattern', m.pattern);
         if (via) via.messages += 1;
       }
-      pushCapped(panel.times, incoming.map(() => now), 2000);
+      countReceived(panel.rate, now, incoming.length);
       if (panel.paused) panel.heldDropped += pushCapped(panel.held, incoming);
       else {
         pushCapped(panel.messages, incoming);
@@ -156,9 +156,14 @@ function ensureListening(): Promise<void> {
   return listening;
 }
 
-/** The message of a failed call; a lost session or reconnect is reported to the tab `key`. */
-function describe(key: string, e: unknown): string {
-  const view = redisErrorView(useTabs().reportTabError(key, e));
+/**
+ * The message of a failed call; a lost session or reconnect is reported to
+ * the tab `key`. `sessionId` is the session the call belongs to: the
+ * panel's, which never changes (a new session gets a new panel), so a
+ * failure that arrives after a reconnect leaves the tab alone.
+ */
+function describe(key: string, e: unknown, sessionId: string): string {
+  const view = redisErrorView(useTabs().reportTabError(key, e, sessionId));
   return view.hint ? `${view.message} ${view.hint}` : view.message;
 }
 
@@ -178,7 +183,7 @@ function panel(key: string, sessionId: string): PubSubPanel {
     paused: false,
     held: markRaw([]),
     heldDropped: 0,
-    times: markRaw([]),
+    rate: markRaw([]),
     startedAt: null,
     busy: false,
     errors: [],
@@ -246,7 +251,7 @@ async function subscribeNames(key: string, p: PubSubPanel, names: PubSubNames): 
   } catch (e: unknown) {
     // The names this call added and the server never confirmed go away again.
     p.names = p.names.filter((n) => n.confirmed || !listOf(fresh, n.kind).includes(n.name));
-    return describe(key, e);
+    return describe(key, e, p.sessionId);
   }
 }
 
@@ -282,7 +287,7 @@ async function takeOver(key: string, p: PubSubPanel): Promise<string | null> {
     found = await redisPubsubSubscriptions(p.sessionId);
   } catch (e: unknown) {
     checked.delete(p.sessionId);
-    return describe(key, e);
+    return describe(key, e, p.sessionId);
   }
   const owned = new Set([...panels.values()].map((x) => x.subscriptionId).filter((id): id is string => id !== null));
   const orphans = found.filter((s) => !owned.has(s.subscriptionId));
@@ -309,23 +314,32 @@ async function takeOver(key: string, p: PubSubPanel): Promise<string | null> {
   return error;
 }
 
-/** Stops one channel or pattern; the last one closes the subscription connection. */
+/**
+ * Stops one channel or pattern; the last one closes the subscription
+ * connection. Refused while a subscribe or another change is in flight: the
+ * backend would confirm the name afterwards and bring it back.
+ */
 async function unsubscribe(key: string, target: PubSubName): Promise<string | null> {
   const p = panels.get(key);
   if (!p) return null;
-  const id = p.subscriptionId;
-  const rest = p.names.filter((n) => n !== target);
+  if (p.busy) return 'Wait until the current subscription change has finished, then remove the name.';
+  p.busy = true;
   try {
+    const id = p.subscriptionId;
+    const rest = p.names.filter((n) => n !== target);
     if (id && rest.length === 0) {
       await redisPubsubUnsubscribe(id);
       p.subscriptionId = null;
     } else if (id) {
       await redisPubsubChange(id, NO_NAMES, namesOf([target]));
     }
-    p.names = rest;
+    // Names confirmed while the call ran stay; only the target goes.
+    p.names = p.names.filter((n) => n !== target);
     return null;
   } catch (e: unknown) {
-    return describe(key, e);
+    return describe(key, e, p.sessionId);
+  } finally {
+    p.busy = false;
   }
 }
 

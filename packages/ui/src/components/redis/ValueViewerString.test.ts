@@ -134,3 +134,46 @@ describe('ValueViewer whole string loading', () => {
     again.unmount();
   });
 });
+
+describe('ValueViewer reload with typed text', () => {
+  it('asks before a reload drops text typed in the string editor', async () => {
+    size = 2 * MiB;
+    binary = 'none';
+    const dialogs = useDialogs();
+    const wrapper = await open();
+    buttonByText('Load the whole value')?.click();
+    await flushPromises();
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === 'Edit')
+      ?.trigger('click');
+    await wrapper.find('textarea').setValue('typed text');
+    const reads = cursors.length;
+
+    // "No" keeps the editor and reads nothing.
+    await wrapper.find('button[aria-label="Reload key"]').trigger('click');
+    await flushPromises();
+    const asked = dialogs.dialogs.at(-1);
+    expect(asked?.spec.type === 'confirm' ? asked.spec.message : '').toContain('has not been saved');
+    if (asked) dialogs.close(asked.id, false);
+    await flushPromises();
+    expect(wrapper.find<HTMLTextAreaElement>('textarea').element.value).toBe('typed text');
+    expect(cursors).toHaveLength(reads);
+
+    // "Discard" closes the editor and reads the key again.
+    await wrapper.find('button[aria-label="Reload key"]').trigger('click');
+    await flushPromises();
+    const again = dialogs.dialogs.at(-1);
+    if (again) dialogs.close(again.id, true);
+    await flushPromises();
+    expect(wrapper.find('textarea').exists()).toBe(false);
+    expect(cursors).toHaveLength(reads + 1);
+
+    // Nothing typed: no question.
+    await wrapper.find('button[aria-label="Reload key"]').trigger('click');
+    await flushPromises();
+    expect(dialogs.dialogs).toHaveLength(0);
+    expect(cursors).toHaveLength(reads + 2);
+    wrapper.unmount();
+  });
+});

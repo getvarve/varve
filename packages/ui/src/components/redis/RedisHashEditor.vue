@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, useId } from 'vue';
+import { computed, ref, useId, watch } from 'vue';
 import type { FieldValue } from '../../api/redis';
 import type { Value } from '../../api/sessions';
 import { canReference, editableText, targetOf, textValue } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
 import { cellClass, cellText, fullText, isPlaceholder, placeholderHelp, plainText } from '../../lib/values';
 import Icon from '../common/Icon.vue';
+import { vFocus } from './vFocus';
 
 /** Hash fields with inline edit, delete and add (HSET / HDEL), staged into the key's draft. */
 const props = defineProps<{ entries: readonly FieldValue[]; draft: EditDraft; editable: boolean }>();
 
 const uid = useId();
-/** Index of the row being edited, and its text. */
-const editing = ref<number | null>(null);
+/**
+ * The field being edited (its `targetOf.field` key, not a row index, so a
+ * reload or another page never moves the edit to another field), and its text.
+ */
+const editing = ref<string | null>(null);
 const editText = ref('');
 const newField = ref('');
 const newValue = ref('');
@@ -34,14 +38,22 @@ function shown(entry: FieldValue): Value {
   return pending?.op === 'hashSet' ? pending.value : entry.value;
 }
 
-function startEdit(index: number, entry: FieldValue): void {
+// Rows read again (after an apply or a reload): an edit left open is dropped.
+watch(
+  () => props.entries,
+  () => {
+    editing.value = null;
+  },
+);
+
+function startEdit(entry: FieldValue): void {
   const pending = pendingOf(entry.field);
-  editing.value = index;
+  editing.value = targetOf.field(entry.field);
   editText.value = pending?.op === 'hashSet' ? (plainText(pending.value) ?? '') : (plainText(entry.value) ?? '');
 }
 
 function commitEdit(entry: FieldValue): void {
-  if (editing.value === null) return;
+  if (editing.value !== targetOf.field(entry.field)) return;
   const text = editText.value;
   editing.value = null;
   if (text === plainText(entry.value)) props.draft.unstage(targetOf.field(entry.field));
@@ -101,7 +113,7 @@ function add(): void {
             {{ cellText(f.field) }}
           </td>
           <td
-            v-if="editing === i"
+            v-if="editing === targetOf.field(f.field)"
             class="mono"
           >
             <label
@@ -111,9 +123,9 @@ function add(): void {
             <input
               :id="`${uid}-edit-${i}`"
               v-model="editText"
+              v-focus
               class="input inline mono"
               spellcheck="false"
-              autofocus
               @keydown.enter.prevent="commitEdit(f)"
               @keydown.escape.prevent.stop="editing = null"
               @blur="commitEdit(f)"
@@ -146,7 +158,7 @@ function add(): void {
                 :aria-label="`Edit ${cellText(f.field)}`"
                 :disabled="!editableText(f.value) || !canReference(f.field)"
                 :title="editableText(f.value) ? undefined : 'Binary and very large values cannot be edited here.'"
-                @click="startEdit(i, f)"
+                @click="startEdit(f)"
               >
                 Edit
               </button>

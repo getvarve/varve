@@ -11,6 +11,8 @@ const props = defineProps<{ members: readonly Value[]; draft: EditDraft; editabl
 const uid = useId();
 const newMember = ref('');
 const addError = ref<string | null>(null);
+/** Set when the member field was empty on submit; a second, explicit button adds the empty member. */
+const emptyMember = ref(false);
 
 function tip(value: Value): string {
   return isPlaceholder(value) ? placeholderHelp(value) : fullText(value);
@@ -23,7 +25,14 @@ function removed(member: Value): boolean {
 
 const loaded = computed(() => new Set(props.members.map((m) => plainText(m))));
 
-function add(): void {
+/** Stages the new member; an empty member is only added through the explicit "Add empty member" button. */
+function add(allowEmpty = false): void {
+  if (newMember.value === '' && !allowEmpty) {
+    addError.value = 'Enter a member.';
+    emptyMember.value = true;
+    return;
+  }
+  emptyMember.value = false;
   if (loaded.value.has(newMember.value)) {
     addError.value = 'This member is in the set already.';
     return;
@@ -94,7 +103,7 @@ function add(): void {
       v-if="editable"
       class="add"
       novalidate
-      @submit.prevent="add"
+      @submit.prevent="add()"
     >
       <label
         class="visually-hidden"
@@ -114,6 +123,14 @@ function add(): void {
         class="btn compact"
       >
         Add member (SADD)
+      </button>
+      <button
+        v-if="emptyMember && newMember === ''"
+        type="button"
+        class="btn ghost compact"
+        @click="add(true)"
+      >
+        Add empty member
       </button>
       <span
         v-if="addError"

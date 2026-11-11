@@ -1,5 +1,5 @@
 import { moduleKindOf } from '../api/redis';
-import type { DigestMissing, FieldValue, KeyEdit, KeyType, RedisEditOutcome, RedisEditPlan, ZsetBound } from '../api/redis';
+import type { DigestMissing, FieldValue, KeyEdit, KeyType, KeyVersion, RedisEditOutcome, RedisEditPlan, ZsetBound } from '../api/redis';
 import type { Value } from '../api/sessions';
 import { isPlaceholder, plainText } from './values';
 
@@ -445,6 +445,23 @@ export function parseBound(text: string, by: 'score' | 'lex'): ZsetBound | null 
   return score ? { kind: exclusive ? 'exclusive' : 'inclusive', value: score } : null;
 }
 
+/**
+ * One end of an applied sorted set range back in Redis syntax, the reverse of
+ * `parseBound`: `-inf`/`+inf` (score) or `-`/`+` (lex) when open, a leading
+ * `(` when exclusive, a leading `[` for an inclusive lex end. A lex end with
+ * a space, a quote or a backslash is written in double quotes, so the
+ * command line can be pasted into the console or redis-cli as it is.
+ */
+export function formatBound(bound: ZsetBound, by: 'score' | 'lex', end: 'min' | 'max'): string {
+  if (bound.kind === 'unbounded') {
+    if (by === 'score') return end === 'min' ? '-inf' : '+inf';
+    return end === 'min' ? '-' : '+';
+  }
+  if (by === 'score') return `${bound.kind === 'exclusive' ? '(' : ''}${scoreText(bound.value)}`;
+  const word = `${bound.kind === 'exclusive' ? '(' : '['}${plainText(bound.value) ?? ''}`;
+  return /[\s"'\\]/.test(word) ? `"${word.replace(/[\\"]/g, '\\$&')}"` : word;
+}
+
 /** The type of the key a create plan makes, from its first value edit; `unknown` when it has none. */
 export function createdKeyType(edits: readonly KeyEdit[]): KeyType {
   for (const edit of edits) {
@@ -482,6 +499,64 @@ export function digestNote(missing: DigestMissing | null): string | null {
       return 'Your ACL user may not read this key in full, so rename, delete and trim cannot check it for changes by others; a change that keeps its length would go unnoticed. You are asked to confirm such changes.';
     default:
       return null;
+  }
+}
+
+/**
+ * Whether a key still is what was read before, from two version reads:
+ * `changed` when its type, length, expiry, database or content digest
+ * differs, `same` when both digests are known and equal, and `unknown` when
+ * the content cannot be compared (a version is missing, or a key too large
+ * or not permitted to digest).
+ */
+export function versionDrift(before: KeyVersion | null, after: KeyVersion | null): 'same' | 'changed' | 'unknown' {
+  if (!before || !after) return 'unknown';
+  if (
+    JSON.stringify(before.keyType) !== JSON.stringify(after.keyType) ||
+    before.length !== after.length ||
+    before.expireAtMs !== after.expireAtMs ||
+    (before.db ?? null) !== (after.db ?? null)
+  ) {
+    return 'changed';
+  }
+  if (before.digest === null || after.digest === null) return 'unknown';
+  return before.digest === after.digest ? 'same' : 'changed';
+}
+
+/**
+ * What the key viewer says about unsaved changes it kept while the tab's
+ * session was replaced (a lost connection, a reconnect): the key was read
+ * again on the new session and compared with the version the changes were
+ * made on. `null` when the key is unchanged, so there is nothing to say.
+ */
+export function reconnectNote(before: KeyVersion | null, after: { missing: boolean; version: KeyVersion | null }): OutcomeView | null {
+  if (after.missing) {
+    return {
+      tone: 'warning',
+      title: 'The key no longer exists',
+      message: 'It was deleted or expired while this tab was not connected. Your unsaved changes are still here, but they cannot be saved to this key.',
+      reread: true,
+    };
+  }
+  switch (versionDrift(before, after.version)) {
+    case 'same':
+      return null;
+    case 'changed':
+      return {
+        tone: 'warning',
+        title: 'The key changed on the server',
+        message:
+          'It was changed while this tab was not connected. Your unsaved changes are kept, but they were made on the older value: compare them with the current value before you save.',
+        reread: true,
+      };
+    case 'unknown':
+      return {
+        tone: 'warning',
+        title: 'The key could not be compared',
+        message:
+          'This tab connected again and your unsaved changes are kept. Whether the key changed meanwhile could not be checked, so compare them with the current value before you save.',
+        reread: true,
+      };
   }
 }
 

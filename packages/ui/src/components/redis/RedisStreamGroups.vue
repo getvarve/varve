@@ -31,8 +31,9 @@ const error = ref<string | null>(null);
 const loading = ref(false);
 const requests = latestOnly();
 
-function message(e: unknown): string {
-  const view = redisErrorView(useTabs().reportTabError(props.tabId, e));
+/** The message of a failed read; `sessionId` is the session it was sent on (taken before the await). */
+function message(e: unknown, sessionId: string): string {
+  const view = redisErrorView(useTabs().reportTabError(props.tabId, e, sessionId));
   return view.hint ? `${view.message} ${view.hint}` : view.message;
 }
 
@@ -40,10 +41,11 @@ async function loadGroups(): Promise<void> {
   const token = requests.next();
   loading.value = true;
   error.value = null;
+  const sessionId = props.sessionId;
   try {
     const [streamInfo, list] = await Promise.all([
-      redisStreamInfo(props.sessionId, props.keyName),
-      redisStreamGroups(props.sessionId, props.keyName),
+      redisStreamInfo(sessionId, props.keyName),
+      redisStreamGroups(sessionId, props.keyName),
     ]);
     if (!requests.isCurrent(token)) return;
     info.value = streamInfo;
@@ -51,7 +53,7 @@ async function loadGroups(): Promise<void> {
     if (selected.value !== null && !list.some((g) => g.name === selected.value)) selected.value = null;
     if (selected.value !== null) await loadGroup(selected.value);
   } catch (e: unknown) {
-    if (requests.isCurrent(token)) error.value = message(e);
+    if (requests.isCurrent(token)) error.value = message(e, sessionId);
   } finally {
     if (requests.isCurrent(token)) loading.value = false;
   }
@@ -71,17 +73,18 @@ async function loadGroup(group: string): Promise<void> {
   const token = groupRequests.next();
   groupError.value = null;
   picked.clear();
+  const sessionId = props.sessionId;
   try {
     const [list, page] = await Promise.all([
-      redisStreamConsumers(props.sessionId, props.keyName, group),
-      redisStreamPending(props.sessionId, props.keyName, group, pendingQuery(null)),
+      redisStreamConsumers(sessionId, props.keyName, group),
+      redisStreamPending(sessionId, props.keyName, group, pendingQuery(null)),
     ]);
     if (!groupRequests.isCurrent(token)) return;
     consumers.value = list;
     pending.value = page.entries;
     pendingNext.value = page.nextStart;
   } catch (e: unknown) {
-    if (groupRequests.isCurrent(token)) groupError.value = message(e);
+    if (groupRequests.isCurrent(token)) groupError.value = message(e, sessionId);
   }
 }
 
@@ -99,18 +102,38 @@ async function morePending(): Promise<void> {
   const group = selected.value;
   if (group === null || pendingNext.value === null) return;
   const token = groupRequests.next();
+  const sessionId = props.sessionId;
   try {
-    const page = await redisStreamPending(props.sessionId, props.keyName, group, pendingQuery(pendingNext.value));
+    const page = await redisStreamPending(sessionId, props.keyName, group, pendingQuery(pendingNext.value));
     if (!groupRequests.isCurrent(token)) return;
     pending.value = [...pending.value, ...page.entries];
     pendingNext.value = page.nextStart;
   } catch (e: unknown) {
-    if (groupRequests.isCurrent(token)) groupError.value = message(e);
+    if (groupRequests.isCurrent(token)) groupError.value = message(e, sessionId);
   }
 }
 
 function select(group: string): void {
-  selected.value = selected.value === group ? null : group;
+  const previous = selected.value;
+  selected.value = previous === group ? null : group;
+  if (selected.value !== previous) {
+    // The filter, claim form and start id belong to the group they were set for;
+    // the old group's rows are not shown under the new heading while it loads.
+    pendingFilter.consumer = '';
+    pendingFilter.minIdleMs = '';
+    claim.consumer = '';
+    claim.minIdleMs = '0';
+    claim.justId = false;
+    claimError.value = null;
+    setId.value = '$';
+    setIdError.value = null;
+    consumers.value = [];
+    pending.value = [];
+    pendingNext.value = null;
+    picked.clear();
+    // An answer for the previous group must not land under this one.
+    groupRequests.next();
+  }
   if (selected.value !== null) void loadGroup(selected.value);
 }
 

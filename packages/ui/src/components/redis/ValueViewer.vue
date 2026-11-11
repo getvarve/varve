@@ -24,7 +24,7 @@ import { useTabs } from '../../composables/useTabs';
 import { useDialogs } from '../../composables/useDialogs';
 import { useToasts } from '../../composables/useToasts';
 import { latestOnly } from '../../lib/async';
-import { describeEdit, digestNote, EditDraft, hexBytes, wholeStringPolicy } from '../../lib/redisEdit';
+import { describeEdit, digestNote, EditDraft, hexBytes, reconnectNote, wholeStringPolicy } from '../../lib/redisEdit';
 import type { OutcomeView } from '../../lib/redisEdit';
 import { redisErrorView } from '../../lib/redisErrors';
 import { chunkEnd, isDeadCursor, joinStringChunks, MAX_VIEW_ENTRIES } from '../../lib/redisValue';
@@ -97,18 +97,14 @@ function stopDigestRead(): void {
   digestRead = null;
 }
 
-onBeforeUnmount(stopDigestRead);
-
-function reset(): void {
-  info.value = null;
+onBeforeUnmount(() => {
   stopDigestRead();
-  version.value = null;
-  versionError.value = null;
-  missing.value = false;
-  error.value = null;
-  cursorExpired.value = false;
-  nextCursor.value = null;
-  total.value = null;
+  // Staged edits live in this viewer: once it is gone, the tab has no unsaved work from it.
+  useTabs().setUnsaved(props.tabId, false);
+});
+
+/** Drops the value read so far (not its kind, so the type's view stays mounted). */
+function clearValue(): void {
   text.value = null;
   loadedBytes.value = 0n;
   hash.value = [];
@@ -119,6 +115,20 @@ function reset(): void {
   json.value = null;
   series.value = null;
   probabilistic.value = null;
+}
+
+/** Everything about the key, for a key that is opened (another key or session). */
+function reset(): void {
+  info.value = null;
+  stopDigestRead();
+  version.value = null;
+  versionError.value = null;
+  missing.value = false;
+  error.value = null;
+  cursorExpired.value = false;
+  nextCursor.value = null;
+  total.value = null;
+  clearValue();
   kind.value = null;
 }
 
@@ -171,9 +181,11 @@ const requests = latestOnly();
 
 const cursorExpired = ref(false);
 
-function fail(e: unknown): void {
+/** Shows a failed read. `sessionId` is the session the read was sent on (taken before the await). */
+function fail(e: unknown, sessionId: string): void {
   // Marks a lost session, or a tab whose profile now points elsewhere (reconnect needed).
-  const cmd = useTabs().reportTabError(props.tabId, e);
+  // A late failure of a session the tab has replaced since leaves the tab alone.
+  const cmd = useTabs().reportTabError(props.tabId, e, sessionId);
   if (isDeadCursor(cmd)) {
     // Page cursors are single use and expire; a dead one is never retried.
     nextCursor.value = null;
@@ -187,60 +199,128 @@ function fail(e: unknown): void {
   error.value = view.hint ? `${view.message} ${view.hint}` : view.message;
 }
 
-async function readPage(cursor: string, token = requests.next()): Promise<void> {
+/**
+ * Reads one page. `replace` swaps the value shown for this first page in one
+ * go once it arrives (a read of the same key again), instead of appending.
+ */
+async function readPage(cursor: string, token = requests.next(), replace = false): Promise<void> {
   loading.value = true;
+  const sessionId = props.sessionId;
   try {
-    const chunk = await redisReadValue(props.sessionId, props.entry.display, { cursor, count: PAGE });
+    const chunk = await redisReadValue(sessionId, props.entry.display, { cursor, count: PAGE });
     if (!requests.isCurrent(token)) return;
     error.value = null;
+    if (replace) clearValue();
     if (!chunk) {
       missing.value = true;
       return;
     }
+    missing.value = false;
     total.value = chunk.total;
     // The backend may stop a page early on its byte budget; a cursor means there is more.
     nextCursor.value = chunk.nextCursor;
     append(chunk.data);
   } catch (e: unknown) {
-    if (requests.isCurrent(token)) fail(e);
+    if (requests.isCurrent(token)) fail(e, sessionId);
   } finally {
     if (requests.isCurrent(token)) loading.value = false;
   }
 }
 
-async function load(): Promise<void> {
+/**
+ * Reads the key from the start. A newly opened key starts blank; the same key
+ * read again (`sameKey`: reload, after an apply) keeps showing what it has
+ * until the new answer arrives, so the type's view (its sorted set range, time
+ * range, selected consumer group) stays mounted and keeps its state.
+ * Resolves true when the key was read (also when it no longer exists), false
+ * when the read failed or a newer read took over.
+ */
+async function load(sameKey = false): Promise<boolean> {
   const token = requests.next();
-  reset();
+  if (sameKey) {
+    error.value = null;
+    cursorExpired.value = false;
+    nextCursor.value = null;
+  } else reset();
   loading.value = true;
+  const sessionId = props.sessionId;
   try {
     const [keyInfo, keyVersion] = await Promise.all([
-      redisKeyInfo(props.sessionId, props.entry.display),
-      redisKeyVersion(props.sessionId, props.entry.display).catch((e: unknown) => {
+      redisKeyInfo(sessionId, props.entry.display),
+      redisKeyVersion(sessionId, props.entry.display).then(
+        (read) => ({ read, failed: null }),
         // Without a version the value is still shown; only editing is off.
-        versionError.value = redisErrorView(toCmdError(e)).message;
-        return null;
-      }),
+        (e: unknown) => ({ read: null, failed: redisErrorView(toCmdError(e)).message }),
+      ),
     ]);
     if (!requests.isCurrent(token)) {
-      if (keyVersion?.digestRead) void redisKeyDigestCancel(props.sessionId, keyVersion.digestRead).catch(() => undefined);
-      return;
+      // A late answer (also a late failure) for an older read never touches the current key.
+      if (keyVersion.read?.digestRead) void redisKeyDigestCancel(sessionId, keyVersion.read.digestRead).catch(() => undefined);
+      return false;
     }
-    version.value = keyVersion;
-    if (keyVersion?.digestRead) digestRead = { sessionId: props.sessionId, id: keyVersion.digestRead };
+    stopDigestRead();
+    version.value = keyVersion.read;
+    versionError.value = keyVersion.failed;
+    if (keyVersion.read?.digestRead) digestRead = { sessionId, id: keyVersion.read.digestRead };
     if (!keyInfo) {
+      info.value = null;
+      clearValue();
       missing.value = true;
       loading.value = false;
-      return;
+      return true;
     }
     info.value = keyInfo;
   } catch (e: unknown) {
     if (requests.isCurrent(token)) {
-      fail(e);
+      fail(e, sessionId);
       loading.value = false;
     }
-    return;
+    return false;
   }
-  await readPage('', token);
+  await readPage('', token, true);
+  return requests.isCurrent(token) && error.value === null && !cursorExpired.value;
+}
+
+/** Reads the shown key again; its range, time series and consumer group views read again too. */
+function reload(): Promise<boolean> {
+  groupsRefresh.value += 1;
+  zsetView.value?.reload();
+  return load(true);
+}
+
+/**
+ * The reload buttons. Staged collection edits survive a reload, but text
+ * typed in the string or JSON editor would sit on a value that may have been
+ * replaced: ask before it is dropped.
+ */
+async function reloadAsked(): Promise<void> {
+  if (stringDirty.value) {
+    const ok = await useDialogs().askConfirm({
+      title: 'Discard unsaved changes?',
+      message: `The text you typed for ${props.entry.display} has not been saved. Reloading the key discards it.`,
+      confirmLabel: 'Discard',
+      danger: true,
+    });
+    if (!ok) return;
+    stringEditor.value?.close();
+  }
+  void reload();
+}
+
+/**
+ * The tab connected again (another session) while this key stays open:
+ * staged edits and typed text are kept, the key is read again on the new
+ * session, and when it is no longer what the edits were made on the user is
+ * told, instead of the edits being dropped or silently applied to a value
+ * they have not seen.
+ */
+async function rereadOnNewSession(): Promise<void> {
+  const before = version.value;
+  const hadEdits = draft.size > 0 || stringDirty.value;
+  outcome.value = null;
+  // A read that failed shows its own error; one that a newer read replaced says nothing.
+  if (!(await reload()) || !hadEdits) return;
+  outcome.value = reconnectNote(before, { missing: missing.value, version: version.value });
 }
 
 
@@ -294,6 +374,8 @@ const outcome = shallowRef<OutcomeView | null>(null);
 /** Bumped after every apply so the stream groups panel reads again. */
 const groupsRefresh = ref(0);
 const zsetView = ref<InstanceType<typeof RedisZsetView> | null>(null);
+/** The string or JSON editor (one of them is mounted at most). */
+const stringEditor = ref<InstanceType<typeof RedisStringEditor> | null>(null);
 /** A whole-key change in flight (rename, delete), to follow it in the browser once applied. */
 let wholeKey: KeyEdit | null = null;
 
@@ -304,6 +386,8 @@ const keyEdit = useKeyEdit({
   done: (view) => {
     outcome.value = view;
     draft.clear();
+    // The typed text was applied (or the key is read again after a conflict): the edit is over.
+    stringEditor.value?.close();
     const change = wholeKey;
     wholeKey = null;
     if (view.tone === 'success' && change?.op === 'rename') {
@@ -314,9 +398,7 @@ const keyEdit = useKeyEdit({
       emit('deleted');
       return;
     }
-    groupsRefresh.value += 1;
-    zsetView.value?.reload();
-    void load();
+    void reload();
   },
 });
 
@@ -329,9 +411,14 @@ const editBlock = computed<string | null>(() => {
 });
 const editable = computed(() => editBlock.value === null && !missing.value);
 
-// Staged edits count as unsaved work of the tab (closing it asks first).
+/** An open string or JSON edit with typed changes (reported by the editor). */
+const stringDirty = ref(false);
+
+// Staged edits, and typed changes in the string or JSON editor, count as
+// unsaved work of the tab: closing it, selecting another key, scanning again
+// or switching the database asks first.
 watch(
-  () => draft.size > 0,
+  () => draft.size > 0 || stringDirty.value,
   (unsaved) => useTabs().setUnsaved(props.tabId, unsaved),
   { immediate: true },
 );
@@ -362,7 +449,7 @@ function saveDraft(): void {
 function planGroupChange(change: StreamGroupChange): void {
   outcome.value = null;
   wholeKey = null;
-  void keyEdit.reviewWith(() => redisStreamGroupPlan(props.sessionId, props.entry.display, change));
+  void keyEdit.reviewWith((sessionId) => redisStreamGroupPlan(sessionId, props.entry.display, change));
 }
 
 const keyDialog = ref<'rename' | 'ttl' | null>(null);
@@ -394,10 +481,16 @@ const stringLock = computed<string | null>(() => {
 });
 
 watch(
-  () => [props.sessionId, props.entry.name],
-  () => {
-    // Staged edits belong to the key (and session) they were made on.
+  () => [props.sessionId, props.entry.name] as const,
+  (now, before) => {
+    // The same key on another session (the tab connected again): the edits stay.
+    if (before && now[1] === before[1]) {
+      void rereadOnNewSession();
+      return;
+    }
+    // Staged edits belong to the key they were made on.
     draft.clear();
+    stringDirty.value = false;
     outcome.value = null;
     void load();
   },
@@ -507,7 +600,6 @@ const TYPE_TONE: Record<string, string> = {
       <h2 class="mono key">
         {{ entry.display }}
       </h2>
-      <span class="spacer" />
       <template v-if="editable">
         <button
           type="button"
@@ -554,7 +646,7 @@ const TYPE_TONE: Record<string, string> = {
         class="icon-btn"
         aria-label="Reload key"
         :disabled="loading"
-        @click="load"
+        @click="reloadAsked"
       >
         <Icon name="refresh" />
       </button>
@@ -608,7 +700,7 @@ const TYPE_TONE: Record<string, string> = {
         <button
           type="button"
           class="btn compact"
-          @click="load"
+          @click="reloadAsked"
         >
           Reload from the start
         </button>
@@ -723,12 +815,14 @@ const TYPE_TONE: Record<string, string> = {
           </div>
         </div>
         <RedisStringEditor
+          ref="stringEditor"
           mode="string"
           :original="stringLock ? null : text.value"
           :locked="stringLock"
           :editable="editable"
           :busy="keyEdit.state.planning"
           @save="review([$event])"
+          @dirty="stringDirty = $event"
         >
           <p
             v-if="stringOversized"
@@ -751,12 +845,14 @@ const TYPE_TONE: Record<string, string> = {
       </p>
       <RedisStringEditor
         v-else-if="kind === 'json' && json"
+        ref="stringEditor"
         mode="json"
         :original="stringLock ? null : json"
         :locked="stringLock"
         :editable="editable"
         :busy="keyEdit.state.planning"
         @save="review([$event])"
+        @dirty="stringDirty = $event"
       >
         <pre class="mono value">{{ json.t === 'text' ? (prettyJson(json.v) ?? json.v) : fullText(json) }}</pre>
       </RedisStringEditor>
@@ -943,17 +1039,21 @@ const TYPE_TONE: Record<string, string> = {
   background: var(--surface);
 }
 
+/* On a narrow pane the controls wrap to a second row instead of squeezing the key name away. */
 .head {
   display: flex;
   flex-shrink: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  height: 48px;
-  padding: 0 12px 0 16px;
+  gap: 4px 10px;
+  min-height: 48px;
+  padding: 6px 12px 6px 16px;
   border-bottom: 1px solid var(--border-inner);
 }
 
 .key {
+  flex: 1 1 160px;
+  min-width: 120px;
   margin: 0;
   overflow: hidden;
   font-size: 15px;

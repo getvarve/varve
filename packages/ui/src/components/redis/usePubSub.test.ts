@@ -18,10 +18,13 @@ const subscribeCalls: PubSubNames[] = [];
 const changes: [PubSubNames, PubSubNames][] = [];
 const unsubscribed: string[] = [];
 let releaseList: () => void = () => undefined;
+/** While set, subscribe calls wait for it (a call in flight). */
+let subscribeGate: Promise<void> | null = null;
 
 vi.mock('../../api/redis', async (original) => ({
   ...(await original<typeof RedisModule>()),
   redisPubsubSubscribe: vi.fn(async (_session: string, names: PubSubNames) => {
+    if (subscribeGate) await subscribeGate;
     subscribeCalls.push(names);
     // The server confirms before the call returns: the store must keep this event.
     handler?.({ payload: { kind: 'subscribed', subscriptionId: 'sub1', nameKind: 'channel', name: names.channels[0] ?? '', count: 1 } });
@@ -177,5 +180,34 @@ describe('usePubSub', () => {
     expect(p?.names.map((n) => n.name)).toContain('kept');
     expect(p?.errors.at(-1)).toMatch(/opened again/);
     await store.close('tab-race');
+  });
+
+  it('does not remove a name while its subscribe call is in flight', async () => {
+    const store = usePubSub();
+    const p = store.panel('tab-busy', 's-busy');
+    let release: () => void = () => undefined;
+    subscribeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const subscribing = store.subscribe('tab-busy', { channels: ['jobs'], patterns: [] });
+    await flushPromises();
+    expect(p.busy).toBe(true);
+    const jobs = p.names[0];
+    expect(jobs?.name).toBe('jobs');
+    // Removing it now would only drop it locally; the confirmation would bring it back.
+    expect(await store.unsubscribe('tab-busy', jobs as NonNullable<typeof jobs>)).toMatch(/Wait/);
+    expect(p.names.map((n) => n.name)).toEqual(['jobs']);
+    release();
+    subscribeGate = null;
+    expect(await subscribing).toBeNull();
+    expect(p.names).toEqual([{ kind: 'channel', name: 'jobs', confirmed: true, messages: 0 }]);
+
+    // Once the call returned, removing it ends the subscription.
+    unsubscribed.length = 0;
+    expect(await store.unsubscribe('tab-busy', p.names[0] as NonNullable<(typeof p.names)[0]>)).toBeNull();
+    expect(p.names).toEqual([]);
+    expect(unsubscribed).toEqual(['sub1']);
+    expect(p.busy).toBe(false);
+    await store.close('tab-busy');
   });
 });

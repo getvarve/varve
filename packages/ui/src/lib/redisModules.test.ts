@@ -23,6 +23,14 @@ describe('time series helpers', () => {
     expect(parseTimestamp('')).toBeUndefined();
     expect(parseTimestamp(' 1718000000000 ')).toBe('1718000000000');
     expect(parseTimestamp('2026-10-21T00:00:00Z')).toBe(String(Date.UTC(2026, 9, 21)));
+    // Without a zone, dates and date-times are both UTC (like the times the view shows), so a day is 24 hours.
+    expect(parseTimestamp('2026-10-21')).toBe(String(Date.UTC(2026, 9, 21)));
+    expect(parseTimestamp('2026-10-21 13:45')).toBe(String(Date.UTC(2026, 9, 21, 13, 45)));
+    expect(parseTimestamp('2026-10-21T13:45:00.250')).toBe(String(Date.UTC(2026, 9, 21, 13, 45, 0, 250)));
+    expect(parseTimestamp('2026-10-22 00:00')).toBe(String(Date.UTC(2026, 9, 22)));
+    expect(parseTimestamp('2026-10-21T13:45+02:00')).toBe(String(Date.UTC(2026, 9, 21, 11, 45)));
+    expect(parseTimestamp('2026-10-21T13:45:00.000Z')).toBe(String(Date.UTC(2026, 9, 21, 13, 45)));
+    expect(parseTimestamp(formatTimestamp(String(Date.UTC(2026, 9, 21, 13, 45))))).toBe(String(Date.UTC(2026, 9, 21, 13, 45)));
     expect(parseTimestamp('soon')).toBeNull();
     expect(parseTimestamp('9223372036854775808')).toBeNull();
     expect(formatTimestamp('0')).toBe('1970-01-01T00:00:00.000Z');
