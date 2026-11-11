@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use varve_driver::{Dialect, Value};
 
-use super::{Plan, Target, fragment, ident, invalid, plain_text, unsupported};
+use super::{Plan, Target, fragment, ident, invalid, plain_text, table_text, unsupported};
 use crate::model::CatalogResult;
 use crate::sql;
 
@@ -383,7 +383,7 @@ impl DataType {
                 let members = self
                     .values
                     .iter()
-                    .map(|v| plain_text(v, "an ENUM or SET member"))
+                    .map(|v| table_text(v, "an ENUM or SET member"))
                     .collect::<CatalogResult<Vec<_>>>()?;
                 out.push_str(&format!("({})", members.join(",")));
             }
@@ -701,15 +701,12 @@ impl ColumnDef {
     pub(super) fn render(&self, t: &Target, plan: &mut Plan) -> CatalogResult<String> {
         let ty = &self.data_type;
         let mut out = format!("{} {}", ident(&self.name)?, ty.render(t, plan)?);
-        if let Some(srid) = self.srid {
-            if !ty.name.is_spatial() {
-                return Err(invalid("only spatial columns have an SRID"));
-            }
-            if t.is_mariadb() {
-                out.push_str(&format!(" REF_SYSTEM_ID={srid}"));
-            } else {
-                out.push_str(&format!(" SRID {srid}"));
-            }
+        if self.srid.is_some() && !ty.name.is_spatial() {
+            return Err(invalid("only spatial columns have an SRID"));
+        }
+        // MariaDB's REF_SYSTEM_ID is part of the type.
+        if let Some(srid) = self.srid.filter(|_| t.is_mariadb()) {
+            out.push_str(&format!(" REF_SYSTEM_ID={srid}"));
         }
         let special = self.generated.is_some() || self.row_period.is_some();
         if special && (self.default.is_some() || self.auto_increment) {
@@ -734,6 +731,11 @@ impl ColumnDef {
                 " GENERATED ALWAYS AS ({}) {storage}",
                 fragment(&generated.expression, "a generated column expression")?
             ));
+        }
+        // MySQL's SRID is a column attribute: after the generated clause,
+        // which must follow the type directly.
+        if let Some(srid) = self.srid.filter(|_| !t.is_mariadb()) {
+            out.push_str(&format!(" SRID {srid}"));
         }
         if let Some(period) = self.row_period {
             if !t.is_mariadb() {
@@ -794,7 +796,7 @@ impl ColumnDef {
             out.push_str(" WITHOUT SYSTEM VERSIONING");
         }
         if let Some(comment) = &self.comment {
-            out.push_str(&format!(" COMMENT {}", plain_text(comment, "a comment")?));
+            out.push_str(&format!(" COMMENT {}", table_text(comment, "a comment")?));
         }
         Ok(out)
     }
@@ -1005,7 +1007,7 @@ impl IndexDef {
             out.push_str(&format!(" WITH PARSER {}", ident(parser)?));
         }
         if let Some(comment) = &self.comment {
-            out.push_str(&format!(" COMMENT {}", plain_text(comment, "a comment")?));
+            out.push_str(&format!(" COMMENT {}", table_text(comment, "a comment")?));
         }
         if self.invisible {
             out.push(' ');
@@ -1085,6 +1087,9 @@ pub(super) fn visibility_keyword(t: &Target, invisible: bool) -> CatalogResult<&
         }
         Ok(if invisible { "IGNORED" } else { "NOT IGNORED" })
     } else {
+        if !t.mysql_at(8, 0, 0) {
+            return Err(t.lacks("invisible indexes (MySQL 8.0+)"));
+        }
         Ok(if invisible { "INVISIBLE" } else { "VISIBLE" })
     }
 }
@@ -1229,8 +1234,11 @@ mod tests {
         d.scale = Some(6);
         assert!(d.render(&t, &mut plan).is_err());
         let mut e = ty(TypeName::Enum);
-        e.values = vec!["a\\b".into()];
+        e.values = vec!["a\0b".into()];
         assert!(e.render(&t, &mut plan).is_err());
+        // A backslash is quoted at run time (see `table_text`).
+        e.values = vec!["a\\b".into()];
+        assert_eq!(e.render(&t, &mut plan)?, "ENUM(\0a\\b\0)");
         assert!(is_unsupported(&ty(TypeName::Uuid).render(&t, &mut plan)));
         assert!(is_unsupported(
             &ty(TypeName::Inet4).render(&target(&ma106())?, &mut plan)
@@ -1292,6 +1300,21 @@ mod tests {
         assert_eq!(
             p.render(&target(&ma106())?, &mut plan)?,
             "`pos` POINT REF_SYSTEM_ID=4326 NOT NULL"
+        );
+        // A generated spatial column: MySQL takes SRID after the storage
+        // keyword, MariaDB keeps it in the type.
+        p.generated = Some(Generated {
+            expression: "ST_SRID(POINT(x, y), 4326)".into(),
+            storage: GeneratedStorage::Stored,
+        });
+        assert_eq!(
+            p.render(&target(&my97())?, &mut plan)?,
+            "`pos` POINT GENERATED ALWAYS AS (ST_SRID(POINT(x, y), 4326)) STORED SRID 4326 NOT NULL"
+        );
+        p.nullable = true;
+        assert_eq!(
+            p.render(&target(&ma106())?, &mut plan)?,
+            "`pos` POINT REF_SYSTEM_ID=4326 GENERATED ALWAYS AS (ST_SRID(POINT(x, y), 4326)) STORED"
         );
 
         let mut id = ColumnDef::new("id", {

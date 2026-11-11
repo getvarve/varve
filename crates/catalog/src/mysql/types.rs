@@ -43,7 +43,8 @@ pub struct MyTable {
     pub engine: Option<String>,
     /// Row format.
     pub row_format: Option<String>,
-    /// Next `AUTO_INCREMENT` value.
+    /// Next `AUTO_INCREMENT` value, as decimal text (it can pass 2^53).
+    #[serde(default, with = "crate::uint_text::option")]
     pub auto_increment: Option<u64>,
     /// Table collation.
     pub collation: Option<String>,

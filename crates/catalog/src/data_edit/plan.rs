@@ -11,6 +11,7 @@ use super::model::{
     QualifiedOperator, RowChange, RowEditPlan, RowKey, TableTarget,
 };
 use crate::model::{CatalogError, CatalogResult};
+use crate::mysql::util::at_least;
 use crate::sql;
 
 /// The SQL dialect of an engine that supports grid editing.
@@ -113,9 +114,21 @@ pub fn plan_edits(
         },
         float_cast: match server.engine {
             // `CAST(... AS FLOAT)` exists since MySQL 8.0.17 and MariaDB
-            // 10.4.5.
-            Engine::Mysql => server.at_least(8, 1) || server.patch.is_none_or(|p| p >= 17),
-            _ => true,
+            // 10.4.5. A missing patch level counts as `.0`, so the cast is
+            // only used where it is known to exist.
+            Engine::Mysql => at_least(server, 8, 0, 17),
+            Engine::Mariadb => at_least(server, 10, 4, 5),
+            Engine::Postgres | Engine::Redis => true,
+        },
+        text_collation: match server.engine {
+            // NO PAD binary collations, so trailing spaces count.
+            Engine::Mariadb => TextCollation::NoPad("utf8mb4_nopad_bin"),
+            // `utf8mb4_0900_bin` arrived in MySQL 8.0.17; older servers
+            // only have the PAD SPACE `utf8mb4_bin`.
+            Engine::Mysql if at_least(server, 8, 0, 17) => TextCollation::NoPad("utf8mb4_0900_bin"),
+            Engine::Mysql | Engine::Postgres | Engine::Redis => {
+                TextCollation::PadSpace("utf8mb4_bin")
+            }
         },
         warnings: Vec::new(),
         has_expressions: false,
@@ -139,6 +152,17 @@ pub fn plan_edits(
     })
 }
 
+/// The binary collation MySQL and MariaDB compare original text values
+/// in.
+#[derive(Debug, Clone, Copy)]
+enum TextCollation {
+    /// Trailing spaces count: equal under the collation means equal text.
+    NoPad(&'static str),
+    /// Trailing spaces are ignored (`PAD SPACE`): equal under the collation
+    /// and of equal length means equal text.
+    PadSpace(&'static str),
+}
+
 struct Planner<'a> {
     engine: Engine,
     dialect: Dialect,
@@ -147,6 +171,7 @@ struct Planner<'a> {
     check_original: bool,
     insert_returning: bool,
     float_cast: bool,
+    text_collation: TextCollation,
     warnings: Vec<String>,
     has_expressions: bool,
 }
@@ -471,7 +496,7 @@ impl<'a> Planner<'a> {
                 };
                 let left = match self.dialect {
                     Dialect::Postgres => {
-                        let mut left = pg_comparable(column, &self.ident(column)?);
+                        let mut left = pg_comparable(column, &self.ident(column)?, value);
                         if let Some(Some(collation)) = self.key.key_collations.get(position) {
                             left = format!(
                                 "{left} COLLATE {}",
@@ -544,7 +569,10 @@ impl<'a> Planner<'a> {
                     sql::literal(self.dialect, value)?
                 )
             } else {
-                let left = format!("CAST({} AS pg_catalog.text)", pg_comparable(column, &ident));
+                let left = format!(
+                    "CAST({} AS pg_catalog.text)",
+                    pg_comparable(column, &ident, value)
+                );
                 let right = format!("CAST({} AS pg_catalog.text)", self.literal(column, value)?);
                 format!("({left} COLLATE pg_catalog.\"C\" OPERATOR(pg_catalog.=) {right}) IS TRUE")
             })),
@@ -552,26 +580,30 @@ impl<'a> Planner<'a> {
                 if column.type_name == "float" && !self.float_cast && !value_is_null(value) {
                     self.warnings.push(format!(
                         "change {}: {} is not compared with its original value because this \
-                         MySQL version cannot write a FLOAT literal",
+                         server version cannot write a FLOAT literal",
                         index + 1,
                         column.name
                     ));
                     return Ok(None);
                 }
-                let right = match value {
+                match value {
                     Value::Text(_) if is_mysql_text(&column.type_name) => {
-                        let collation = match self.engine {
-                            Engine::Mariadb => "utf8mb4_nopad_bin",
-                            _ => "utf8mb4_0900_bin",
-                        };
-                        format!(
-                            "CONVERT({} USING utf8mb4) COLLATE {collation}",
-                            self.literal(column, value)?
-                        )
+                        let literal = self.literal(column, value)?;
+                        Ok(Some(match self.text_collation {
+                            TextCollation::NoPad(collation) => format!(
+                                "{ident} <=> CONVERT({literal} USING utf8mb4) COLLATE {collation}"
+                            ),
+                            TextCollation::PadSpace(collation) => format!(
+                                "{ident} <=> CONVERT({literal} USING utf8mb4) COLLATE {collation} \
+                                 AND CHAR_LENGTH({ident}) <=> CHAR_LENGTH({literal})"
+                            ),
+                        }))
                     }
-                    _ => self.literal(column, value)?,
-                };
-                Ok(Some(format!("{ident} <=> {right}")))
+                    _ => Ok(Some(format!(
+                        "{ident} <=> {}",
+                        self.literal(column, value)?
+                    ))),
+                }
             }
         }
     }
@@ -632,12 +664,17 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// A PostgreSQL column as compared with a value read by the client: an
-/// array (also a domain over an array) with lower bounds other than 1
-/// (`'[0:1]={5,6}'`) loses its bounds on the way to the client, so arrays
-/// are compared as the slice `col[:]`, whose lower bounds are always 1.
-fn pg_comparable(column: &ColumnInfo, ident: &str) -> String {
-    if column.array || column.data_type.ends_with("[]") {
+/// A PostgreSQL column as compared with `value`, a value read by the
+/// client. The driver reads an array with lower bounds of 1 as a list
+/// (`Value::Array`), which carries no bounds: such a value is compared
+/// with the slice `col[:]`, whose lower bounds are always 1 (also for a
+/// domain over an array). An array with other bounds (`[0:1]={5,6}`) comes
+/// as the server's text (`Value::Other`), bounds included: it is compared
+/// with the column itself, since the slice would rebase it to 1 and never
+/// match.
+fn pg_comparable(column: &ColumnInfo, ident: &str, value: &Value) -> String {
+    let array = column.array || column.data_type.ends_with("[]");
+    if array && matches!(value, Value::Array(_)) {
         format!("({ident})[:]")
     } else {
         ident.to_owned()
@@ -1022,6 +1059,84 @@ mod tests {
         Ok(())
     }
 
+    /// A key and a column that are arrays: a value read as a list is
+    /// compared with the slice `col[:]` (lower bounds 1), one read as the
+    /// server's text (explicit bounds, `[0:1]={5,6}`) with the column
+    /// itself, so its bounds take part in the comparison.
+    #[test]
+    fn postgres_arrays_are_sliced_only_for_a_list_value() -> CatalogResult<()> {
+        let mut id = pg_column("id", "_int4");
+        id.data_type = "integer[]".into();
+        id.array = true;
+        id.nullable = false;
+        let mut v = pg_column("v", "_int4");
+        v.data_type = "integer[]".into();
+        v.array = true;
+        let key_info = KeyInfo {
+            kind: KeyKind::Primary,
+            name: "arr_pkey".into(),
+            columns: vec!["id".into()],
+            table_columns: vec![id, v],
+            equality_operators: vec![QualifiedOperator {
+                schema: "pg_catalog".into(),
+                name: "=".into(),
+            }],
+            key_collations: Vec::new(),
+        };
+        let list = Value::Array(vec![Value::Int(5), Value::Int(6)]);
+        let bounded = Value::Other("[0:1]={5,6}".into());
+        let plan = |id: &Value, v: &Value| {
+            plan_edits(
+                &pg(),
+                &pg_target(),
+                &[RowChange::Delete {
+                    key: RowKey {
+                        columns: vec![("id".into(), id.clone())],
+                    },
+                    original: vec![("id".into(), id.clone()), ("v".into(), v.clone())],
+                }],
+                &options(key_info.clone(), true),
+            )
+        };
+        let lists = plan(&list, &list)?;
+        assert_eq!(
+            only(&lists)?.statement,
+            "DELETE FROM \"app\".\"items\" WHERE (\"id\")[:] OPERATOR(pg_catalog.=) \
+             CAST('{\"5\",\"6\"}' AS \"pg_catalog\".\"_int4\") \
+             AND (CAST((\"id\")[:] AS pg_catalog.text) COLLATE pg_catalog.\"C\" \
+             OPERATOR(pg_catalog.=) \
+             CAST(CAST('{\"5\",\"6\"}' AS \"pg_catalog\".\"_int4\") AS pg_catalog.text)) IS TRUE \
+             AND (CAST((\"v\")[:] AS pg_catalog.text) COLLATE pg_catalog.\"C\" \
+             OPERATOR(pg_catalog.=) \
+             CAST(CAST('{\"5\",\"6\"}' AS \"pg_catalog\".\"_int4\") AS pg_catalog.text)) IS TRUE"
+        );
+        let texts = plan(&bounded, &bounded)?;
+        assert_eq!(
+            only(&texts)?.statement,
+            "DELETE FROM \"app\".\"items\" WHERE \"id\" OPERATOR(pg_catalog.=) \
+             CAST('[0:1]={5,6}' AS \"pg_catalog\".\"_int4\") \
+             AND (CAST(\"id\" AS pg_catalog.text) COLLATE pg_catalog.\"C\" \
+             OPERATOR(pg_catalog.=) \
+             CAST(CAST('[0:1]={5,6}' AS \"pg_catalog\".\"_int4\") AS pg_catalog.text)) IS TRUE \
+             AND (CAST(\"v\" AS pg_catalog.text) COLLATE pg_catalog.\"C\" \
+             OPERATOR(pg_catalog.=) \
+             CAST(CAST('[0:1]={5,6}' AS \"pg_catalog\".\"_int4\") AS pg_catalog.text)) IS TRUE"
+        );
+        // Each value decides for itself: a list key with a bounded column.
+        let mixed = plan(&list, &bounded)?;
+        let statement = &only(&mixed)?.statement;
+        assert!(
+            statement.starts_with("DELETE FROM \"app\".\"items\" WHERE (\"id\")[:] OPERATOR"),
+            "{statement}"
+        );
+        assert!(
+            statement.contains("CAST(\"v\" AS pg_catalog.text)"),
+            "{statement}"
+        );
+        assert!(!statement.contains("(\"v\")[:]"), "{statement}");
+        Ok(())
+    }
+
     #[test]
     fn postgres_keys_use_the_index_operator_with_its_schema() -> CatalogResult<()> {
         let mut key_info = pg_key();
@@ -1347,6 +1462,81 @@ mod tests {
             "UPDATE `shop`.`items` SET `weight` = 2.0 WHERE `id` = 1"
         );
         assert_eq!(plan.warnings.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn float_cast_follows_the_full_version() -> CatalogResult<()> {
+        let update = RowChange::Update {
+            key: key(1),
+            original: vec![],
+            set: vec![("weight".into(), value(Value::Float(2.0)))],
+        };
+        for (server, cast) in [
+            (server(Engine::Mysql, 5, 7, Some(44)), false),
+            (server(Engine::Mysql, 8, 0, Some(16)), false),
+            (server(Engine::Mysql, 8, 0, None), false),
+            (server(Engine::Mysql, 8, 0, Some(17)), true),
+            (server(Engine::Mysql, 9, 7, Some(0)), true),
+            (server(Engine::Mariadb, 10, 3, Some(39)), false),
+            (server(Engine::Mariadb, 10, 4, Some(4)), false),
+            (server(Engine::Mariadb, 10, 4, Some(5)), true),
+            (server(Engine::Mariadb, 11, 0, None), true),
+        ] {
+            let plan = plan_edits(
+                &server,
+                &my_target(),
+                std::slice::from_ref(&update),
+                &options(my_key("json"), false),
+            )?;
+            let expected = if cast {
+                "UPDATE `shop`.`items` SET `weight` = CAST(2.0 AS FLOAT) WHERE `id` = 1"
+            } else {
+                "UPDATE `shop`.`items` SET `weight` = 2.0 WHERE `id` = 1"
+            };
+            assert_eq!(only(&plan)?.statement, expected, "{}", server.version);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mysql_before_8_0_17_compares_text_with_a_pad_space_collation_and_length() -> CatalogResult<()>
+    {
+        let update = RowChange::Update {
+            key: key(5),
+            original: vec![("name".into(), Value::Text("Ab ".into()))],
+            set: vec![("name".into(), value(Value::Text("ab".into())))],
+        };
+        for server in [
+            server(Engine::Mysql, 5, 7, Some(44)),
+            server(Engine::Mysql, 8, 0, Some(16)),
+        ] {
+            let plan = plan_edits(
+                &server,
+                &my_target(),
+                std::slice::from_ref(&update),
+                &options(my_key("json"), true),
+            )?;
+            assert_eq!(
+                only(&plan)?.statement,
+                "UPDATE `shop`.`items` SET `name` = 'ab' WHERE `id` = 5 AND `name` <=> \
+                 CONVERT('Ab ' USING utf8mb4) COLLATE utf8mb4_bin AND CHAR_LENGTH(`name`) <=> \
+                 CHAR_LENGTH('Ab ')",
+                "{}",
+                server.version
+            );
+        }
+        let plan = plan_edits(
+            &server(Engine::Mysql, 8, 0, Some(17)),
+            &my_target(),
+            &[update],
+            &options(my_key("json"), true),
+        )?;
+        assert_eq!(
+            only(&plan)?.statement,
+            "UPDATE `shop`.`items` SET `name` = 'ab' WHERE `id` = 5 AND `name` <=> \
+             CONVERT('Ab ' USING utf8mb4) COLLATE utf8mb4_0900_bin"
+        );
         Ok(())
     }
 

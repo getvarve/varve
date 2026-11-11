@@ -25,6 +25,7 @@ pub mod mysql;
 pub mod postgres;
 pub mod rows;
 pub mod sql;
+mod uint_text;
 
 pub use model::{
     Capabilities, Catalog, CatalogError, CatalogResult, Container, EditPlan, KindCount,

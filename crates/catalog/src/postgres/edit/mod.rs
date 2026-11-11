@@ -42,7 +42,9 @@ mod typename;
 mod types;
 mod view;
 
-pub use common::{ConfigSetting, DropBehavior, FiringState, QualifiedName, RoleSpec, StorageParam};
+pub use common::{
+    CollationName, ConfigSetting, DropBehavior, FiringState, QualifiedName, RoleSpec, StorageParam,
+};
 pub use database::{
     CreateDatabase, CreateStrategy, DatabaseChange, DatabaseOperation, LocaleProvider,
     SchemaChange, SchemaOperation,

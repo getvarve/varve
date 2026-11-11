@@ -784,6 +784,103 @@ fn capabilities_follow_versions() {
     assert!(maria.analyze && !maria.buffers);
 }
 
+/// A statement that already is an EXPLAIN is refused by its leading
+/// keyword: the splitter gives `EXPLAIN ANALYZE DELETE ...` the kind of the
+/// statement it runs.
+#[test]
+fn explain_statements_are_not_wrapped_again() {
+    let pg = server(Engine::Postgres, "18.1");
+    let my = server(Engine::Mysql, "8.0.46");
+    let maria = server(Engine::Mariadb, "10.6.24-MariaDB");
+    let plain = ExplainOptions::default();
+    let refused = |s: &ServerInfo, statement: &str| {
+        matches!(
+            explain_sql(s, statement, &plain),
+            Err(CatalogError::Invalid { message }) if message.contains("already is an EXPLAIN")
+        )
+    };
+    for s in [&pg, &my, &maria] {
+        for statement in [
+            "EXPLAIN SELECT 1",
+            "EXPLAIN ANALYZE DELETE FROM t",
+            "explain analyze update t set a = 1 where id = 2",
+            "  /* note */ EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
+            "SHOW TABLES",
+            "DESCRIBE t",
+        ] {
+            assert!(refused(s, statement), "{statement}");
+        }
+    }
+    assert!(refused(
+        &pg,
+        "EXPLAIN (ANALYZE, FORMAT JSON) DELETE FROM t WHERE a = 1"
+    ));
+    // MariaDB's `ANALYZE statement` is its EXPLAIN ANALYZE; `ANALYZE TABLE`
+    // is not an EXPLAIN.
+    assert!(refused(&maria, "ANALYZE DELETE FROM t"));
+    assert!(refused(&maria, "ANALYZE FORMAT=JSON SELECT 1"));
+    assert!(!refused(&maria, "ANALYZE TABLE t"));
+    // Statements that merely mention the words are explained.
+    assert!(!refused(&pg, "SELECT 'explain' AS explain"));
+    assert!(!refused(&pg, "-- explain\nDELETE FROM t"));
+    assert!(!refused(
+        &pg,
+        "WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x"
+    ));
+}
+
+/// A server error position in the EXPLAIN text maps back to the statement
+/// the user gave: the prefix and its newline come off, trimmed leading
+/// whitespace is added back, and a position inside the prefix is dropped.
+#[test]
+fn error_positions_map_to_the_statement() -> TestResult {
+    let pg = server(Engine::Postgres, "18.1");
+    let plain = ExplainOptions::default();
+    let statement = "\n  SELECT * FORM t";
+    let sql = explain_sql(&pg, statement, &plain)?;
+    assert_eq!(sql, "EXPLAIN (FORMAT JSON)\nSELECT * FORM t");
+    let prefix = "EXPLAIN (FORMAT JSON)\n".chars().count();
+    assert_eq!(prefix, 22);
+    let leading = 3;
+    // `FORM` is character 10 of `SELECT * FORM t`, 32 of the EXPLAIN text
+    // and 13 of what the user wrote.
+    assert_eq!(sql.rfind("FORM"), Some(31));
+    assert_eq!(statement_position(Some(32), prefix, leading), Some(13));
+    assert_eq!(statement.get(12..16), Some("FORM"));
+    // The first character of the statement.
+    assert_eq!(statement_position(Some(23), prefix, 0), Some(1));
+    // Inside the prefix, at its newline, or no position at all.
+    assert_eq!(statement_position(Some(1), prefix, leading), None);
+    assert_eq!(statement_position(Some(22), prefix, leading), None);
+    assert_eq!(statement_position(None, prefix, leading), None);
+    // The splitter's trimmed whitespace is what is added back.
+    let (_, _, trimmed) = single_span(&pg, statement)?;
+    assert_eq!(trimmed, leading);
+    // A driver error gets the mapped position.
+    let error = CatalogError::Driver {
+        error: varve_driver::DriverError {
+            position: Some(24),
+            ..varve_driver::DriverError::new(varve_driver::ErrorKind::Query, "syntax error")
+        },
+    };
+    match at_statement(error, prefix, 3) {
+        CatalogError::Driver { error } => assert_eq!(error.position, Some(5)),
+        other => panic!("{other:?}"),
+    }
+    // Other errors pass unchanged.
+    assert!(matches!(
+        at_statement(
+            CatalogError::Invalid {
+                message: "x".into()
+            },
+            prefix,
+            0
+        ),
+        CatalogError::Invalid { .. }
+    ));
+    Ok(())
+}
+
 // ANALYZE safety
 
 #[test]
@@ -844,13 +941,99 @@ fn analyze_safety_by_statement_kind() {
         panic!("DELETE is rolled back");
     };
     assert!(warnings.iter().any(|w| w.contains("non-transactional")));
-    // PostgreSQL specials.
+    // PostgreSQL specials. A CTE that changes data makes the statement
+    // that change, with the warning naming the WITH clause.
+    let AnalyzeSafety::RolledBack { warnings } = analyze_safety(
+        &pg,
+        "WITH gone AS (DELETE FROM t RETURNING *) SELECT count(*) FROM gone",
+    ) else {
+        panic!("a DELETE in a WITH is rolled back");
+    };
+    assert!(
+        warnings.iter().any(|w| w.contains("WITH clause")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings.iter().any(|w| w.contains("no WHERE clause")),
+        "{warnings:?}"
+    );
+    let AnalyzeSafety::RolledBack { warnings } = analyze_safety(
+        &pg,
+        "WITH x AS MATERIALIZED (UPDATE t SET a = 1 WHERE id = 2 RETURNING *) SELECT * FROM x",
+    ) else {
+        panic!("an UPDATE in a WITH is rolled back");
+    };
+    assert!(
+        warnings.iter().any(|w| w.contains("WITH clause")),
+        "{warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("no WHERE clause")),
+        "{warnings:?}"
+    );
+    // In parentheses too.
+    let AnalyzeSafety::RolledBack { warnings } = analyze_safety(
+        &pg,
+        "((WITH gone AS (DELETE FROM t WHERE id = 1 RETURNING *) SELECT count(*) FROM gone))",
+    ) else {
+        panic!("a DELETE in a parenthesised WITH is rolled back");
+    };
+    assert!(
+        warnings.iter().any(|w| w.contains("WITH clause")),
+        "{warnings:?}"
+    );
+    // A COPY that runs a statement that changes data stays a COPY, refused
+    // (the splitter gives it that statement's kind).
+    for copy in [
+        "COPY (DELETE FROM t WHERE id = 1 RETURNING *) TO STDOUT",
+        "copy (INSERT INTO t VALUES (1) RETURNING *) TO PROGRAM 'sh'",
+        "/* note */ COPY (UPDATE t SET a = 1 RETURNING *) TO '/tmp/x'",
+        "COPY t FROM STDIN",
+    ] {
+        assert!(
+            matches!(
+                analyze_safety(&pg, copy),
+                AnalyzeSafety::Refused { ref reason } if reason.contains("COPY or LOAD DATA")
+            ),
+            "{copy}"
+        );
+    }
+    // A main statement that changes data after a reading CTE is not one in
+    // the WITH clause.
+    let AnalyzeSafety::RolledBack { warnings } = analyze_safety(
+        &pg,
+        "WITH ids AS (SELECT id FROM s) DELETE FROM t WHERE id IN (SELECT id FROM ids)",
+    ) else {
+        panic!("a DELETE after a WITH is rolled back");
+    };
+    assert!(
+        !warnings.iter().any(|w| w.contains("WITH clause")),
+        "{warnings:?}"
+    );
+    // An EXPLAIN stays refused, also when it runs a statement that changes
+    // data (the splitter gives it that statement's kind).
+    for s in [&pg, &my, &maria] {
+        for explain in [
+            "EXPLAIN ANALYZE DELETE FROM t",
+            "EXPLAIN ANALYZE UPDATE t SET a = 1 WHERE id = 2",
+            "EXPLAIN SELECT 1",
+        ] {
+            assert!(
+                matches!(
+                    analyze_safety(s, explain),
+                    AnalyzeSafety::Refused { reason } if reason.contains("EXPLAIN, SHOW or DESCRIBE")
+                ),
+                "{explain}"
+            );
+        }
+    }
     assert!(matches!(
-        analyze_safety(
-            &pg,
-            "WITH gone AS (DELETE FROM t RETURNING *) SELECT count(*) FROM gone"
-        ),
-        AnalyzeSafety::RolledBack { .. }
+        analyze_safety(&maria, "ANALYZE DELETE FROM t"),
+        AnalyzeSafety::Refused { reason } if reason.contains("EXPLAIN, SHOW or DESCRIBE")
+    ));
+    assert!(matches!(
+        analyze_safety(&maria, "ANALYZE TABLE t"),
+        AnalyzeSafety::Refused { .. }
     ));
     assert!(matches!(
         analyze_safety(&pg, "SELECT nextval('s')"),

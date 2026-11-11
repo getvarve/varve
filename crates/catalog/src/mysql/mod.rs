@@ -38,7 +38,7 @@ mod schema;
 pub mod session;
 mod text;
 mod types;
-mod util;
+pub(crate) mod util;
 
 pub use engines::{MyEngine, engine_loses_rows, engine_warning, engines};
 pub use row_count::{ROW_COUNT_CAP_MS, row_count};
@@ -163,12 +163,15 @@ fn features_for(server: &ServerInfo) -> Vec<String> {
             features.push("descendingIndexes");
         }
     } else {
-        features.extend([
-            "setPersist",
-            "invisibleIndexes",
-            "descendingIndexes",
-            "jsonType",
-        ]);
+        if at_least(server, 5, 7, 8) {
+            features.push("jsonType");
+        }
+        if at_least(server, 8, 0, 0) {
+            features.extend(["setPersist", "invisibleIndexes"]);
+        }
+        if at_least(server, 8, 0, 1) {
+            features.push("descendingIndexes");
+        }
         if at_least(server, 8, 0, 13) {
             features.extend(["functionalIndexes", "expressionDefaults"]);
         }
@@ -692,6 +695,13 @@ mod tests {
         assert!(!caps.features.contains(&"setPersist".to_owned()));
         assert!(!caps.features.contains(&"invisibleIndexes".to_owned()));
         assert!(!caps.features.contains(&"descendingIndexes".to_owned()));
+
+        let mysql57 = MyCatalog::new(&server(Engine::Mysql, 5, 7, 44));
+        let caps = mysql57.capabilities();
+        assert!(caps.features.contains(&"jsonType".to_owned()));
+        for feature in ["setPersist", "invisibleIndexes", "descendingIndexes"] {
+            assert!(!caps.features.contains(&feature.to_owned()), "{feature}");
+        }
     }
 
     #[test]

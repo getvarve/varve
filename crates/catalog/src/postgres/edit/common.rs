@@ -59,6 +59,44 @@ impl QualifiedName {
     }
 }
 
+/// A collation in `COLLATE` and `COLLATION =`: a bare name, resolved
+/// through the session's `search_path` (`"C"`), or a schema-qualified one
+/// (`{"schema": "app", "name": "de_phonebook"}`), which a collation from a
+/// schema outside the `search_path` needs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(
+    untagged,
+    expecting = "expected a collation as a name, or as an object with a name and an optional schema"
+)]
+pub enum CollationName {
+    /// A name resolved through the `search_path`.
+    Bare(String),
+    /// A name with its schema.
+    Qualified(QualifiedName),
+}
+
+impl CollationName {
+    /// The quoted, possibly qualified name.
+    pub(crate) fn sql(&self) -> CatalogResult<String> {
+        match self {
+            Self::Bare(name) => sql::ident(Dialect::Postgres, name),
+            Self::Qualified(name) => name.sql(),
+        }
+    }
+}
+
+impl From<&str> for CollationName {
+    fn from(name: &str) -> Self {
+        Self::Bare(name.to_owned())
+    }
+}
+
+impl From<QualifiedName> for CollationName {
+    fn from(name: QualifiedName) -> Self {
+        Self::Qualified(name)
+    }
+}
+
 /// A role as written in `OWNER TO`, `TO` (policies) and `AUTHORIZATION`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -617,25 +655,36 @@ fn checked(text: &str, what: &str, shape: Shape) -> CatalogResult<String> {
             let [span] = spans.as_slice() else {
                 return Err(invalid(format!("{what} must be exactly one statement")));
             };
-            let allowed = match shape {
-                Shape::Query => span.kind == StatementKind::Select,
-                _ => {
-                    matches!(
-                        span.kind,
-                        StatementKind::Select
-                            | StatementKind::Insert
-                            | StatementKind::Update
-                            | StatementKind::UpdateAll
-                            | StatementKind::Delete
-                            | StatementKind::DeleteAll
-                            | StatementKind::Merge
-                    ) || (span.kind == StatementKind::Other
-                        && tokens.first().is_some_and(|t| {
-                            t.kind == LexKind::Word
-                                && cleaned[t.start..t.end].eq_ignore_ascii_case("notify")
-                        }))
-                }
-            };
+            // The classifier gives a statement that wraps another the kind
+            // of the one it runs (`EXPLAIN ANALYZE DELETE ...`, `COPY
+            // (DELETE ... RETURNING ...) TO ...` are a `DELETE`), so the
+            // leading keyword is checked too.
+            let wrapper = tokens.first().is_some_and(|t| {
+                t.kind == LexKind::Word
+                    && ["explain", "describe", "desc", "analyze", "copy"]
+                        .iter()
+                        .any(|word| cleaned[t.start..t.end].eq_ignore_ascii_case(word))
+            });
+            let allowed = !wrapper
+                && match shape {
+                    Shape::Query => span.kind == StatementKind::Select,
+                    _ => {
+                        matches!(
+                            span.kind,
+                            StatementKind::Select
+                                | StatementKind::Insert
+                                | StatementKind::Update
+                                | StatementKind::UpdateAll
+                                | StatementKind::Delete
+                                | StatementKind::DeleteAll
+                                | StatementKind::Merge
+                        ) || (span.kind == StatementKind::Other
+                            && tokens.first().is_some_and(|t| {
+                                t.kind == LexKind::Word
+                                    && cleaned[t.start..t.end].eq_ignore_ascii_case("notify")
+                            }))
+                    }
+                };
             if !allowed {
                 return Err(invalid(match shape {
                     Shape::Query => format!("{what} must be a SELECT, VALUES, TABLE or WITH query"),
@@ -1192,9 +1241,24 @@ pub(crate) mod tests {
             "SET a = 1",
             "VACUUM",
             "INSERT INTO t VALUES (1); DROP TABLE t",
+            // A statement that wraps another is not that statement.
+            "EXPLAIN ANALYZE DELETE FROM t",
+            "explain (analyze) UPDATE t SET a = 1",
+            "EXPLAIN SELECT 1",
+            "DESCRIBE t",
+            "DESC t",
+            "ANALYZE t",
+            "COPY (DELETE FROM t RETURNING *) TO STDOUT",
+            "COPY (SELECT 1) TO PROGRAM 'sh'",
+            "/* note */ COPY (INSERT INTO t VALUES (1) RETURNING *) TO STDOUT",
         ] {
             assert!(statement(bad, "s").is_err(), "{bad}");
         }
+        assert!(query("COPY (SELECT 1) TO STDOUT", "q").is_err());
+        assert!(query("EXPLAIN SELECT 1", "q").is_err());
+        // A statement that only mentions the words is fine.
+        assert!(statement("SELECT 'copy' AS explain", "s").is_ok());
+        assert!(statement("INSERT INTO copy VALUES (1)", "s").is_ok());
     }
 
     #[test]

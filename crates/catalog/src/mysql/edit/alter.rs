@@ -537,6 +537,11 @@ fn clause(
             (sql, i)
         }
         AlterOp::RenameColumn { old_name, new_name } => {
+            // `RENAME COLUMN` arrived in MySQL 8.0.3 and MariaDB 10.5.2;
+            // older servers rename with `CHANGE COLUMN`.
+            if !(t.mysql_at(8, 0, 3) || (t.is_mariadb() && t.version >= (10, 5, 2))) {
+                return Err(t.lacks("RENAME COLUMN (rename with changeColumn)"));
+            }
             let level = if t.is_mariadb() || t.mysql_at(8, 0, 28) {
                 Level::Instant
             } else {
@@ -1191,7 +1196,8 @@ pub(super) fn alter(t: &Target, c: &AlterTable, plan: &mut Plan) -> CatalogResul
     Ok(())
 }
 
-const KEEP_HISTORY: &str = "SET STATEMENT system_versioning_alter_history='KEEP' FOR ";
+/// Written before an `ALTER TABLE` on a system-versioned table (MariaDB).
+pub(super) const KEEP_HISTORY: &str = "SET STATEMENT system_versioning_alter_history='KEEP' FOR ";
 
 #[cfg(test)]
 mod tests {
@@ -1258,48 +1264,225 @@ mod tests {
         Ok(())
     }
 
+    fn hex(text: &str) -> String {
+        text.bytes().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// The run-time quoting of a text given as a hex literal.
+    fn quoted(text: &str) -> String {
+        let literal = format!("_utf8mb4 X'{}'", hex(text));
+        format!(
+            "IF(@@SESSION.sql_mode LIKE '%NO_BACKSLASH_ESCAPES%', CONCAT('''', REPLACE({literal}, '''', ''''''), ''''), QUOTE({literal}))"
+        )
+    }
+
+    /// The five statements MySQL runs for a statement built at run time
+    /// from `built`, shown as `shown`.
+    fn prepared(built: &str, shown: &str) -> Vec<String> {
+        vec![
+            format!("SET @varve_ddl = {built}"),
+            "PREPARE varve_ddl FROM @varve_ddl".into(),
+            "SET @varve_ddl = NULL".into(),
+            format!("EXECUTE varve_ddl /* {shown} */"),
+            "DEALLOCATE PREPARE varve_ddl".into(),
+        ]
+    }
+
+    /// Where a plan stopped is counted in the statements the user reads,
+    /// and only a plan that prepares a statement needs a clean-up.
+    #[test]
+    fn positions_and_clean_up_follow_the_shown_statements() {
+        let plan = |statements: Vec<String>| crate::EditPlan {
+            statements,
+            transactional: false,
+            destructive: false,
+            warnings: vec![],
+        };
+        let mut statements = vec!["ALTER TABLE `a` ADD COLUMN `x` int".to_string()];
+        statements.extend(prepared("CONCAT(X'00')", "ALTER TABLE `a` COMMENT='b\\c'"));
+        statements.push("DROP TABLE `old`".into());
+        let mixed = plan(statements);
+        assert_eq!(mixed.shown().len(), 3);
+        assert_eq!(mixed.shown_position(0), (0, false));
+        // SET, PREPARE, clear and EXECUTE: the statement has not run.
+        for index in 1..=4 {
+            assert_eq!(mixed.shown_position(index), (1, false), "{index}");
+        }
+        // DEALLOCATE PREPARE: it has.
+        assert_eq!(mixed.shown_position(5), (1, true));
+        assert_eq!(mixed.shown_position(6), (2, false));
+        assert_eq!(mixed.shown_position(7), (3, false));
+        assert_eq!(
+            mixed.cleanup_after_failure(),
+            ["DEALLOCATE PREPARE varve_ddl", "SET @varve_ddl = NULL"]
+        );
+
+        let immediate = plan(vec![
+            "EXECUTE IMMEDIATE CONCAT(X'00') /* ALTER TABLE `a` COMMENT='b\\c' */".into(),
+            "DROP TABLE `old`".into(),
+        ]);
+        assert_eq!(immediate.shown_position(1), (1, false));
+        assert!(immediate.cleanup_after_failure().is_empty());
+        let plain = plan(vec!["DROP TABLE `old`".into()]);
+        assert_eq!(plain.shown_position(0), (0, false));
+        assert!(plain.cleanup_after_failure().is_empty());
+    }
+
+    #[test]
+    fn a_column_with_a_backslash_in_its_comment_or_members_can_still_be_changed()
+    -> CatalogResult<()> {
+        // Widening the type restates the whole column, its comment and its
+        // ENUM members included.
+        let ops = r#"{"op": "modifyColumn", "previous": {"name": "p", "dataType": {"name": "varchar", "length": 10}, "comment": "path C:\\tmp"},
+                "column": {"name": "p", "dataType": {"name": "varchar", "length": 20}, "comment": "path C:\\tmp"}},
+               {"op": "modifyColumn", "previous": {"name": "e", "dataType": {"name": "enum", "values": ["a\\b", "it's"]}},
+                "column": {"name": "e", "dataType": {"name": "enum", "values": ["a\\b", "it's", "c"]}}}"#;
+        let json = alter(ops, "");
+        // The SQL around the texts is hex, each text is quoted for the
+        // session's mode when the statement runs.
+        let built = |head: &str| {
+            let pieces = [
+                format!(
+                    "_utf8mb4 X'{}'",
+                    hex(&format!(
+                        "{head}ALTER TABLE `d`.`t` MODIFY COLUMN `p` VARCHAR(20) NULL COMMENT "
+                    ))
+                ),
+                quoted("path C:\\tmp"),
+                format!("_utf8mb4 X'{}'", hex(", MODIFY COLUMN `e` ENUM(")),
+                quoted("a\\b"),
+                format!("_utf8mb4 X'{}'", hex(",'it''s','c') NULL")),
+            ];
+            format!("CONCAT({})", pieces.join(", "))
+        };
+        let shown = "ALTER TABLE `d`.`t` MODIFY COLUMN `p` VARCHAR(20) NULL COMMENT 'path C:\\tmp', MODIFY COLUMN `e` ENUM('a\\b','it''s','c') NULL";
+        // MySQL has no EXECUTE IMMEDIATE: the statement is prepared from a
+        // variable. Both have a fixed name, so a later one replaces what a
+        // failed one left behind.
+        let plan = plan_json(&my80(), &json)?;
+        assert_eq!(plan.statements, prepared(&built(""), shown));
+        assert_eq!(plan.shown(), [shown]);
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("prepared at run time")),
+            "{:?}",
+            plan.warnings
+        );
+        // MariaDB runs it as one statement that leaves nothing behind.
+        let plan = plan_json(&ma106(), &json)?;
+        assert_eq!(
+            plan.statements,
+            [format!("EXECUTE IMMEDIATE {} /* {shown} */", built(""))]
+        );
+        assert_eq!(plan.shown(), [shown]);
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("prepared at run time")),
+            "{:?}",
+            plan.warnings
+        );
+        // MariaDB before EXECUTE IMMEDIATE (10.2.3) prepares like MySQL.
+        assert_eq!(
+            plan_json(&mariadb(10, 2, 2), &json)?.statements,
+            prepared(&built(""), shown)
+        );
+        assert_eq!(plan_json(&mariadb(10, 2, 3), &json)?.statements.len(), 1);
+        // On a system-versioned table the history setting is part of the
+        // statement built at run time.
+        let keep = "SET STATEMENT system_versioning_alter_history='KEEP' FOR ";
+        let versioned = plan_json(&ma106(), &alter(ops, r#", "systemVersioned": true"#))?;
+        assert_eq!(
+            versioned.statements,
+            [format!(
+                "EXECUTE IMMEDIATE {} /* {keep}{shown} */",
+                built(keep)
+            )]
+        );
+        assert_eq!(versioned.shown(), [format!("{keep}{shown}")]);
+        for plan in [&plan, &versioned] {
+            assert!(plan.statements.iter().all(|s| !s.contains('\0')));
+        }
+        // Without a backslash nothing changes.
+        let plain = alter(
+            r#"{"op": "modifyColumn", "previous": {"name": "p", "dataType": {"name": "varchar", "length": 10}, "comment": "x"},
+                "column": {"name": "p", "dataType": {"name": "varchar", "length": 20}, "comment": "x"}}"#,
+            "",
+        );
+        let plain = plan_json(&my80(), &plain)?;
+        assert_eq!(
+            sql(&plain),
+            "ALTER TABLE `d`.`t` MODIFY COLUMN `p` VARCHAR(20) NULL COMMENT 'x'"
+        );
+        assert_eq!(plain.shown(), plain.statements);
+        // Index comments, through CREATE INDEX.
+        let index = r#"{"change": "createIndex", "database": "d", "table": "t",
+            "index": {"name": "ix", "kind": "index", "parts": [{"kind": "column", "name": "a"}], "comment": "a\\b"}}"#;
+        let plan = plan_json(&my80(), index)?;
+        assert_eq!(
+            plan.shown(),
+            ["CREATE INDEX `ix` ON `d`.`t` (`a`) COMMENT 'a\\b'"]
+        );
+        // Statements MySQL cannot prepare still refuse the backslash.
+        let routine = r#"{"change": "createRoutine", "database": "d", "name": "p", "routine": "procedure",
+            "parameters": [{"mode": "in", "name": "a", "dataType": {"name": "enum", "values": ["a\\b"]}}],
+            "body": "BEGIN END"}"#;
+        assert!(is_invalid(&plan_json(&my80(), routine)));
+        Ok(())
+    }
+
     #[test]
     fn a_comment_with_a_backslash_is_set_at_run_time_for_the_sql_mode() -> CatalogResult<()> {
         let json = alter(
             r#"{"op": "setOptions", "options": {"comment": "C:\\data"}}, {"op": "rename", "name": "u"}"#,
             "",
         );
+        // The comment travels as hex (C:\data), the statement names the renamed table.
+        let built = format!(
+            "CONCAT(_utf8mb4 X'{}', {})",
+            hex("ALTER TABLE `d`.`u` COMMENT="),
+            quoted("C:\\data")
+        );
+        assert!(built.contains("X'433a5c64617461'"));
+        let shown = "ALTER TABLE `d`.`u` COMMENT='C:\\data'";
         let plan = plan_json(&my80(), &json)?;
         assert_eq!(plan.statements[0], "ALTER TABLE `d`.`t` RENAME TO `d`.`u`");
-        let name = plan.statements[1]
-            .strip_prefix("SET @")
-            .and_then(|rest| rest.split(' ').next())
-            .ok_or("no variable")
-            .map_err(|e| crate::model::CatalogError::Invalid { message: e.into() })?
-            .to_owned();
-        // A random suffix keeps the names apart from the user's own.
-        assert!(
-            name.starts_with("varve_ddl_") && name.len() == "varve_ddl_".len() + 8,
-            "{name}"
-        );
-        assert!(plan.statements[1].contains(" = CONCAT(_utf8mb4 X'"));
-        // The comment travels as hex (C:\data), the prefix names the renamed table.
-        assert!(plan.statements[1].contains("X'433a5c64617461'"));
-        assert!(plan.statements[1].contains(&format!(
-            "X'{}'",
-            "ALTER TABLE `d`.`u` COMMENT="
-                .bytes()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>()
-        )));
-        // The variable is cleared before EXECUTE can fail; EXECUTE shows the ALTER readably.
+        assert_eq!(plan.statements[1..], prepared(&built, shown));
+        // What the user reads: the rename and the comment, one line each.
         assert_eq!(
-            &plan.statements[2..],
+            plan.shown(),
+            ["ALTER TABLE `d`.`t` RENAME TO `d`.`u`", shown]
+        );
+        let plan = plan_json(&ma106(), &json)?;
+        assert_eq!(
+            plan.statements[1..],
+            [format!("EXECUTE IMMEDIATE {built} /* {shown} */")]
+        );
+        assert_eq!(
+            plan.shown(),
+            ["ALTER TABLE `d`.`t` RENAME TO `d`.`u`", shown]
+        );
+        // Two statements built at run time in one plan use the same names:
+        // the second replaces what the first left when it failed.
+        let both = plan_json(
+            &my80(),
+            &alter(
+                r#"{"op": "setOptions", "options": {"comment": "C:\\data"}},
+                   {"op": "modifyColumn", "previous": {"name": "p", "dataType": {"name": "int"}},
+                    "column": {"name": "p", "dataType": {"name": "int"}, "comment": "a\\b"}}"#,
+                "",
+            ),
+        )?;
+        assert_eq!(both.statements.len(), 10, "{:?}", both.statements);
+        assert_eq!(both.statements[1], both.statements[6]);
+        assert_eq!(
+            both.shown(),
             [
-                format!("PREPARE {name} FROM @{name}"),
-                format!("SET @{name} = NULL"),
-                format!("EXECUTE {name} /* ALTER TABLE `d`.`u` COMMENT='C:\\data' */"),
-                format!("DEALLOCATE PREPARE {name}"),
+                "ALTER TABLE `d`.`t` MODIFY COLUMN `p` INT NULL COMMENT 'a\\b'",
+                "ALTER TABLE `d`.`t` COMMENT='C:\\data'"
             ]
         );
-        // A second plan gets other names.
-        let again = plan_json(&my80(), &json)?;
-        assert_ne!(again.statements[2], plan.statements[2]);
         // A comment that would end the readable comment early is spaced out there (the stored text is the hex).
         let tricky = plan_json(
             &my80(),
@@ -1312,6 +1495,10 @@ mod tests {
             tricky.statements[3].ends_with("/* ALTER TABLE `d`.`t` COMMENT='a\\b * / it''s; x' */"),
             "{}",
             tricky.statements[3]
+        );
+        assert_eq!(
+            tricky.shown(),
+            ["ALTER TABLE `d`.`t` COMMENT='a\\b * / it''s; x'"]
         );
         let plain = plan_json(
             &my80(),
@@ -1330,6 +1517,46 @@ mod tests {
                 )
             )
             .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rename_column_and_index_visibility_need_a_server_that_has_them() -> CatalogResult<()> {
+        let rename = alter(
+            r#"{"op": "renameColumn", "oldName": "a", "newName": "b"}"#,
+            "",
+        );
+        for old in [
+            mysql(5, 7, 44),
+            mysql(8, 0, 2),
+            mariadb(10, 4, 34),
+            mariadb(10, 5, 1),
+        ] {
+            assert!(is_unsupported(&plan_json(&old, &rename)), "{}", old.version);
+        }
+        for new in [mysql(8, 0, 3), mariadb(10, 5, 2)] {
+            assert_eq!(
+                sql(&plan_json(&new, &rename)?),
+                "ALTER TABLE `d`.`t` RENAME COLUMN `a` TO `b`"
+            );
+        }
+        let visibility = alter(
+            r#"{"op": "setIndexVisibility", "name": "ix", "invisible": true}"#,
+            "",
+        );
+        assert!(is_unsupported(&plan_json(&mysql(5, 7, 44), &visibility)));
+        assert_eq!(
+            sql(&plan_json(&mysql(8, 0, 0), &visibility)?),
+            "ALTER TABLE `d`.`t` ALTER INDEX `ix` INVISIBLE"
+        );
+        let create = r#"{"change": "createIndex", "database": "d", "table": "t",
+            "index": {"name": "ix", "kind": "index", "parts": [{"kind": "column", "name": "a"}],
+                      "invisible": true}}"#;
+        assert!(is_unsupported(&plan_json(&mysql(5, 7, 44), create)));
+        assert_eq!(
+            sql(&plan_json(&mysql(8, 0, 0), create)?),
+            "CREATE INDEX `ix` ON `d`.`t` (`a`) INVISIBLE"
         );
         Ok(())
     }

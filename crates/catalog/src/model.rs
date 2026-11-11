@@ -222,6 +222,41 @@ pub struct EditPlan {
     pub warnings: Vec<String>,
 }
 
+impl EditPlan {
+    /// The statements as the user reads them, for the confirmation, the
+    /// preview and the labels of what a plan does. A MySQL or MariaDB
+    /// statement that is built at run time (a comment or `ENUM` member with
+    /// a backslash) is a `SET`, `PREPARE` and `EXECUTE` sequence in
+    /// [`Self::statements`]; here it is the one `ALTER` or `CREATE` it
+    /// runs. Every other statement is the same in both. Run
+    /// [`Self::statements`], never these.
+    #[must_use]
+    pub fn shown(&self) -> Vec<String> {
+        crate::mysql::edit::shown_statements(&self.statements)
+    }
+
+    /// Where statement `index` of [`Self::statements`] sits in
+    /// [`Self::shown`]: the position of the shown statement it belongs to,
+    /// and whether that shown statement has already run when `index` runs
+    /// (the clean-up step after a statement built at run time). For
+    /// telling the user where a plan stopped, counted in the statements
+    /// they read.
+    #[must_use]
+    pub fn shown_position(&self, index: usize) -> (usize, bool) {
+        crate::mysql::edit::shown_position(&self.statements, index)
+    }
+
+    /// Statements to run after a statement of this plan failed, ignoring
+    /// their errors: they remove the prepared statement and the user
+    /// variable a failed MySQL statement built at run time leaves in the
+    /// session. Empty for every other plan (also on MariaDB with
+    /// `EXECUTE IMMEDIATE`, which leaves nothing).
+    #[must_use]
+    pub fn cleanup_after_failure(&self) -> Vec<String> {
+        crate::mysql::edit::cleanup_statements(&self.statements)
+    }
+}
+
 /// A catalog failure.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

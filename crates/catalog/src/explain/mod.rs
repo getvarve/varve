@@ -35,7 +35,9 @@ mod tests;
 
 use serde::{Deserialize, Serialize};
 use varve_core::Engine;
-use varve_driver::{Dialect, ExecOutput, ServerInfo, Session, StatementKind, StatementResult};
+use varve_driver::{
+    Dialect, ExecOutput, LexKind, ServerInfo, Session, StatementKind, StatementResult,
+};
 
 use crate::model::{CatalogError, CatalogResult};
 use crate::rows;
@@ -563,6 +565,15 @@ fn single_statement(
     server: &ServerInfo,
     statement: &str,
 ) -> CatalogResult<(String, StatementKind)> {
+    single_span(server, statement).map(|(text, kind, _)| (text, kind))
+}
+
+/// [`single_statement`], with the number of characters before the
+/// statement in `statement` (the whitespace the splitter trimmed).
+fn single_span(
+    server: &ServerInfo,
+    statement: &str,
+) -> CatalogResult<(String, StatementKind, usize)> {
     let dialect = dialect(server)?;
     if dialect == Dialect::Mysql && has_executable_comment(statement) {
         return Err(CatalogError::Invalid {
@@ -580,7 +591,13 @@ fn single_statement(
         }
     })?;
     match spans.as_slice() {
-        [span] => Ok((span.text.to_owned(), span.kind)),
+        [span] => Ok((
+            span.text.to_owned(),
+            span.kind,
+            statement
+                .get(..span.offset)
+                .map_or(0, |leading| leading.chars().count()),
+        )),
         [] => Err(CatalogError::Invalid {
             message: "there is no statement to explain".into(),
         }),
@@ -591,6 +608,43 @@ fn single_statement(
             ),
         }),
     }
+}
+
+/// True when `text` (one statement, of kind `kind` as the splitter
+/// classified it) is itself an `EXPLAIN`, `DESCRIBE`, `DESC` or `SHOW`, or
+/// MariaDB's `ANALYZE statement` (its `EXPLAIN ANALYZE`; `ANALYZE TABLE` is
+/// maintenance). This goes by the leading keyword: the classifier gives an
+/// `EXPLAIN ANALYZE` of a statement that changes data that statement's
+/// kind (`EXPLAIN ANALYZE DELETE ...` is a `DELETE`), since it runs it.
+pub(super) fn is_explain(dialect: Dialect, text: &str, kind: StatementKind) -> bool {
+    if kind == StatementKind::Explain {
+        return true;
+    }
+    match leading_word(dialect, text).as_deref() {
+        Some("EXPLAIN" | "DESCRIBE" | "DESC" | "SHOW") => true,
+        Some("ANALYZE") => dialect == Dialect::Mysql && kind != StatementKind::Maintenance,
+        _ => false,
+    }
+}
+
+/// True when `text` (one statement) is a `COPY`. This goes by the leading
+/// keyword for the same reason as [`is_explain`]: the classifier gives
+/// `COPY (DELETE ... RETURNING ...) TO ...` the kind of the statement in
+/// its parentheses, since it runs it.
+pub(super) fn is_copy(dialect: Dialect, text: &str) -> bool {
+    leading_word(dialect, text).as_deref() == Some("COPY")
+}
+
+/// The first token of `text` in upper case when it is a word. Comments
+/// before it are skipped; how backslashes in strings are read cannot
+/// change it.
+fn leading_word(dialect: Dialect, text: &str) -> Option<String> {
+    varve_driver::lex(text, dialect, true)
+        .into_iter()
+        .find(|lexeme| lexeme.kind != LexKind::Comment)
+        .filter(|lexeme| lexeme.kind == LexKind::Word)
+        .and_then(|lexeme| text.get(lexeme.start..lexeme.end))
+        .map(str::to_ascii_uppercase)
 }
 
 /// True when MySQL text contains `/*!` or `/*M!` anywhere, string literals
@@ -627,7 +681,7 @@ pub fn explain_sql(
 ) -> CatalogResult<String> {
     let format = resolve_format(server, options)?;
     let (text, kind) = single_statement(server, statement)?;
-    if kind == StatementKind::Explain {
+    if is_explain(dialect(server)?, &text, kind) {
         return Err(CatalogError::Invalid {
             message: "the statement already is an EXPLAIN, SHOW or DESCRIBE".into(),
         });
@@ -915,24 +969,67 @@ pub async fn explain_with_cancel(
     options: &ExplainOptions,
     cancel: &ExplainCancel,
 ) -> CatalogResult<Plan> {
+    let sql = explain_sql(server, statement, options)?;
+    let (text, _, leading) = single_span(server, statement)?;
+    // `sql` is Varve's prefix, a newline and `text`.
+    let prefix = sql.chars().count().saturating_sub(text.chars().count());
+    run_explain(session, server, statement, options, cancel, &sql)
+        .await
+        .map_err(|error| at_statement(error, prefix, leading))
+}
+
+/// Moves the position of a server error from the `EXPLAIN` text Varve
+/// sent to the statement the user gave: every statement whose error can
+/// carry a position is that text itself, or starts with it (MySQL's
+/// `... ; ROLLBACK`); PostgreSQL's `DO` block runs it through `EXECUTE`,
+/// whose errors carry no position in the outer text.
+fn at_statement(error: CatalogError, prefix: usize, leading: usize) -> CatalogError {
+    match error {
+        CatalogError::Driver { mut error } => {
+            error.position = statement_position(error.position, prefix, leading);
+            CatalogError::Driver { error }
+        }
+        other => other,
+    }
+}
+
+/// A 1-based character position in the `EXPLAIN` text as one in the
+/// user's statement: `prefix` characters (Varve's `EXPLAIN ...` and the
+/// newline after it) come off, the `leading` characters the splitter
+/// trimmed before the statement are added back. `None` when the position
+/// is inside the prefix, which is not the user's text.
+fn statement_position(position: Option<u32>, prefix: usize, leading: usize) -> Option<u32> {
+    let position = usize::try_from(position?).ok()?;
+    let within = position.checked_sub(prefix).filter(|within| *within >= 1)?;
+    u32::try_from(within.checked_add(leading)?).ok()
+}
+
+/// [`explain_with_cancel`] once `sql`, the `EXPLAIN` statement, is built.
+async fn run_explain(
+    session: &dyn Session,
+    server: &ServerInfo,
+    statement: &str,
+    options: &ExplainOptions,
+    cancel: &ExplainCancel,
+    sql: &str,
+) -> CatalogResult<Plan> {
     // `work` runs the steps; `session` itself only the rollbacks.
     let guarded = cancel::Guarded::new(session, cancel);
     let work: &dyn Session = &guarded;
-    let sql = explain_sql(server, statement, options)?;
     let format = plan_format(server, options)?;
     if !options.analyze {
-        let output = rows::run(work, &sql).await?;
+        let output = rows::run(work, sql).await?;
         return finish(format, &output, Vec::new());
     }
     if !options.confirmed {
-        return match probe::server_verdict(work, session, server, statement, Some(&sql)).await {
+        return match probe::server_verdict(work, session, server, statement, Some(sql)).await {
             probe::Verdict::Refused(reason) => Err(CatalogError::Invalid { message: reason }),
             probe::Verdict::Confirm(warnings) => Err(probe::needs_confirmation(&warnings)),
             probe::Verdict::Safe(Some(output)) => finish(format, &output, Vec::new()),
             probe::Verdict::RunFailed(error) => Err(error),
             // A MySQL transaction: the run happens in a savepoint.
             probe::Verdict::Safe(None) => {
-                run_in_scope(work, session, server, &sql, format, Vec::new()).await
+                run_in_scope(work, session, server, sql, format, Vec::new()).await
             }
         };
     }
@@ -945,7 +1042,7 @@ pub async fn explain_with_cancel(
             return Err(CatalogError::Invalid { message: reason });
         }
     };
-    run_in_scope(work, session, server, &sql, format, warnings).await
+    run_in_scope(work, session, server, sql, format, warnings).await
 }
 
 /// Runs an `EXPLAIN ANALYZE` statement in a transaction (or, inside the

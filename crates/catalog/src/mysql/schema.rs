@@ -4,7 +4,7 @@
 //! Every list is one catalog query; a table's details are one round trip
 //! with one statement per part.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use varve_driver::{ServerInfo, Session};
 
@@ -316,6 +316,7 @@ pub(crate) async fn describe_table(
     let mut table = parse_table(&tables[0].single(&what)?, database)?;
     let mut system_time = HashMap::new();
     let mut index_ddl;
+    let table_checks;
     {
         let create = range(create)?;
         let mode = create[0]
@@ -334,6 +335,7 @@ pub(crate) async fn describe_table(
             .flatten()
             .unwrap_or_default();
         index_ddl = index_ddl_of(&ddl, lex, server);
+        table_checks = table_check_names(&ddl, lex);
         let periods = if maria {
             periods_of(&ddl, lex)
         } else {
@@ -356,14 +358,15 @@ pub(crate) async fn describe_table(
             }
         }
     }
-    table.columns = parse_columns(range(columns)?, server, &system_time)?;
+    table.columns = parse_columns(range(columns)?, server, &system_time, Some(&table_checks))?;
     table.indexes = parse_indexes(&range(indexes)?[0])?;
     for index in &mut table.indexes {
         let ddl = index_ddl.remove(&index.name).unwrap_or_default();
         index.parser = ddl.parser;
         index.method_explicit = ddl.explicit_method;
     }
-    table.constraints = parse_constraints(range(constraints)?, server, database)?;
+    table.constraints =
+        parse_constraints(range(constraints)?, server, database, Some(&table_checks))?;
     mark_period_checks(&mut table.constraints, &table.periods);
     table.partitioning = parse_partitioning(&range(partitions)?[0])?;
     table.triggers = parse_triggers(&range(triggers)?[0], database)?
@@ -488,13 +491,73 @@ fn columns_statements(
              FROM information_schema.GEOMETRY_COLUMNS \
              WHERE F_TABLE_SCHEMA = {db} AND F_TABLE_NAME = {tb}"
         ));
-        out.push(format!(
-            "SELECT CONSTRAINT_NAME AS `name`, CHECK_CLAUSE AS `check_clause` \
-             FROM information_schema.CHECK_CONSTRAINTS \
-             WHERE CONSTRAINT_SCHEMA = {db} AND TABLE_NAME = {tb} AND LEVEL = 'Column'"
-        ));
+        out.push(maria_checks_sql(&db, &tb, ""));
     }
     Ok(out)
+}
+
+/// MariaDB's `CHECK_CONSTRAINTS` rows of a table. `LEVEL` says whether a
+/// check was declared in a column definition or as a table constraint, but
+/// older MariaDB versions do not have that column. Naming it would fail the
+/// whole batch there, so the statement reads every column (`*`) and
+/// [`maria_check_level`] takes the level from `LEVEL` when it came back,
+/// and from `SHOW CREATE TABLE` otherwise.
+///
+/// `db` and `tb` are quoted literals, `filter` an extra condition.
+fn maria_checks_sql(db: &str, tb: &str, filter: &str) -> String {
+    format!(
+        "SELECT *, CONSTRAINT_NAME AS `name`, CHECK_CLAUSE AS `check_clause` \
+         FROM information_schema.CHECK_CONSTRAINTS \
+         WHERE CONSTRAINT_SCHEMA = {db} AND TABLE_NAME = {tb}{filter}"
+    )
+}
+
+/// True when a [`maria_checks_sql`] result has no `LEVEL` column, so the
+/// levels must come from the table's DDL (see [`table_check_names`]).
+fn lacks_check_level(rows: &Rows) -> bool {
+    !rows.is_empty() && !rows.columns().iter().any(|c| c == "LEVEL")
+}
+
+/// The level of a MariaDB check row: `LEVEL` when the server reports it,
+/// otherwise table level exactly when `SHOW CREATE TABLE` declares a
+/// `CONSTRAINT name CHECK` of that name (`table_checks`); MariaDB writes a
+/// column-level check inside its column definition instead.
+fn maria_check_level(
+    row: &crate::rows::Row<'_>,
+    name: &str,
+    table_checks: Option<&HashSet<String>>,
+) -> CatalogResult<MyCheckLevel> {
+    if row.value("LEVEL").is_ok() {
+        return Ok(match text(row, "LEVEL")? {
+            Some(level) if level.eq_ignore_ascii_case("Column") => MyCheckLevel::Column,
+            _ => MyCheckLevel::Table,
+        });
+    }
+    let table_checks = table_checks.ok_or_else(|| CatalogError::Unexpected {
+        message: "the check levels need the table's DDL on this MariaDB version".into(),
+    })?;
+    Ok(if table_checks.contains(name) {
+        MyCheckLevel::Table
+    } else {
+        MyCheckLevel::Column
+    })
+}
+
+/// The names of the table-level checks of a `CREATE TABLE` statement
+/// (`CONSTRAINT name CHECK (...)`).
+fn table_check_names(ddl: &str, lex: Lex) -> HashSet<String> {
+    text::table_parts(ddl, lex)
+        .map(|parts| {
+            parts
+                .items
+                .iter()
+                .filter_map(|item| match text::table_item(item, lex) {
+                    TableItem::Check(name) => Some(name),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// True for numeric and bit literals as MariaDB writes defaults.
@@ -527,10 +590,15 @@ fn on_update_of(extra: &str) -> Option<String> {
 }
 
 /// Reads the results of [`columns_statements`].
+///
+/// `table_checks` are the table-level check names from the DDL, needed on
+/// MariaDB versions whose `CHECK_CONSTRAINTS` lacks `LEVEL` (see
+/// [`maria_check_level`]).
 fn parse_columns(
     sets: &[Rows],
     server: &ServerInfo,
     system_time: &HashMap<String, MyGeneratedKind>,
+    table_checks: Option<&HashSet<String>>,
 ) -> CatalogResult<Vec<MyColumn>> {
     let maria = is_mariadb(server);
     let mut srids: HashMap<String, u32> = HashMap::new();
@@ -544,6 +612,7 @@ fn parse_columns(
         for row in sets.get(2).into_iter().flat_map(Rows::iter) {
             if let (Some(name), Some(clause)) =
                 (text(&row, "name")?, text_nonempty(&row, "check_clause")?)
+                && maria_check_level(&row, &name, table_checks)? == MyCheckLevel::Column
             {
                 checks.insert(name, clause);
             }
@@ -667,13 +736,14 @@ fn parse_columns(
         .collect()
 }
 
-/// The periods of a table, read from its `CREATE TABLE`:
-/// `(name, start, end)`, `SYSTEM_TIME` included.
-async fn table_periods(
+/// The periods (`(name, start, end)`, `SYSTEM_TIME` included) and the
+/// table-level check names of a MariaDB table, read from its
+/// `SHOW CREATE TABLE`.
+async fn table_ddl_parts(
     session: &dyn Session,
     database: &str,
     table: &str,
-) -> CatalogResult<Vec<(String, String, String)>> {
+) -> CatalogResult<(Vec<(String, String, String)>, HashSet<String>)> {
     let sql = format!(
         "SELECT @@SESSION.sql_mode AS `mode`;\nSHOW CREATE TABLE {}",
         super::util::qname(database, table)?
@@ -694,7 +764,8 @@ async fn table_periods(
         .transpose()?
         .flatten()
         .unwrap_or_default();
-    Ok(periods_of(&ddl, Lex::for_sql_mode(&mode, true)))
+    let lex = Lex::for_sql_mode(&mode, true);
+    Ok((periods_of(&ddl, lex), table_check_names(&ddl, lex)))
 }
 
 /// The row start / row end columns of a MariaDB system-versioned table,
@@ -705,7 +776,7 @@ async fn system_time_columns(
     table: &str,
 ) -> CatalogResult<HashMap<String, MyGeneratedKind>> {
     let mut map = HashMap::new();
-    for (period, start, end) in table_periods(session, database, table).await? {
+    for (period, start, end) in table_ddl_parts(session, database, table).await?.0 {
         if period.eq_ignore_ascii_case("SYSTEM_TIME") {
             map.insert(start, MyGeneratedKind::RowStart);
             map.insert(end, MyGeneratedKind::RowEnd);
@@ -725,8 +796,15 @@ pub(crate) async fn load_columns(
     let sql = columns_statements(server, database, table, column)?.join(";\n");
     let rows = query_all(session, &sql, &format!("table {database}.{table}")).await?;
     let empty = HashMap::new();
-    let mut columns = parse_columns(&rows, server, &empty)?;
-    let needs_system_time = is_mariadb(server)
+    let maria = is_mariadb(server);
+    // Older MariaDB versions do not say which checks are column level.
+    let table_checks = if maria && rows.get(2).is_some_and(lacks_check_level) {
+        Some(table_ddl_parts(session, database, table).await?.1)
+    } else {
+        None
+    };
+    let mut columns = parse_columns(&rows, server, &empty, table_checks.as_ref())?;
+    let needs_system_time = maria
         && columns.iter().any(|c| {
             c.generated.as_ref().is_some_and(|g| {
                 g.expression.is_none()
@@ -738,7 +816,7 @@ pub(crate) async fn load_columns(
         });
     if needs_system_time {
         let map = system_time_columns(session, database, table).await?;
-        columns = parse_columns(&rows, server, &map)?;
+        columns = parse_columns(&rows, server, &map, table_checks.as_ref())?;
     }
     Ok(columns)
 }
@@ -798,7 +876,13 @@ fn indexes_sql(
     index: Option<&str>,
 ) -> CatalogResult<String> {
     let maria = is_mariadb(server);
-    let visible = if !maria { "IS_VISIBLE" } else { "'YES'" };
+    // STATISTICS.IS_VISIBLE exists from MySQL 8.0.0; older servers and
+    // MariaDB have no invisible indexes, so every index is visible there.
+    let visible = if !maria && at_least(server, 8, 0, 0) {
+        "IS_VISIBLE"
+    } else {
+        "'YES'"
+    };
     let expression = if !maria && at_least(server, 8, 0, 13) {
         "EXPRESSION"
     } else {
@@ -1003,17 +1087,13 @@ fn constraints_statements(
         ),
     ];
     if maria {
-        out.push(format!(
-            "SELECT CONSTRAINT_NAME AS `name`, CHECK_CLAUSE AS `check_clause`, LEVEL AS `check_level` \
-             FROM information_schema.CHECK_CONSTRAINTS \
-             WHERE CONSTRAINT_SCHEMA = {db} AND TABLE_NAME = {tb}{filter}"
-        ));
+        out.push(maria_checks_sql(&db, &tb, &filter));
     } else if at_least(server, 8, 0, 16) {
         // MySQL's CHECK_CONSTRAINTS has no table column; check names are
         // unique per database, and TABLE_CONSTRAINTS says which are this
         // table's.
         out.push(format!(
-            "SELECT CONSTRAINT_NAME AS `name`, CHECK_CLAUSE AS `check_clause`, NULL AS `check_level` \
+            "SELECT CONSTRAINT_NAME AS `name`, CHECK_CLAUSE AS `check_clause` \
              FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = {db}{filter}"
         ));
     }
@@ -1026,25 +1106,35 @@ type KeyColumn = (String, Option<String>, Option<String>, Option<String>);
 /// A foreign key's `ON UPDATE`, `ON DELETE` and match option.
 type ForeignKeyRules = (Option<String>, Option<String>, Option<String>);
 
-/// Reads the results of [`constraints_statements`].
+/// Reads the results of [`constraints_statements`]. `table_checks` as for
+/// [`parse_columns`].
 fn parse_constraints(
     sets: &[Rows],
     server: &ServerInfo,
     database: &str,
+    table_checks: Option<&HashSet<String>>,
 ) -> CatalogResult<Vec<MyConstraint>> {
     let maria = is_mariadb(server);
     let missing = || CatalogError::Unexpected {
         message: "the constraint query returned nothing".into(),
     };
-    let mut columns: HashMap<String, Vec<KeyColumn>> = HashMap::new();
+    // Key columns by constraint name and whether the row is a foreign
+    // key's (it references a table): index names and foreign key names
+    // are separate namespaces, so `UNIQUE KEY fk1` and `CONSTRAINT fk1
+    // FOREIGN KEY` can sit on one table.
+    let mut columns: HashMap<(String, bool), Vec<KeyColumn>> = HashMap::new();
     for row in sets.get(1).ok_or_else(missing)?.iter() {
         if let Some(column) = text_nonempty(&row, "column_name")? {
-            columns.entry(req(&row, "name")?).or_default().push((
-                column,
-                text_nonempty(&row, "ref_schema")?,
-                text_nonempty(&row, "ref_table")?,
-                text_nonempty(&row, "ref_column")?,
-            ));
+            let ref_table = text_nonempty(&row, "ref_table")?;
+            columns
+                .entry((req(&row, "name")?, ref_table.is_some()))
+                .or_default()
+                .push((
+                    column,
+                    text_nonempty(&row, "ref_schema")?,
+                    ref_table,
+                    text_nonempty(&row, "ref_column")?,
+                ));
         }
     }
     let mut rules: HashMap<String, ForeignKeyRules> = HashMap::new();
@@ -1058,15 +1148,15 @@ fn parse_constraints(
             ),
         );
     }
-    let mut checks: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
+    let mut checks: HashMap<String, (Option<String>, Option<MyCheckLevel>)> = HashMap::new();
     for row in sets.get(3).into_iter().flat_map(Rows::iter) {
-        checks.insert(
-            req(&row, "name")?,
-            (
-                text_nonempty(&row, "check_clause")?,
-                text(&row, "check_level")?,
-            ),
-        );
+        let name = req(&row, "name")?;
+        let level = if maria {
+            Some(maria_check_level(&row, &name, table_checks)?)
+        } else {
+            None
+        };
+        checks.insert(name, (text_nonempty(&row, "check_clause")?, level));
     }
     let mut out: Vec<MyConstraint> = Vec::new();
     for row in sets.first().ok_or_else(missing)?.iter() {
@@ -1085,7 +1175,11 @@ fn parse_constraints(
         let parts = if constraint_type == MyConstraintType::Check {
             Vec::new()
         } else {
-            columns.get(&name).cloned().unwrap_or_default()
+            let foreign = constraint_type == MyConstraintType::ForeignKey;
+            columns
+                .get(&(name.clone(), foreign))
+                .cloned()
+                .unwrap_or_default()
         };
         let references = if constraint_type == MyConstraintType::ForeignKey {
             let (on_update, on_delete, match_option) =
@@ -1105,15 +1199,7 @@ fn parse_constraints(
             None
         };
         let (check_clause, level) = if constraint_type == MyConstraintType::Check {
-            let (clause, level) = checks.get(&name).cloned().unwrap_or_default();
-            let level = level.map(|l| {
-                if l.eq_ignore_ascii_case("Column") {
-                    MyCheckLevel::Column
-                } else {
-                    MyCheckLevel::Table
-                }
-            });
-            (clause, level)
+            checks.get(&name).cloned().unwrap_or_default()
         } else {
             (None, None)
         };
@@ -1150,13 +1236,29 @@ pub(crate) async fn load_constraints(
 ) -> CatalogResult<Vec<MyConstraint>> {
     let sql = constraints_statements(server, database, table, name)?.join(";\n");
     let rows = query_all(session, &sql, &format!("table {database}.{table}")).await?;
-    let mut constraints = parse_constraints(&rows, server, database)?;
-    let table_checks = constraints
+    let maria = is_mariadb(server);
+    // Older MariaDB versions do not say which checks are table level: the
+    // DDL tells, and also gives the periods below.
+    let mut ddl_parts = if maria && rows.get(3).is_some_and(lacks_check_level) {
+        Some(table_ddl_parts(session, database, table).await?)
+    } else {
+        None
+    };
+    let mut constraints = parse_constraints(
+        &rows,
+        server,
+        database,
+        ddl_parts.as_ref().map(|(_, checks)| checks),
+    )?;
+    let has_table_checks = constraints
         .iter()
         .any(|c| c.level == Some(MyCheckLevel::Table));
-    if is_mariadb(server) && table_checks {
-        let periods: Vec<MyPeriod> = table_periods(session, database, table)
-            .await?
+    if maria && has_table_checks {
+        let (periods, _) = match ddl_parts.take() {
+            Some(parts) => parts,
+            None => table_ddl_parts(session, database, table).await?,
+        };
+        let periods: Vec<MyPeriod> = periods
             .into_iter()
             .filter(|(name, _, _)| !name.eq_ignore_ascii_case("SYSTEM_TIME"))
             .map(|(name, start, end)| MyPeriod {
@@ -1511,6 +1613,304 @@ pub(crate) fn trigger_summary(t: &MyTrigger) -> ObjectSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use varve_driver::{ExecOutput, StatementResult, Value};
+
+    fn server(engine: varve_core::Engine, major: u32, minor: u32, patch: u32) -> ServerInfo {
+        ServerInfo {
+            engine,
+            version: format!("{major}.{minor}.{patch}"),
+            major,
+            minor,
+            patch: Some(patch),
+        }
+    }
+
+    /// One result set with text values.
+    fn rows(columns: &[&str], data: &[&[Option<&str>]]) -> CatalogResult<Rows> {
+        let value = |v: &Option<&str>| v.map_or(Value::Null, |s| Value::Text(s.into()));
+        Rows::first(ExecOutput {
+            results: vec![StatementResult::Rows {
+                columns: columns
+                    .iter()
+                    .map(|c| varve_driver::Column {
+                        name: (*c).into(),
+                        type_name: "varchar".into(),
+                    })
+                    .collect(),
+                rows: data.iter().map(|r| r.iter().map(value).collect()).collect(),
+                truncated: false,
+            }],
+            notices: vec![],
+            elapsed_ms: 0,
+        })
+    }
+
+    const TC: &[&str] = &["table_name", "name", "constraint_type", "enforced"];
+    const KCU: &[&str] = &[
+        "name",
+        "column_name",
+        "ref_schema",
+        "ref_table",
+        "ref_column",
+    ];
+    const RC: &[&str] = &["name", "on_update", "on_delete", "match_option"];
+
+    #[test]
+    fn index_visibility_is_only_read_where_the_column_exists() -> CatalogResult<()> {
+        use varve_core::Engine;
+        let sql = |s: &ServerInfo| indexes_sql(s, "d", "t", None);
+        assert!(sql(&server(Engine::Mysql, 8, 0, 0))?.contains("IS_VISIBLE AS `visible`"));
+        for old in [
+            server(Engine::Mysql, 5, 7, 44),
+            server(Engine::Mariadb, 11, 4, 0),
+        ] {
+            let text = sql(&old)?;
+            assert!(!text.contains("IS_VISIBLE"), "{text}");
+            assert!(text.contains("'YES' AS `visible`"), "{text}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mariadb_checks_do_not_name_the_level_column() -> CatalogResult<()> {
+        let maria = server(varve_core::Engine::Mariadb, 10, 4, 0);
+        let statements = [
+            columns_statements(&maria, "d", "t", None)?,
+            constraints_statements(&maria, "d", "t", None)?,
+        ]
+        .concat();
+        assert!(
+            statements.iter().all(|s| !s.contains("LEVEL")),
+            "{statements:?}"
+        );
+        assert!(
+            statements
+                .iter()
+                .any(|s| s.starts_with("SELECT *, CONSTRAINT_NAME AS `name`"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mariadb_check_levels_come_from_the_ddl_without_a_level_column() -> CatalogResult<()> {
+        let maria = server(varve_core::Engine::Mariadb, 10, 4, 0);
+        let ddl = "CREATE TABLE `t` (\n  `a` int(11) DEFAULT NULL CHECK (`a` > 0),\n  \
+                   `doc` longtext DEFAULT NULL CHECK (json_valid(`doc`)),\n  \
+                   CONSTRAINT `t_pos` CHECK (`a` < 100)\n) ENGINE=InnoDB";
+        let table_checks = table_check_names(ddl, Lex::for_sql_mode("", true));
+        assert_eq!(table_checks, HashSet::from(["t_pos".to_owned()]));
+
+        // Without LEVEL (older MariaDB): the DDL decides.
+        let checks_old = rows(
+            &[
+                "CONSTRAINT_SCHEMA",
+                "TABLE_NAME",
+                "CONSTRAINT_NAME",
+                "CHECK_CLAUSE",
+                "name",
+                "check_clause",
+            ],
+            &[
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("a"),
+                    Some("`a` > 0"),
+                    Some("a"),
+                    Some("`a` > 0"),
+                ],
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("doc"),
+                    Some("json_valid(`doc`)"),
+                    Some("doc"),
+                    Some("json_valid(`doc`)"),
+                ],
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("t_pos"),
+                    Some("`a` < 100"),
+                    Some("t_pos"),
+                    Some("`a` < 100"),
+                ],
+            ],
+        )?;
+        assert!(lacks_check_level(&checks_old));
+        // With LEVEL (newer MariaDB): the column decides, the DDL is not needed.
+        let checks_new = rows(
+            &[
+                "CONSTRAINT_SCHEMA",
+                "TABLE_NAME",
+                "CONSTRAINT_NAME",
+                "LEVEL",
+                "CHECK_CLAUSE",
+                "name",
+                "check_clause",
+            ],
+            &[
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("a"),
+                    Some("Column"),
+                    Some("`a` > 0"),
+                    Some("a"),
+                    Some("`a` > 0"),
+                ],
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("doc"),
+                    Some("Column"),
+                    Some("json_valid(`doc`)"),
+                    Some("doc"),
+                    Some("json_valid(`doc`)"),
+                ],
+                &[
+                    Some("d"),
+                    Some("t"),
+                    Some("t_pos"),
+                    Some("Table"),
+                    Some("`a` < 100"),
+                    Some("t_pos"),
+                    Some("`a` < 100"),
+                ],
+            ],
+        )?;
+        assert!(!lacks_check_level(&checks_new));
+
+        let tc = rows(
+            TC,
+            &[
+                &[Some("t"), Some("a"), Some("CHECK"), None],
+                &[Some("t"), Some("doc"), Some("CHECK"), None],
+                &[Some("t"), Some("t_pos"), Some("CHECK"), None],
+            ],
+        )?;
+        let empty = |columns: &[&str]| rows(columns, &[]);
+        for (checks, levels) in [
+            (checks_old.clone(), Some(&table_checks)),
+            (checks_new, None),
+        ] {
+            let sets = vec![tc.clone(), empty(KCU)?, empty(RC)?, checks];
+            let found = parse_constraints(&sets, &maria, "d", levels)?;
+            let level = |name: &str| found.iter().find(|c| c.name == name).and_then(|c| c.level);
+            assert_eq!(level("a"), Some(MyCheckLevel::Column));
+            assert_eq!(level("t_pos"), Some(MyCheckLevel::Table));
+            assert!(found.iter().any(|c| c.name == "doc" && c.json));
+        }
+        // The levels are required when the server does not report them.
+        let sets = vec![tc, empty(KCU)?, empty(RC)?, checks_old];
+        assert!(parse_constraints(&sets, &maria, "d", None).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn mariadb_column_checks_without_a_level_column_skip_table_checks() -> CatalogResult<()> {
+        let maria = server(varve_core::Engine::Mariadb, 10, 4, 0);
+        let columns = rows(
+            &[
+                "table_name",
+                "name",
+                "position",
+                "data_type",
+                "column_type",
+                "nullable",
+                "dflt",
+                "extra",
+                "gen_expr",
+                "charset",
+                "collation",
+                "comment",
+                "col_key",
+                "srid",
+            ],
+            &[&[
+                Some("t"),
+                Some("a"),
+                Some("1"),
+                Some("int"),
+                Some("int(11)"),
+                Some("YES"),
+                None,
+                Some(""),
+                None,
+                None,
+                None,
+                Some(""),
+                Some(""),
+                None,
+            ]],
+        )?;
+        let geometry = rows(&["name", "srid"], &[])?;
+        // A table check that happens to carry a column's name stays off the column.
+        let checks = rows(
+            &["CONSTRAINT_NAME", "CHECK_CLAUSE", "name", "check_clause"],
+            &[&[Some("a"), Some("`a` < 100"), Some("a"), Some("`a` < 100")]],
+        )?;
+        let sets = vec![columns, geometry, checks];
+        let table_level = HashSet::from(["a".to_owned()]);
+        let found = parse_columns(&sets, &maria, &HashMap::new(), Some(&table_level))?;
+        assert_eq!(found.first().and_then(|c| c.check.clone()), None);
+        let found = parse_columns(&sets, &maria, &HashMap::new(), Some(&HashSet::new()))?;
+        assert_eq!(
+            found.first().and_then(|c| c.check.clone()).as_deref(),
+            Some("`a` < 100")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_unique_key_and_a_foreign_key_with_one_name_keep_their_own_columns() -> CatalogResult<()> {
+        let mysql = server(varve_core::Engine::Mysql, 8, 0, 40);
+        let sets = vec![
+            rows(
+                TC,
+                &[
+                    &[Some("t"), Some("fk1"), Some("FOREIGN KEY"), Some("YES")],
+                    &[Some("t"), Some("fk1"), Some("UNIQUE"), Some("YES")],
+                ],
+            )?,
+            rows(
+                KCU,
+                &[
+                    &[Some("fk1"), Some("pid"), None, None, None],
+                    &[Some("fk1"), Some("pid"), Some("d"), Some("p"), Some("id")],
+                ],
+            )?,
+            rows(
+                RC,
+                &[&[Some("fk1"), Some("CASCADE"), Some("RESTRICT"), Some("NONE")]],
+            )?,
+        ];
+        let found = parse_constraints(&sets, &mysql, "d", None)?;
+        let foreign = found
+            .iter()
+            .find(|c| c.constraint_type == MyConstraintType::ForeignKey)
+            .ok_or_else(|| CatalogError::Unexpected {
+                message: "no foreign key".into(),
+            })?;
+        assert_eq!(foreign.columns, vec!["pid".to_owned()]);
+        let reference = foreign
+            .references
+            .as_ref()
+            .ok_or_else(|| CatalogError::Unexpected {
+                message: "no reference".into(),
+            })?;
+        assert_eq!(reference.table, "p");
+        assert_eq!(reference.columns, vec!["id".to_owned()]);
+        let unique = found
+            .iter()
+            .find(|c| c.constraint_type == MyConstraintType::Unique)
+            .ok_or_else(|| CatalogError::Unexpected {
+                message: "no unique key".into(),
+            })?;
+        assert_eq!(unique.columns, vec!["pid".to_owned()]);
+        assert_eq!(unique.references, None);
+        Ok(())
+    }
 
     #[test]
     fn index_parser_and_explicit_method_from_the_ddl() {

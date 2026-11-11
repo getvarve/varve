@@ -339,8 +339,11 @@ pub struct AppliedChange {
     /// What it did.
     pub op: ChangeOp,
     /// `(column, value)` of the row after the change, with defaults and
-    /// generated values filled in. `None` for deletes and for rows the
-    /// plan cannot read back ([`PlannedChange::refresh`]).
+    /// generated values filled in. `None` for deletes, for rows the plan
+    /// cannot read back ([`PlannedChange::refresh`]), and for rows the read
+    /// back did not find because the server stored another key value than
+    /// the one written (a rounded `DECIMAL`, cut fractional seconds, a
+    /// trigger that rewrote the key).
     pub row: Option<Vec<(String, Value)>>,
 }
 
