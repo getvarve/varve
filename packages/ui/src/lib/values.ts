@@ -7,10 +7,6 @@ export const TEXT_PREVIEW = 200;
 
 const NUMERIC: readonly Value['t'][] = ['int', 'uInt', 'float', 'decimal'];
 
-function isInteger(value: Value): value is Extract<Value, { t: 'int' | 'uInt' }> {
-  return value.t === 'int' || value.t === 'uInt';
-}
-
 /** Marker text the backend puts in place of entries too large to send (crates/driver-redis oversized.rs). */
 export const OVERSIZED_MARK = '(too large to show';
 
@@ -180,17 +176,158 @@ export function cellClass(value: Value): string {
   return 'v-text';
 }
 
-/** Sort order for grid columns: NULL first, numbers numerically, everything else by text. */
+/**
+ * A number for sorting: non-finite values (floats, and PostgreSQL numeric
+ * NaN and Infinity) apart, finite ones as exact decimal digits so big
+ * integers and long decimals never lose precision to a double.
+ */
+type NumericKey =
+  | { kind: 'nan' }
+  | { kind: 'infinite'; negative: boolean }
+  | { kind: 'finite'; negative: boolean; whole: bigint; fraction: string };
+
+const DECIMAL_TEXT = /^([+-]?)(\d*)(?:\.(\d*))?$/;
+
+function numericKey(value: Value): NumericKey | null {
+  let text: string;
+  switch (value.t) {
+    case 'int':
+    case 'uInt':
+      text = String(value.v);
+      break;
+    case 'float':
+      // Read from the wire value, never from `plainText` (`inf` is not a number to `Number`).
+      if (value.v === 'NaN' || (typeof value.v === 'number' && Number.isNaN(value.v))) return { kind: 'nan' };
+      if (value.v === 'Infinity' || value.v === Number.POSITIVE_INFINITY) return { kind: 'infinite', negative: false };
+      if (value.v === '-Infinity' || value.v === Number.NEGATIVE_INFINITY) return { kind: 'infinite', negative: true };
+      // Rust's Display form: the shortest round-tripping digits, never an exponent.
+      text = rustFloat(value.v);
+      break;
+    case 'decimal':
+      text = value.v.trim();
+      break;
+    default:
+      return null;
+  }
+  if (text === 'NaN') return { kind: 'nan' };
+  if (text === 'Infinity' || text === '+Infinity') return { kind: 'infinite', negative: false };
+  if (text === '-Infinity') return { kind: 'infinite', negative: true };
+  const match = DECIMAL_TEXT.exec(text);
+  if (!match) return null;
+  const [, sign = '', wholeDigits = '', fractionDigits = ''] = match;
+  if (wholeDigits === '' && fractionDigits === '') return null;
+  const whole = BigInt(wholeDigits === '' ? '0' : wholeDigits);
+  const fraction = fractionDigits.replace(/0+$/, '');
+  // Zero has no sign: -0 and 0 sort together.
+  const negative = sign === '-' && (whole !== 0n || fraction !== '');
+  return { kind: 'finite', negative, whole, fraction };
+}
+
+/** Compares two absolute values given as whole part and fraction digits (trailing zeros removed). */
+function compareMagnitude(a: { whole: bigint; fraction: string }, b: { whole: bigint; fraction: string }): number {
+  if (a.whole !== b.whole) return a.whole < b.whole ? -1 : 1;
+  const width = Math.max(a.fraction.length, b.fraction.length);
+  const x = a.fraction.padEnd(width, '0');
+  const y = b.fraction.padEnd(width, '0');
+  if (x === y) return 0;
+  return x < y ? -1 : 1;
+}
+
+/** Numeric order as PostgreSQL sorts numbers: -Infinity, finite values, Infinity, then NaN. */
+function compareNumericKeys(a: NumericKey, b: NumericKey): number {
+  const rank = (k: NumericKey): number => (k.kind === 'nan' ? 3 : k.kind === 'infinite' ? (k.negative ? 0 : 2) : 1);
+  const ra = rank(a);
+  const rb = rank(b);
+  if (ra !== rb) return ra - rb;
+  if (a.kind !== 'finite' || b.kind !== 'finite') return 0;
+  if (a.negative !== b.negative) return a.negative ? -1 : 1;
+  const magnitude = compareMagnitude(a, b);
+  return a.negative ? -magnitude : magnitude;
+}
+
+const MICROS_PER_SECOND = 1_000_000n;
+const MICROS_PER_DAY = 86_400n * MICROS_PER_SECOND;
+/** PostgreSQL compares intervals with a month as 30 days (`interval_cmp_value`). */
+const DAYS_PER_MONTH = 30n;
+
+/** Whole microseconds of a decimal seconds text such as `-6.5`, or `null` when it is not one. */
+function secondsToMicros(text: string): bigint | null {
+  const match = /^([+-]?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!match) return null;
+  const [, sign = '', whole = '0', fraction = ''] = match;
+  // PostgreSQL keeps microseconds; digits beyond that are not sent.
+  const micros = BigInt(whole) * MICROS_PER_SECOND + BigInt(fraction.slice(0, 6).padEnd(6, '0'));
+  return sign === '-' ? -micros : micros;
+}
+
+/** An ISO 8601 interval as PostgreSQL writes it with `IntervalStyle = iso_8601` (what Varve's sessions set): `P1Y2M3DT4H5M6.5S`, signs per field. */
+function isoIntervalMicros(text: string): bigint | null {
+  const match = /^P(?:([+-]?\d+)Y)?(?:([+-]?\d+)M)?(?:([+-]?\d+)W)?(?:([+-]?\d+)D)?(?:T(?:([+-]?\d+)H)?(?:([+-]?\d+)M)?(?:([+-]?\d+(?:\.\d+)?)S)?)?$/.exec(text);
+  if (!match || text === 'P' || text.endsWith('T')) return null;
+  const [, years, months, weeks, days, hours, minutes, seconds] = match;
+  const int = (part: string | undefined): bigint => (part === undefined ? 0n : BigInt(part));
+  const secondMicros = seconds === undefined ? 0n : secondsToMicros(seconds);
+  if (secondMicros === null) return null;
+  const totalMonths = int(years) * 12n + int(months);
+  const totalDays = int(weeks) * 7n + int(days);
+  return (
+    (totalMonths * DAYS_PER_MONTH + totalDays) * MICROS_PER_DAY + (int(hours) * 3600n + int(minutes) * 60n) * MICROS_PER_SECOND + secondMicros
+  );
+}
+
+/** An interval in PostgreSQL's own style (`IntervalStyle = postgres`, for a session that changed it): `1 year 2 mons -3 days 04:05:06.5`. */
+function postgresIntervalMicros(text: string): bigint | null {
+  const tokens = text.trim().split(/\s+/);
+  if (tokens.length === 0 || tokens[0] === '') return null;
+  let total = 0n;
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i] ?? '';
+    const clock = /^([+-]?)(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(token);
+    if (clock) {
+      const [, sign = '', h = '0', m = '0', s = '0'] = clock;
+      const secs = secondsToMicros(s);
+      if (secs === null) return null;
+      const micros = (BigInt(h) * 3600n + BigInt(m) * 60n) * MICROS_PER_SECOND + secs;
+      total += sign === '-' ? -micros : micros;
+      continue;
+    }
+    const unit = tokens[i + 1];
+    if (!/^[+-]?\d+$/.test(token) || unit === undefined) return null;
+    const n = BigInt(token);
+    i += 1;
+    if (unit === 'year' || unit === 'years') total += n * 12n * DAYS_PER_MONTH * MICROS_PER_DAY;
+    else if (unit === 'mon' || unit === 'mons') total += n * DAYS_PER_MONTH * MICROS_PER_DAY;
+    else if (unit === 'day' || unit === 'days') total += n * MICROS_PER_DAY;
+    else return null;
+  }
+  return total;
+}
+
+/** The length of an interval in microseconds for sorting (months as 30 days, as PostgreSQL compares them), or `null` for a form it does not read. */
+function intervalMicros(text: string): bigint | null {
+  const trimmed = text.trim();
+  return trimmed.startsWith('P') ? isoIntervalMicros(trimmed) : postgresIntervalMicros(trimmed);
+}
+
+/**
+ * Sort order for grid columns: NULL first, numbers numerically and exactly
+ * (non-finite floats and decimals as PostgreSQL orders them), intervals by
+ * length, everything else by text.
+ */
 export function compareValues(a: Value, b: Value): number {
   if (a.t === 'null' || b.t === 'null') return (a.t === 'null' ? 0 : 1) - (b.t === 'null' ? 0 : 1);
-  if (isInteger(a) && isInteger(b)) {
-    const x = BigInt(String(a.v));
-    const y = BigInt(String(b.v));
-    if (x !== y) return x < y ? -1 : 1;
-  } else if (isNumeric(a) && isNumeric(b)) {
-    const x = Number(plainText(a));
-    const y = Number(plainText(b));
-    if (!Number.isNaN(x) && !Number.isNaN(y) && x !== y) return x < y ? -1 : 1;
+  if (isNumeric(a) && isNumeric(b)) {
+    const x = numericKey(a);
+    const y = numericKey(b);
+    if (x && y) {
+      const order = compareNumericKeys(x, y);
+      if (order !== 0) return order;
+    }
+  }
+  if (a.t === 'interval' && b.t === 'interval') {
+    const x = intervalMicros(a.v);
+    const y = intervalMicros(b.v);
+    if (x !== null && y !== null && x !== y) return x < y ? -1 : 1;
   }
   if (a.t === 'bool' && b.t === 'bool') return Number(a.v) - Number(b.v);
   return (plainText(a) ?? '').localeCompare(plainText(b) ?? '');
@@ -213,12 +350,20 @@ export function charCount(text: string): number {
   return [...text].length;
 }
 
+/**
+ * A duration in a short human form: `38 ms`, `1.50 s`, `12.3 s`, `3 min 12 s`.
+ * Rounding happens before the unit is chosen, so a value just under a unit
+ * boundary reads `1.00 s` or `1 min 0 s`, never `1000 ms` or `60.0 s`.
+ */
 export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes} min ${seconds} s`;
+  const wholeMs = Math.round(ms);
+  if (wholeMs < 1000) return `${wholeMs} ms`;
+  const hundredths = Math.round(ms / 10);
+  if (hundredths < 1000) return `${(hundredths / 100).toFixed(2)} s`;
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const seconds = Math.round(ms / 1000);
+  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 }
 
 export function formatBytes(input: number | string): string {

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import { computed, onMounted, useId, watch } from 'vue';
 import { presentError } from '../../api/errors';
-import type { CmdError } from '../../api/errors';
 import { explain, explainCapabilities } from '../../api/explain';
-import type { ExplainCapabilities, ExplainFormat, ExplainOptions, Plan } from '../../api/explain';
+import type { ExplainFormat, ExplainOptions, Plan } from '../../api/explain';
 import { cancel } from '../../api/sessions';
 import type { SessionInfo } from '../../api/sessions';
+import { useTabs } from '../../composables/useTabs';
 import { useToasts } from '../../composables/useToasts';
 import { HIGHLIGHT_LABELS, PG_BLOCK_BYTES, explainLabel, findNode, flattenPlan, formatMs, formatNumber, planOutline } from '../../lib/explainPlan';
 import type { HighlightMode } from '../../lib/explainPlan';
@@ -15,6 +15,8 @@ import { formatBytes, prettyJson } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
 import ExplainConfirmDialog from './ExplainConfirmDialog.vue';
+import { explainState } from './explainState';
+import type { ExplainState } from './explainState';
 import PlanNodeDetails from './PlanNodeDetails.vue';
 import PlanTimeline from './PlanTimeline.vue';
 import PlanTree from './PlanTree.vue';
@@ -26,7 +28,8 @@ import { useReporter } from '../live/report';
  * backend asks for (every reason listed), Cancel while it runs, and the plan
  * as a visual tree, a timeline, indented text or the server's raw output,
  * with node details and hot spots. A failure shows as the statement's own
- * error.
+ * error. Results, options and a run in progress are kept per tab
+ * (explainState.ts), so a view mounted again for its tab picks them up.
  */
 const props = withDefaults(
   defineProps<{
@@ -36,7 +39,7 @@ const props = withDefaults(
     connectionName: string;
     /** The statement to explain (one statement). */
     statement: string;
-    /** Run once on mount: `'explain'`, `'analyze'`, or `null` to wait for the user. */
+    /** Run on the first mount for the tab: `'explain'`, `'analyze'`, or `null` to wait for the user. */
     autoRun?: 'explain' | 'analyze' | null;
     /** The workspace tab the view runs in; its errors are reported to the tab. */
     tabId?: string | null;
@@ -44,23 +47,24 @@ const props = withDefaults(
   { autoRun: null, tabId: null },
 );
 const emit = defineEmits<{ running: [running: boolean] }>();
+const highlightId = useId();
 const report = useReporter(() => props.tabId);
 
 const toasts = useToasts();
 
+// The tab's explain state; the tab id does not change for the life of the view.
+const state: ExplainState = explainState(props.tabId, useTabs().tabs.map((t) => t.id));
+const { caps, capsError, options, showOptions, result, running, cancelling, confirmRequest, stale, view, highlight, selected } = state;
+
 // Capabilities and options
 
-const caps = shallowRef<ExplainCapabilities | null>(null);
-const capsError = shallowRef<CmdError | null>(null);
-const options = reactive({ buffers: true, verbose: false, settings: false, wal: false, format: null as ExplainFormat | null });
-const showOptions = ref(false);
-
 async function loadCaps(): Promise<void> {
+  const sessionId = props.session.id;
   try {
-    caps.value = await explainCapabilities(props.session.id);
+    caps.value = await explainCapabilities(sessionId);
     capsError.value = null;
   } catch (e: unknown) {
-    capsError.value = report(e);
+    capsError.value = report(e, sessionId);
   }
 }
 
@@ -85,6 +89,25 @@ function optionsFor(analyze: boolean): ExplainOptions {
   };
 }
 
+const FORMAT_NAMES: Record<ExplainFormat, string> = { json: 'JSON', tree: 'Tree' };
+
+/**
+ * The formats the Format select offers: every format either mode has, the
+ * ones only one mode has marked as such (the other mode uses the server
+ * default instead).
+ */
+const formatChoices = computed<{ format: ExplainFormat; label: string }[]>(() => {
+  const c = caps.value;
+  if (!c) return [];
+  const all = [...c.formats, ...c.analyzeFormats.filter((f) => !c.formats.includes(f))];
+  return all.map((format) => {
+    const name = FORMAT_NAMES[format];
+    if (!c.analyzeFormats.includes(format)) return { format, label: `${name} (plain EXPLAIN only)` };
+    if (!c.formats.includes(format)) return { format, label: `${name} (with ANALYZE only)` };
+    return { format, label: name };
+  });
+});
+
 const optionSummary = computed(() => {
   const o = optionsFor(true);
   const on = [o.buffers && 'BUFFERS', o.verbose && 'VERBOSE', o.settings && 'SETTINGS', o.wal && 'WAL', o.format && `FORMAT ${o.format.toUpperCase()}`].filter(Boolean);
@@ -93,50 +116,51 @@ const optionSummary = computed(() => {
 
 // Running
 
-type Result =
-  | { kind: 'plan'; plan: Plan; options: ExplainOptions; at: number }
-  | { kind: 'error'; error: CmdError; analyze: boolean }
-  | { kind: 'cancelled'; analyze: boolean }
-  | { kind: 'declined' };
-
-const result = shallowRef<Result | null>(null);
-const running = ref<'explain' | 'analyze' | null>(null);
-const cancelling = ref(false);
-const confirmRequest = shallowRef<ExplainConfirmation | null>(null);
-let answerConfirm: ((yes: boolean) => void) | null = null;
-
 function askConfirm(request: ExplainConfirmation): Promise<boolean> {
   confirmRequest.value = request;
   return new Promise((resolve) => {
-    answerConfirm = resolve;
+    state.answerConfirm = resolve;
   });
 }
 
 function onConfirmDone(yes: boolean): void {
-  const resolve = answerConfirm;
-  answerConfirm = null;
+  const resolve = state.answerConfirm;
+  state.answerConfirm = null;
   confirmRequest.value = null;
   resolve?.(yes);
 }
 
 const canRun = computed(() => props.statement.trim() !== '' && running.value === null && props.session.engine !== 'redis');
 
+/**
+ * The highlight a plan can show: misestimates need actual rows (ANALYZE),
+ * buffers reads need buffer counts. Anything else falls back to the share.
+ */
+function highlightFor(p: Plan, wanted: HighlightMode): HighlightMode {
+  if (wanted === 'misestimate' && !p.analyzed) return 'share';
+  if (wanted === 'buffersRead' && !flattenPlan(p.root).some((f) => f.node.buffers !== null)) return 'share';
+  return wanted;
+}
+
 async function run(analyze: boolean): Promise<void> {
   if (!canRun.value) return;
-  if (!caps.value) await loadCaps();
-  const opts = optionsFor(analyze);
+  // Taken before any await, so a second call (or a view mounted again) does not start another run.
   running.value = analyze ? 'analyze' : 'explain';
   cancelling.value = false;
   emit('running', true);
   try {
-    const outcome = await runExplain((confirmed) => explain(props.session.id, props.statement, opts, confirmed), askConfirm);
+    if (!caps.value) await loadCaps();
+    const opts = optionsFor(analyze);
+    const sessionId = props.session.id;
+    const outcome = await runExplain((confirmed) => explain(sessionId, props.statement, opts, confirmed), askConfirm);
     switch (outcome.status) {
       case 'done':
         result.value = { kind: 'plan', plan: outcome.value, options: opts, at: Date.now() };
         selected.value = hottest(outcome.value);
+        highlight.value = highlightFor(outcome.value, highlight.value);
         break;
       case 'failed':
-        result.value = { kind: 'error', error: report(outcome.error), analyze };
+        result.value = { kind: 'error', error: report(outcome.error, sessionId), analyze };
         break;
       case 'cancelled':
         result.value = { kind: 'cancelled', analyze };
@@ -145,6 +169,8 @@ async function run(analyze: boolean): Promise<void> {
         result.value = { kind: 'declined' };
         break;
     }
+    // The shown result is for the statement as it is now.
+    stale.value = false;
   } finally {
     running.value = null;
     cancelling.value = false;
@@ -156,37 +182,32 @@ async function run(analyze: boolean): Promise<void> {
 async function stop(): Promise<void> {
   if (running.value === null || cancelling.value) return;
   cancelling.value = true;
+  const sessionId = props.session.id;
   try {
-    await cancel(props.session.id);
+    await cancel(sessionId);
   } catch (e: unknown) {
     cancelling.value = false;
-    toasts.pushError(report(e), 'Could not cancel EXPLAIN');
+    toasts.pushError(report(e, sessionId), 'Could not cancel EXPLAIN');
   }
 }
 
 onMounted(async () => {
-  await loadCaps();
-  if (props.autoRun) await run(props.autoRun === 'analyze');
+  // Once per tab: a view mounted again keeps the plan it showed (and a run still in progress).
+  const auto = props.autoRun !== null && !state.autoRan;
+  state.autoRan = true;
+  if (!caps.value) await loadCaps();
+  if (auto) await run(props.autoRun === 'analyze');
 });
 
 // A new statement makes the shown plan stale; keep it visible but say so.
-const stale = ref(false);
 watch(
   () => props.statement,
   () => {
     stale.value = result.value?.kind === 'plan';
   },
 );
-watch(result, () => {
-  stale.value = false;
-});
 
 // Plan display
-
-type View = 'visual' | 'timeline' | 'text' | 'raw';
-const view = ref<View>('visual');
-const highlight = ref<HighlightMode>('share');
-const selected = ref<number | null>(null);
 
 const plan = computed(() => (result.value?.kind === 'plan' ? result.value.plan : null));
 const selectedNode = computed(() => (plan.value && selected.value !== null ? findNode(plan.value.root, selected.value) : null));
@@ -225,7 +246,7 @@ async function copyPlan(): Promise<void> {
     await navigator.clipboard.writeText(text);
     toasts.push('success', 'Plan copied', view.value === 'text' ? 'Indented text' : 'Server output');
   } catch (e: unknown) {
-    toasts.pushError(report(e), 'Could not copy the plan');
+    toasts.pushError(report(e, null), 'Could not copy the plan');
   }
 }
 
@@ -350,8 +371,13 @@ defineExpose({
             class="select small-select"
           >
             <option :value="null">Server default</option>
-            <option value="json">JSON</option>
-            <option value="tree">Tree</option>
+            <option
+              v-for="f in formatChoices"
+              :key="f.format"
+              :value="f.format"
+            >
+              {{ f.label }}
+            </option>
           </select>
         </label>
         <span
@@ -447,9 +473,9 @@ defineExpose({
         >Statement changed since</span>
         <span class="grow" />
         <template v-if="view === 'visual'">
-          <label for="explain-highlight">Highlight</label>
+          <label :for="highlightId">Highlight</label>
           <select
-            id="explain-highlight"
+            :id="highlightId"
             v-model="highlight"
             class="select small-select"
           >

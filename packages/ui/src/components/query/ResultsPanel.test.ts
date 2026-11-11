@@ -42,10 +42,10 @@ const run: RunResult = {
   startedAt: 0,
 };
 
-async function exportCsv(): Promise<void> {
+async function exportCsv(exported: RunResult = run): Promise<void> {
   const wrapper = mount(ResultsPanel, {
     attachTo: document.body,
-    props: { run, running: false, errorLocation: null, exportName: 'Orders', engine: 'postgres', connectionId: 'c1' },
+    props: { run: exported, running: false, errorLocation: null, exportName: 'Orders', engine: 'postgres', connectionId: 'c1' },
     global: { stubs: { ResultGrid: true } },
   });
   await flushPromises();
@@ -93,6 +93,91 @@ describe('ResultsPanel export', () => {
     expect(toasts.at(-1)?.tone).toBe('success');
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('ResultsPanel truncated export', () => {
+  beforeEach(() => {
+    writes.length = 0;
+    invoked.length = 0;
+    recordFails = false;
+  });
+
+  it('says the file holds only the rows the result kept', async () => {
+    const first = run.output?.results[0];
+    if (!run.output || first?.kind !== 'rows') throw new Error('sample run has no rows');
+    await exportCsv({ ...run, id: 2, output: { ...run.output, results: [{ ...first, truncated: true }] } });
+    expect(writes).toHaveLength(1);
+    const toast = useToasts().toasts.filter((t) => t.title.startsWith('Exported')).at(-1);
+    expect(toast?.tone).toBe('warning');
+    expect(toast?.title).toBe('Exported the first 2 rows only');
+  });
+});
+
+describe('ResultsPanel result sets', () => {
+  const two: RunResult = {
+    ...run,
+    id: 3,
+    output: {
+      results: [
+        { kind: 'rows', columns: [{ name: 'doc', typeName: 'jsonb' }], rows: [[{ t: 'json', v: '{"a":1}' }]], truncated: false },
+        { kind: 'rows', columns: [{ name: 'id', typeName: 'int4' }], rows: [[{ t: 'int', v: 1 }]], truncated: false },
+      ],
+      notices: [],
+      elapsedMs: 3,
+    },
+  };
+
+  function panel(r: RunResult): ReturnType<typeof mount> {
+    return mount(ResultsPanel, {
+      props: { run: r, running: false, errorLocation: null, exportName: 'c', engine: 'postgres', connectionId: 'c1' },
+      global: { stubs: { ResultGrid: { name: 'ResultGrid', template: '<div class="grid-stub" />', emits: ['select', 'copied'] } } },
+    });
+  }
+
+  function selectedTab(wrapper: ReturnType<typeof mount>): string {
+    return wrapper.find('button[role="tab"][aria-selected="true"]').text();
+  }
+
+  it('opens on the first result set, also when mounted again for the same run', async () => {
+    const first = panel(two);
+    await flushPromises();
+    expect(selectedTab(first)).toContain('Result 1');
+    first.unmount();
+    const again = panel(two);
+    await flushPromises();
+    expect(selectedTab(again)).toContain('Result 1');
+    again.unmount();
+  });
+
+  it('keeps the picked result set for the run when mounted again', async () => {
+    const first = panel(two);
+    await flushPromises();
+    const tab = first.findAll('button[role="tab"]').find((b) => b.text().startsWith('Result 2'));
+    await tab?.trigger('click');
+    expect(selectedTab(first)).toContain('Result 2');
+    first.unmount();
+    const again = panel(two);
+    await flushPromises();
+    expect(selectedTab(again)).toContain('Result 2');
+    // A new run opens on its own default again.
+    await again.setProps({ run: { ...two, id: 4 } });
+    expect(selectedTab(again)).toContain('Result 1');
+    again.unmount();
+  });
+
+  it('closes the value panel when another result set is shown', async () => {
+    const wrapper = panel({ ...two, id: 5 });
+    await flushPromises();
+    const grid = wrapper.findComponent({ name: 'ResultGrid' });
+    grid.vm.$emit('select', { column: { name: 'doc', typeName: 'jsonb' }, value: { t: 'json', v: '{"a":1}' } });
+    await flushPromises();
+    expect(wrapper.find('aside[aria-label="Value"]').exists()).toBe(true);
+    const tab = wrapper.findAll('button[role="tab"]').find((b) => b.text().startsWith('Result 2'));
+    await tab?.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('aside[aria-label="Value"]').exists()).toBe(false);
+    wrapper.unmount();
   });
 });
 

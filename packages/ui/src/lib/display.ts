@@ -115,6 +115,18 @@ export function formatDateTime(ms: number): string {
   )}.${pad(d.getMilliseconds(), 3)}`;
 }
 
+/**
+ * A log entry's time: `HH:MM:SS` for an entry from today (local time), with
+ * the date in front (`YYYY-MM-DD HH:MM:SS`) for an older or future one, so an
+ * entry from days ago never reads as if it happened today.
+ */
+export function formatEntryTime(ms: number, now: number = Date.now()): string {
+  const d = new Date(ms);
+  const today = new Date(now);
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  return sameDay ? formatTime(ms) : formatDateTime(ms).slice(0, 19);
+}
+
 export function formatDay(ms: number): string {
   return new Date(ms).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }

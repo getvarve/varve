@@ -1,5 +1,5 @@
 import type { TlsMode } from '../api/records';
-import { encryptionStatus, hostPort } from './display';
+import { encryptionStatus, formatEntryTime, hostPort } from './display';
 
 describe('hostPort', () => {
   it('puts IPv6 addresses in brackets', () => {
@@ -46,5 +46,18 @@ describe('encryptionStatus', () => {
     expect(encryptionStatus(enc(false, 'disable'), true)?.label).toBe(
       'Not encrypted to the server (SSH to the bastion)',
     );
+  });
+});
+
+describe('formatEntryTime', () => {
+  const now = new Date(2026, 10, 11, 15, 30, 0).getTime();
+
+  it('shows only the time for an entry from today', () => {
+    expect(formatEntryTime(new Date(2026, 10, 11, 0, 0, 5).getTime(), now)).toBe('00:00:05');
+  });
+
+  it('puts the date in front for an entry from another day', () => {
+    expect(formatEntryTime(new Date(2026, 10, 8, 9, 4, 3).getTime(), now)).toBe('2026-11-08 09:04:03');
+    expect(formatEntryTime(new Date(2026, 10, 10, 23, 59, 59).getTime(), now)).toBe('2026-11-10 23:59:59');
   });
 });

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from 'ag-grid-community';
-import type { CellClickedEvent, CellKeyDownEvent, ColDef, FullWidthCellKeyDownEvent, GridOptions } from 'ag-grid-community';
+import type { CellClickedEvent, CellFocusedEvent, CellKeyDownEvent, ColDef, FullWidthCellKeyDownEvent, GridApi, GridOptions } from 'ag-grid-community';
 import { AgGridVue } from 'ag-grid-vue3';
-import { computed, markRaw, toRaw } from 'vue';
+import { computed, markRaw, ref, shallowRef, toRaw } from 'vue';
 import type { Column, Value } from '../../api/sessions';
+import { useKeepGridScroll, useSizeColumnsWhenShown } from '../../composables/useSizeColumnsWhenShown';
 import { exportText, toTsv } from '../../lib/exportResult';
 import { opensInDialog, previewText, tooltipText } from '../../lib/gridPreview';
 import { cellClass, compareValues, isPlaceholder, placeholderHelp } from '../../lib/values';
@@ -87,6 +88,14 @@ const columnDefs = computed<ColDef<GridRow>[]>(() => [
   ),
 ]);
 
+const gridApi = shallowRef<GridApi<GridRow> | null>(null);
+const gridRoot = ref<HTMLElement | null>(null);
+
+// A result that arrives while its tab is hidden is sized when the tab is shown.
+useSizeColumnsWhenShown(() => gridApi.value, [rowData, columnDefs]);
+// The scroll position survives another tab or page (Activity, Settings) being shown.
+const scroll = useKeepGridScroll(() => gridApi.value, () => gridRoot.value);
+
 const gridOptions: GridOptions<GridRow> = {
   enableCellTextSelection: true,
   ensureDomOrder: true,
@@ -95,8 +104,13 @@ const gridOptions: GridOptions<GridRow> = {
   autoSizeStrategy: { type: 'fitCellContents', skipHeader: false },
   // Rows and columns outside the viewport are not rendered (virtualisation stays on).
   rowBuffer: 10,
+  onGridReady: (event) => {
+    gridApi.value = event.api;
+  },
   onCellClicked: (event) => onCellClicked(event),
+  onCellFocused: (event) => onCellFocused(event),
   onCellKeyDown: (event) => onCellKeyDown(event),
+  onBodyScroll: (event) => scroll.noteScroll(event.top, event.left),
 };
 
 function cellAt(rowIndex: number, colId: string | undefined): { column: Column; value: Value } | null {
@@ -110,6 +124,18 @@ function cellAt(rowIndex: number, colId: string | undefined): { column: Column; 
 function onCellClicked(event: CellClickedEvent<GridRow>): void {
   const rowIndex = (event.data?.n ?? 0) - 1;
   emit('select', cellAt(rowIndex, event.column.getColId()));
+}
+
+/**
+ * Keyboard focus moves the value panel along: the arrow keys select cells as
+ * clicks do. The row comes from the displayed order (the grid may be sorted).
+ */
+function onCellFocused(event: CellFocusedEvent<GridRow>): void {
+  if (event.rowIndex === null || event.column === null || event.rowPinned) return;
+  const row = event.api.getDisplayedRowAtIndex(event.rowIndex)?.data;
+  if (!row) return;
+  const colId = typeof event.column === 'string' ? event.column : event.column.getColId();
+  emit('select', cellAt(row.n - 1, colId));
 }
 
 async function copy(text: string, what: string): Promise<void> {
@@ -143,6 +169,7 @@ function onCellKeyDown(event: CellKeyDownEvent<GridRow> | FullWidthCellKeyDownEv
 
 <template>
   <div
+    ref="gridRoot"
     class="grid"
     role="region"
     :aria-label="label"
