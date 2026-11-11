@@ -113,12 +113,29 @@ export type TestTarget =
   | { kind: 'saved'; id: string }
   | { kind: 'unsaved'; input: ConnectionInput; basedOn?: string };
 
+/**
+ * `TypedFor` in app/src-tauri/src/commands.rs: for each typed secret of a
+ * connect call, the profile version it was entered for.
+ */
+export interface TypedFor {
+  password?: number;
+  sshSecret?: number;
+  tlsPassphrase?: number;
+}
+
 /** Secrets typed in a prompt or form, passed to one call and never stored by this layer. */
 export interface TypedSecrets {
   password?: string;
   sshSecret?: string;
   /** Passphrase of an encrypted TLS client key. */
   tlsPassphrase?: string;
+  /**
+   * The profile version each typed secret was entered for. The backend
+   * checks every secret on its own and refuses one typed before an edit
+   * that made its kind unusable (another server, account or route). A
+   * secret sent without a version is refused once such an edit happened.
+   */
+  typedFor?: TypedFor;
 }
 
 export function testConnection(target: TestTarget, secrets: TypedSecrets = {}): Promise<TestResult> {
@@ -127,6 +144,7 @@ export function testConnection(target: TestTarget, secrets: TypedSecrets = {}): 
     password: secrets.password ?? null,
     sshSecret: secrets.sshSecret ?? null,
     tlsPassphrase: secrets.tlsPassphrase ?? null,
+    typedFor: secrets.typedFor ?? null,
   });
 }
 
@@ -136,6 +154,7 @@ export function openSession(id: string, secrets: TypedSecrets = {}): Promise<Ses
     password: secrets.password ?? null,
     sshSecret: secrets.sshSecret ?? null,
     tlsPassphrase: secrets.tlsPassphrase ?? null,
+    typedFor: secrets.typedFor ?? null,
   });
 }
 
@@ -190,5 +209,6 @@ export function openDatabaseSession(id: string, database: string, secrets: Typed
     password: secrets.password ?? null,
     sshSecret: secrets.sshSecret ?? null,
     tlsPassphrase: secrets.tlsPassphrase ?? null,
+    typedFor: secrets.typedFor ?? null,
   });
 }
