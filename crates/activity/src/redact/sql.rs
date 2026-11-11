@@ -1976,6 +1976,46 @@ enum Account {
     SetPassword,
 }
 
+/// Server variables whose whole value is a secret, by exact (lowercase) name.
+const SECRET_VARIABLE_NAMES: [&str; 3] = [
+    "ssl_passphrase_command",
+    "wsrep_sst_auth",
+    "report_password",
+];
+
+/// Name parts that mark a server variable holding text as a secret. Paths
+/// and file names (`*_path`, `*_file`, `*_dir`) are not secrets, and
+/// numeric, boolean and enum variables (`password_history`,
+/// `default_password_lifetime`) cannot hold one.
+const SECRET_VARIABLE_PARTS: [&str; 6] = [
+    "password",
+    "secret",
+    "passphrase",
+    "token",
+    "pwd",
+    "filekey",
+];
+
+/// True for a server variable whose value is a secret (`wsrep_sst_auth`,
+/// `file_key_management_filekey`, `auth_token_value`). `holds_text` says
+/// whether the variable holds free text: a number, a switch or an enum
+/// cannot hold a secret, so only the exact names count for those.
+///
+/// This is the one list of secret server variables: the variables panel
+/// masks by it and the redactor treats a `SET` of such a name as a secret
+/// setting, so the two cannot drift apart.
+#[must_use]
+pub fn secret_server_variable(name: &str, holds_text: bool) -> bool {
+    let name = name.to_ascii_lowercase();
+    if SECRET_VARIABLE_NAMES.contains(&name.as_str()) {
+        return true;
+    }
+    let path_like = ["_path", "_file", "_dir"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix));
+    holds_text && !path_like && SECRET_VARIABLE_PARTS.iter().any(|part| name.contains(part))
+}
+
 /// True for a name that holds a secret: a secret key, a word that looks
 /// like `password`, or a name with such a part (`MASTER_PASWORD`,
 /// `app.api_token`).
@@ -3576,7 +3616,9 @@ impl<'a> Redactions<'a> {
 
     /// `SET [SESSION | LOCAL | GLOBAL] name TO | = value` (also inside
     /// `ALTER DATABASE | ROLE ... SET`) where the name looks like a secret.
-    fn redact_secret_setting(&mut self, set: usize) {
+    /// With `variables` (the statement sets server variables), a secret
+    /// server variable counts too ([`secret_server_variable`]).
+    fn redact_secret_setting(&mut self, set: usize, variables: bool) {
         let mut q = set + 1;
         while matches!(
             self.upper_word(q).as_deref(),
@@ -3585,7 +3627,12 @@ impl<'a> Redactions<'a> {
         {
             q += 1;
         }
+        // `SET @@GLOBAL.name`: the scope is glued to the name with a dot.
+        if q > set + 1 && self.is_punct(q, ".") {
+            q += 1;
+        }
         let (secret, after) = self.secret_name_at(q);
+        let secret = secret || (variables && self.secret_variable_at(q, after));
         if !secret || self.policy_value(&self.name_before(after), after) {
             return;
         }
@@ -3594,6 +3641,50 @@ impl<'a> Redactions<'a> {
         } else if self.is_punct(after, "=") {
             self.redact_value(after, true);
         }
+    }
+
+    /// True when the (dotted) name in `start..after` is a secret server
+    /// variable ([`secret_server_variable`]) for the value assigned after
+    /// it: `SET GLOBAL wsrep_sst_auth = 'root:pw'`,
+    /// `SET GLOBAL file_key_management_filekey = 'FILE:/k'`.
+    fn secret_variable_at(&self, start: usize, after: usize) -> bool {
+        let mut name = String::new();
+        for p in start..after {
+            let Some(tok) = self.tok(p) else {
+                break;
+            };
+            match tok.kind {
+                Kind::Word => name.push_str(&self.src[tok.start..tok.end]),
+                Kind::QuotedIdent => name.push_str(&self.src[tok.content_start..tok.content_end]),
+                _ => name.push('.'),
+            }
+        }
+        if name.is_empty() {
+            return false;
+        }
+        // The value: after `=`, `:=` or `TO`, and after a `BINARY` cast or
+        // a charset introducer (`_utf8mb4 'text'`).
+        let mut value = after;
+        if self.is_punct(value, ":") && self.is_punct(value + 1, "=") {
+            value += 2;
+        } else if self.is_punct(value, "=") || self.upper_word(value).as_deref() == Some("TO") {
+            value += 1;
+        } else {
+            return false;
+        }
+        let text = |p: usize| self.tok(p).is_some_and(|tok| tok.kind == Kind::Str);
+        let prefixed = self.tok(value).is_some_and(|tok| {
+            tok.kind == Kind::Word
+                && (self.src[tok.start..tok.end].starts_with('_')
+                    || self.src[tok.start..tok.end].eq_ignore_ascii_case("BINARY"))
+        });
+        // A policy, count or switch about a secret is an enum or a number
+        // on the server (`validate_password.policy = 'MEDIUM'`), which the
+        // statement cannot tell from text by the quotes alone.
+        let last = name.rsplit('.').next().unwrap_or_default();
+        let describes = metadata_key(last) || flag_key(&key_parts(last));
+        let holds_text = !describes && (text(value) || (prefixed && text(value + 1)));
+        secret_server_variable(&name, holds_text)
     }
 
     /// `COPY ... FROM | TO PROGRAM 'command'`: a shell command line often
@@ -4000,6 +4091,9 @@ impl<'a> Redactions<'a> {
         // `COPY ... WITH PASSWORD x`: a bare word after PASSWORD is the
         // password here too.
         let mut copy = false;
+        // The statement sets server variables (`SET ...`, `ALTER SYSTEM |
+        // DATABASE | ROLE ... SET`): a `SET` in an `UPDATE` names columns.
+        let mut settings = false;
         let mut statement_start = true;
         let mut frames: Vec<Frame> = vec![Frame::new(FrameKind::Plain, &[], false, 0)];
         // The literals of the open `CONCAT` calls, in order.
@@ -4022,6 +4116,7 @@ impl<'a> Redactions<'a> {
                     None
                 };
                 copy = self.upper_word(p).as_deref() == Some("COPY");
+                settings = matches!(self.upper_word(p).as_deref(), Some("SET" | "ALTER"));
                 if copy {
                     self.redact_copy_program(p);
                 }
@@ -4227,7 +4322,7 @@ impl<'a> Redactions<'a> {
             }
             match word.as_str() {
                 "SET" => {
-                    self.redact_secret_setting(p);
+                    self.redact_secret_setting(p, settings);
                     self.redact_row_assignment(p);
                     self.redact_sql_variable(p);
                 }
@@ -4437,6 +4532,33 @@ mod tests {
             .filter(|t| t.kind != Kind::Space)
             .map(|t| (t.kind, src[t.start..t.end].to_string()))
             .collect()
+    }
+
+    #[test]
+    fn secret_server_variables() {
+        // An exact name is a secret whatever it holds.
+        assert!(secret_server_variable("wsrep_sst_auth", false));
+        assert!(secret_server_variable("WSREP_SST_AUTH", true));
+        assert!(secret_server_variable("report_password", false));
+        // A name part marks a variable that holds text.
+        for name in [
+            "file_key_management_filekey",
+            "auth_token_value",
+            "ldap_bind_pwd",
+            "group_replication_recovery_secret",
+        ] {
+            assert!(secret_server_variable(name, true), "{name}");
+            assert!(!secret_server_variable(name, false), "{name}");
+        }
+        // Paths and ordinary names are not.
+        for name in [
+            "token_cache_path",
+            "secret_file",
+            "password_dir",
+            "max_connections",
+        ] {
+            assert!(!secret_server_variable(name, true), "{name}");
+        }
     }
 
     #[test]

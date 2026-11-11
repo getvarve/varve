@@ -85,6 +85,7 @@ pub use message::{
     ERROR_MESSAGE_HIDDEN, ERROR_MESSAGE_OMITTED, ERROR_MESSAGE_WITHHELD, SYNTAX_ERROR_HIDDEN,
     prepare_error_message,
 };
+pub use sql::secret_server_variable;
 
 /// Replacement for a removed secret.
 pub const REDACTED: &str = "[redacted]";

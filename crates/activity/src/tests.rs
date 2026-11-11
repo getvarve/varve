@@ -327,6 +327,79 @@ fn error_messages_follow_the_text_level() -> TestResult {
     Ok(())
 }
 
+/// A `SET` of a server variable the variables panel masks is a secret
+/// setting at `full` too, and so is the error message that repeats it.
+#[test]
+fn secret_server_variables_are_redacted_at_full() -> TestResult {
+    let (_, rec) = recorder()?;
+    rec.set_text_level(TextLevel::Full);
+    let my = SqlDialect::Mysql;
+    for (dialect, statement, kept) in [
+        (
+            my,
+            "SET GLOBAL wsrep_sst_auth = 'root:hunter2'",
+            "SET GLOBAL wsrep_sst_auth = '[redacted]'",
+        ),
+        (
+            my,
+            "SET @@GLOBAL.wsrep_sst_auth = 'root:hunter2'",
+            "SET @@GLOBAL.wsrep_sst_auth = '[redacted]'",
+        ),
+        (
+            my,
+            "SET PERSIST file_key_management_filekey = 'FILE:hunter2'",
+            "SET PERSIST file_key_management_filekey = '[redacted]'",
+        ),
+        // `token` is not the last part of the name.
+        (
+            my,
+            "SET SESSION auth_token_value = 'hunter2'",
+            "SET SESSION auth_token_value = '[redacted]'",
+        ),
+        (
+            my,
+            "SET GLOBAL ldap_bind_pwd_text = _utf8mb4 'hunter2'",
+            "SET GLOBAL ldap_bind_pwd_text = _utf8mb4 '[redacted]'",
+        ),
+        (
+            SqlDialect::Postgres,
+            "ALTER SYSTEM SET ssl_passphrase_command TO 'echo hunter2'",
+            "ALTER SYSTEM SET ssl_passphrase_command TO '[redacted]'",
+        ),
+    ] {
+        let message = format!(
+            "Variable can't be set to the value of '{}'",
+            statement.split('\'').nth(1).unwrap_or_default()
+        );
+        let e = record_failed(&rec, dialect, statement, "1231 (42000)", &message)?;
+        assert_eq!(e.details["statement"], kept, "{statement}");
+        let stored = e.details["error"]["message"].as_str().unwrap_or_default();
+        assert!(stored.contains(REDACTED), "{statement} => {stored}");
+        assert!(
+            !serde_json::to_string(&e)?.contains("hunter2"),
+            "{statement} => {stored}"
+        );
+    }
+    // A path, a number and a switch are no secret.
+    for statement in [
+        "SET GLOBAL token_cache_path = '/var/lib/tokens'",
+        "SET GLOBAL validate_password.length = 12",
+        "SET GLOBAL secret_rotation = ON",
+        // A column of a row, not a server variable.
+        "UPDATE jobs SET token_state = 'expired' WHERE id = 1",
+    ] {
+        let e = record_failed(
+            &rec,
+            my,
+            statement,
+            "1193 (HY000)",
+            "Unknown system variable",
+        )?;
+        assert_eq!(e.details["statement"], statement);
+    }
+    Ok(())
+}
+
 /// What the recorder stores at `full` for a failed `statement`.
 fn prepare_error_message_for_test(
     statement: &str,
@@ -1331,6 +1404,165 @@ fn pages_are_newest_first_with_a_cursor() -> TestResult {
 }
 
 #[test]
+fn text_search_reads_decoded_detail_values_not_keys() -> TestResult {
+    let (_, rec) = recorder()?;
+    rec.record_batch(vec![
+        ActivityEvent::builder(Category::Query, "query.executed")
+            .occurred_at(NOON)
+            .detail("note", "SELECT \"name\" FROM users\nWHERE a\\b")
+            .detail("rows", 4242)
+            .build()?,
+        ActivityEvent::builder(Category::App, "app.started")
+            .occurred_at(NOON - 1)
+            .detail("nested", json!({"list": ["Tab\there"]}))
+            .build()?,
+    ])?;
+    let count = |text: &str| -> Result<usize, ActivityError> {
+        Ok(rec
+            .list(&ActivityFilter {
+                text: Some(text.into()),
+                ..Default::default()
+            })?
+            .events
+            .len())
+    };
+    // Quotes, a line break and a backslash match as typed.
+    assert_eq!(count("\"name\" FROM")?, 1);
+    assert_eq!(count("users\nWHERE")?, 1);
+    assert_eq!(count("a\\b")?, 1);
+    assert_eq!(count("tab\there")?, 1);
+    // Numbers are values too.
+    assert_eq!(count("4242")?, 1);
+    // The JSON encoding and the key names are not searched.
+    assert_eq!(count("\\\"name")?, 0);
+    assert_eq!(count("note")?, 0);
+    assert_eq!(count("nested")?, 0);
+    assert_eq!(count("rows")?, 0);
+    Ok(())
+}
+
+#[test]
+fn text_search_skips_an_event_with_broken_details() -> TestResult {
+    let (store, rec) = recorder()?;
+    rec.record_batch(vec![
+        ActivityEvent::builder(Category::Query, "query.executed")
+            .occurred_at(NOON)
+            .detail("note", "50%_off for caf\u{e9} orders")
+            .detail("rows", 4242)
+            .build()?,
+        ActivityEvent::builder(Category::Query, "query.executed")
+            .occurred_at(NOON - 1)
+            .detail("note", "50 percent off for orders")
+            .detail("rows", 4242)
+            .build()?,
+    ])?;
+    // The older event's details are cut off mid-string.
+    let broken = store.with_conn(|c| {
+        Ok(c.execute(
+            "UPDATE core_activity SET details = '{\"note\": \"50%_off for orders, a\\b 4242' \
+             WHERE occurred_at = ?",
+            [NOON - 1],
+        )?)
+    })?;
+    assert_eq!(broken, 1);
+    // The per-day counts use the same filter and do not read the details
+    // of the events they count.
+    let count = |text: &str| -> Result<u64, ActivityError> {
+        let filter = ActivityFilter {
+            text: Some(text.into()),
+            ..Default::default()
+        };
+        Ok(rec.count_by_day(&filter)?.iter().map(|d| d.count).sum())
+    };
+    let listed = |text: &str| -> Result<usize, ActivityError> {
+        Ok(rec
+            .list(&ActivityFilter {
+                text: Some(text.into()),
+                ..Default::default()
+            })?
+            .events
+            .len())
+    };
+    assert_eq!(listed("50%_off")?, 1);
+    assert_eq!(listed("4242")?, 1);
+    // Through the stored JSON first: wildcards are taken literally there too.
+    assert_eq!(count("50%_off")?, 1);
+    assert_eq!(count("50%%off")?, 0);
+    assert_eq!(count("50_off")?, 0);
+    assert_eq!(count("CAF\u{e9} ORDERS")?, 1);
+    assert_eq!(count("for orders")?, 0);
+    // Through the parsed values only (a backslash, a number).
+    assert_eq!(count("a\\b")?, 0);
+    assert_eq!(count("4242")?, 1);
+    // The action still matches for both events.
+    assert_eq!(count("query.exec")?, 2);
+    Ok(())
+}
+
+#[test]
+fn a_cursor_stays_valid_after_its_event_is_deleted() -> TestResult {
+    let (store, rec) = recorder()?;
+    seed(&rec)?;
+    let first = rec.list(&ActivityFilter {
+        limit: 3,
+        ..Default::default()
+    })?;
+    let cursor = first.next_cursor.clone().ok_or("no cursor")?;
+    let last = first.events.last().ok_or("empty page")?;
+    assert_eq!(cursor, format!("{}:{}", last.occurred_at, last.id));
+
+    // The event the cursor points at is pruned meanwhile.
+    store.with_conn(|c| {
+        c.execute(
+            "DELETE FROM core_activity WHERE id = ?",
+            [last.id.to_string()],
+        )?;
+        Ok(())
+    })?;
+    let filter = ActivityFilter {
+        limit: 100,
+        before_id: Some(cursor),
+        ..Default::default()
+    };
+    let rest = rec.list(&filter)?;
+    assert_eq!(rest.events.len(), 10);
+    assert!(
+        rest.events
+            .iter()
+            .all(|e| e.occurred_at <= last.occurred_at)
+    );
+    let mut exported = Vec::new();
+    assert_eq!(rec.export_jsonl(&filter, &mut exported)?, 10);
+
+    // A bare event id (the earlier cursor form) still works: below the
+    // second event are the ten left after the delete.
+    let second = &first.events[1];
+    let legacy = rec.list(&ActivityFilter {
+        before_id: Some(second.id.to_string()),
+        ..Default::default()
+    })?;
+    assert_eq!(legacy.events.len(), 10);
+
+    for bad in [
+        "12:not-a-uuid",
+        "x:0190f0a0-0000-7000-8000-000000000000",
+        "",
+    ] {
+        assert!(
+            matches!(
+                rec.list(&ActivityFilter {
+                    before_id: Some(bad.into()),
+                    ..Default::default()
+                }),
+                Err(ActivityError::UnknownCursor(_))
+            ),
+            "{bad:?} should be refused"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn query_history_returns_query_events_of_one_connection() -> TestResult {
     let (_, rec) = recorder()?;
     seed(&rec)?;
@@ -1428,6 +1660,179 @@ fn clear_one_connection_or_everything() -> TestResult {
     let notified = notified.lock().map_err(|_| "poisoned")?;
     assert_eq!(notified.len(), 2);
     assert_eq!(notified[0]["removed"], 5);
+    Ok(())
+}
+
+/// A directory of its own under the system temp dir, removed on drop.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new(label: &str) -> std::io::Result<Self> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "varve-activity-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path)?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Whether `needle` occurs in the file at `path` (a missing file holds
+/// nothing).
+fn file_contains(path: &std::path::Path, needle: &[u8]) -> std::io::Result<bool> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(bytes.windows(needle.len()).any(|w| w == needle)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Records `count` events carrying `marker` in their details.
+fn record_marked(
+    rec: &Recorder,
+    marker: &str,
+    count: i64,
+    at: i64,
+    connection: &str,
+) -> TestResult {
+    let mut events = Vec::new();
+    for i in 0..count {
+        events.push(
+            ActivityEvent::builder(Category::Query, "query.executed")
+                .occurred_at(at - i)
+                .connection(connection)
+                .detail("note", format!("{marker} {i} {}", "x".repeat(400)))
+                .build()?,
+        );
+    }
+    rec.record_batch(events)?;
+    Ok(())
+}
+
+#[test]
+fn a_failed_reclaim_does_not_fail_the_delete() -> TestResult {
+    let (_, rec) = recorder()?;
+    record_marked(&rec, "gone", 5, NOON, "c1")?;
+    let event = ActivityEvent::builder(Category::App, "activity.cleared").build()?;
+    let full_disk = || {
+        varve_store::StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
+            Some("database or disk is full".into()),
+        ))
+    };
+    let removed = rec.delete_and_record(
+        event,
+        |conn| conn.execute("DELETE FROM core_activity", []),
+        false,
+        |_| Err(full_disk()),
+    )?;
+    assert_eq!(removed, 5);
+    // The events are gone and the clear itself is in the log.
+    let left = rec.list(&ActivityFilter::default())?.events;
+    assert_eq!(left.len(), 1);
+    assert_eq!(
+        left.first().map(|e| e.action.as_str()),
+        Some("activity.cleared")
+    );
+    assert_eq!(
+        left.first().and_then(|e| e.details.get("removed").cloned()),
+        Some(json!(5))
+    );
+    Ok(())
+}
+
+#[test]
+fn only_a_clear_rebuilds_a_file_from_an_older_version() -> TestResult {
+    let dir = TempDir::new("older")?;
+    let db = dir.0.join("app.db");
+    {
+        // A file from before incremental auto-vacuum.
+        let old = rusqlite::Connection::open(&db)?;
+        old.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE older (v TEXT);")?;
+    }
+    let store = Arc::new(Store::open(&db)?);
+    store.migrate(&[core_migrations()])?;
+    let rec = Recorder::new(Arc::clone(&store), RecorderSettings::local("device-1"));
+    let pragma = |name: &str| -> Result<i64, varve_store::StoreError> {
+        store.with_conn(|c| Ok(c.pragma_query_value(None, name, |r| r.get(0))?))
+    };
+    assert_eq!(pragma("auto_vacuum")?, 0);
+
+    // The prune removes nearly everything, yet leaves the file as it is.
+    record_marked(&rec, "old", 2000, NOON - 10 * DAY, "c1")?;
+    record_marked(&rec, "kept", 10, NOON, "c1")?;
+    assert_eq!(rec.apply_retention_at(Retention::Days(1), NOON)?, 2000);
+    assert_eq!(pragma("auto_vacuum")?, 0);
+    let free = pragma("freelist_count")?;
+    assert!(free.saturating_mul(4) >= pragma("page_count")?, "{free}");
+    // The removed text is zeroed in the pages that stay.
+    assert!(!file_contains(&db, b"old 1999")?, "left in app.db");
+
+    // The clear rebuilds it once.
+    rec.clear(None)?;
+    assert_eq!(pragma("auto_vacuum")?, 2);
+    assert_eq!(pragma("freelist_count")?, 0);
+    Ok(())
+}
+
+#[test]
+fn cleared_text_is_gone_from_the_files_and_the_file_shrinks() -> TestResult {
+    let dir = TempDir::new("clear")?;
+    let db = dir.0.join("app.db");
+    let wal = dir.0.join("app.db-wal");
+    let store = Arc::new(Store::open(&db)?);
+    store.migrate(&[core_migrations()])?;
+    let rec = Recorder::new(Arc::clone(&store), RecorderSettings::local("device-1"));
+
+    let marker = "customer-secret-7f3a";
+    record_marked(&rec, marker, 2000, NOON, "c1")?;
+    store.with_conn(|c| {
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    })?;
+    let full_size = std::fs::metadata(&db)?.len();
+    assert!(file_contains(&db, marker.as_bytes())?);
+
+    rec.clear(None)?;
+    assert!(!file_contains(&db, marker.as_bytes())?, "left in app.db");
+    assert!(
+        !file_contains(&wal, marker.as_bytes())?,
+        "left in app.db-wal"
+    );
+    let cleared_size = std::fs::metadata(&db)?.len();
+    assert!(
+        cleared_size * 4 < full_size,
+        "app.db did not shrink: {full_size} -> {cleared_size}"
+    );
+
+    // A prune of most of the log also hands the space back.
+    record_marked(&rec, marker, 2000, NOON - 10 * DAY, "c1")?;
+    record_marked(&rec, "kept", 10, NOON, "c1")?;
+    store.with_conn(|c| {
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
+    })?;
+    let grown = std::fs::metadata(&db)?.len();
+    assert!(file_contains(&db, marker.as_bytes())?);
+    assert_eq!(rec.apply_retention_at(Retention::Days(1), NOON)?, 2000);
+    assert!(!file_contains(&db, marker.as_bytes())?, "left in app.db");
+    assert!(
+        !file_contains(&wal, marker.as_bytes())?,
+        "left in app.db-wal"
+    );
+    assert!(std::fs::metadata(&db)?.len() * 4 < grown);
+    let free: i64 =
+        store.with_conn(|c| Ok(c.pragma_query_value(None, "freelist_count", |r| r.get(0))?))?;
+    assert_eq!(free, 0);
     Ok(())
 }
 

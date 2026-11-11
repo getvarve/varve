@@ -41,10 +41,15 @@ pub struct ActivityFilter {
     pub actor_id: Option<String>,
     /// Only this device.
     pub device_id: Option<String>,
-    /// Case-insensitive search in the action, the target and the details.
+    /// Search in the action, the target and the text and number values of
+    /// the details (not their key names). Case-insensitive for ASCII
+    /// letters only: SQLite's `LIKE` does not fold other letters, so `é`
+    /// does not find `É`.
     pub text: Option<String>,
-    /// Cursor: only events older than this event (the `next_cursor` of the
-    /// previous page).
+    /// Cursor: only events older than this position (the `next_cursor` of
+    /// the previous page). The cursor holds the position itself, so it
+    /// stays valid when that event was deleted meanwhile. A bare event id
+    /// (the earlier cursor form) is still accepted.
     pub before_id: Option<String>,
     /// Page size, clamped to 1 ..= [`MAX_PAGE_SIZE`]. Exports ignore it.
     pub limit: u32,
@@ -84,7 +89,7 @@ pub struct Page {
     /// The events.
     pub events: Vec<ActivityEvent>,
     /// Pass as [`ActivityFilter::before_id`] to read the next page; `None`
-    /// on the last page.
+    /// on the last page. Opaque: `<occurred_at>:<id>` of the last event.
     pub next_cursor: Option<String>,
 }
 
@@ -190,6 +195,29 @@ fn like_escape(text: &str) -> String {
     out
 }
 
+/// True when every detail value that contains `text` also has it, as
+/// typed, in the stored JSON of its event. Then a plain `LIKE` over the
+/// stored JSON rules out most events before any of them is parsed, which
+/// matters because no index helps a text search and the log can hold
+/// hundreds of megabytes.
+///
+/// The details are written by `serde_json`, which changes only `"`, `\` and
+/// control characters inside a string, so text without those is in the
+/// stored JSON exactly as it is in the value. Numbers are different: the
+/// search reads them as SQLite prints them (`1.0e+16`, fifteen significant
+/// digits), not as they were written, so text that could be part of a
+/// number (digits, `.`, `e`, `+`, `-` only) is searched in the parsed values
+/// alone.
+fn raw_details_hold(text: &str) -> bool {
+    let encoded_as_typed = !text
+        .chars()
+        .any(|c| matches!(c, '"' | '\\') || c.is_control());
+    let could_be_in_a_number = text
+        .chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'));
+    encoded_as_typed && !could_be_in_a_number
+}
+
 fn placeholders(n: usize) -> String {
     vec!["?"; n].join(", ")
 }
@@ -264,11 +292,26 @@ pub(crate) fn where_clause(
         .filter(|t| !t.is_empty())
     {
         let pattern = format!("%{}%", like_escape(text));
-        clauses.push(
-            "(action LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\' OR details LIKE ? ESCAPE '\\')"
-                .into(),
-        );
-        params.extend(std::iter::repeat_n(SqlValue::Text(pattern), 3));
+        // `details` is JSON: search its decoded values, so quotes, line
+        // breaks and backslashes match as typed and key names never match.
+        // A row whose details are not valid JSON is skipped (`json_tree`
+        // would fail the whole search on it); `CASE` fixes the order of the
+        // two tests.
+        let values = "CASE WHEN json_valid(core_activity.details) THEN EXISTS \
+             (SELECT 1 FROM json_tree(core_activity.details) AS j \
+             WHERE j.type IN ('text', 'integer', 'real') AND j.value LIKE ? ESCAPE '\\') \
+             ELSE 0 END";
+        let prefilter = raw_details_hold(text);
+        clauses.push(if prefilter {
+            format!(
+                "(action LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\' \
+                 OR (core_activity.details LIKE ? ESCAPE '\\' AND {values}))"
+            )
+        } else {
+            format!("(action LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\' OR {values})")
+        });
+        let count = if prefilter { 4 } else { 3 };
+        params.extend(std::iter::repeat_n(SqlValue::Text(pattern), count));
     }
     if let Some((occurred_at, id)) = cursor {
         // The first conjunct is a range on the time indexes; the second
@@ -317,8 +360,27 @@ pub(crate) fn fetch_rows(
     Ok(rows)
 }
 
+/// The page cursor of the event at `occurred_at` with `id`.
+pub(crate) fn format_cursor(occurred_at: i64, id: &str) -> String {
+    format!("{occurred_at}:{id}")
+}
+
+/// The position a `before_id` stands for: a `<occurred_at>:<id>` cursor
+/// as is, a bare event id through the stored event. `None` when the text
+/// is neither, or the bare id names no stored event.
+pub(crate) fn resolve_cursor(conn: &Connection, token: &str) -> Result<Option<Cursor>, StoreError> {
+    match token.split_once(':') {
+        Some((occurred_at, id)) => Ok(occurred_at
+            .parse::<i64>()
+            .ok()
+            .zip(Uuid::from_str(id).ok())
+            .map(|(occurred_at, id)| (occurred_at, id.to_string()))),
+        None => cursor_of(conn, token),
+    }
+}
+
 /// Looks up the position of the event `id`.
-pub(crate) fn cursor_of(conn: &Connection, id: &str) -> Result<Option<Cursor>, StoreError> {
+fn cursor_of(conn: &Connection, id: &str) -> Result<Option<Cursor>, StoreError> {
     let mut stmt = conn.prepare_cached("SELECT occurred_at FROM core_activity WHERE id = ?")?;
     let mut rows = stmt.query([id])?;
     match rows.next()? {
@@ -415,6 +477,53 @@ mod tests {
     #[test]
     fn like_patterns_are_escaped() {
         assert_eq!(like_escape("50%_a\\b"), "50\\%\\_a\\\\b");
+    }
+
+    #[test]
+    fn the_stored_json_is_searched_first_only_when_it_holds_the_text_as_typed() {
+        for text in [
+            "orders",
+            "it's 100%_done",
+            "caf\u{e9} \u{1f600}",
+            "v1.2",
+            "e-mail",
+        ] {
+            assert!(raw_details_hold(text), "{text:?}");
+        }
+        // Encoded differently in JSON.
+        for text in ["say \"hi\"", "a\\b", "tab\there", "line\nbreak", "\u{7f}"] {
+            assert!(!raw_details_hold(text), "{text:?}");
+        }
+        // Could be part of a number, which SQLite prints its own way.
+        for text in ["4242", "0.3", "e+16", "-1", "1E5"] {
+            assert!(!raw_details_hold(text), "{text:?}");
+        }
+        let sql_for = |text: &str| {
+            let filter = ActivityFilter {
+                text: Some(text.into()),
+                ..Default::default()
+            };
+            where_clause(&filter, None)
+        };
+        let (sql, params) = sql_for("orders_1");
+        assert!(
+            sql.contains("core_activity.details LIKE ? ESCAPE '\\' AND CASE WHEN json_valid("),
+            "{sql}"
+        );
+        // Wildcards in the text are escaped in every pattern.
+        let patterns = params
+            .iter()
+            .filter(|p| matches!(p, SqlValue::Text(t) if t == "%orders\\_1%"))
+            .count();
+        assert_eq!(patterns, 4);
+        let (sql, params) = sql_for("a\\b");
+        assert!(!sql.contains("core_activity.details LIKE"), "{sql}");
+        assert!(sql.contains("CASE WHEN json_valid("), "{sql}");
+        let patterns = params
+            .iter()
+            .filter(|p| matches!(p, SqlValue::Text(t) if t == "%a\\\\b%"))
+            .count();
+        assert_eq!(patterns, 3);
     }
 
     #[test]

@@ -8,12 +8,13 @@ use std::sync::{Arc, PoisonError, RwLock};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use varve_store::{Store, StoreError};
+use varve_store::{Reclaim, Store, StoreError};
 
 use crate::error::ActivityError;
 use crate::event::{ActivityEvent, Category, LOCAL_ACTOR, now_ms, validate_action};
 use crate::query::{
-    self, ActivityFilter, COLUMNS, Cursor, DayCount, Page, RawRow, cursor_of, fetch_rows,
+    self, ActivityFilter, COLUMNS, Cursor, DayCount, Page, RawRow, fetch_rows, format_cursor,
+    resolve_cursor,
 };
 use crate::redact::{
     ERROR_MESSAGE_WITHHELD, MAX_REDACTED_BYTES, PreparedStatement, SqlDialect, TextLevel,
@@ -385,14 +386,15 @@ impl Recorder {
     /// One page of events matching `filter`, newest first.
     ///
     /// # Errors
-    /// [`ActivityError::UnknownCursor`] when `before_id` names no stored
-    /// event, [`ActivityError::Store`] or [`ActivityError::Corrupt`] on read
+    /// [`ActivityError::UnknownCursor`] when `before_id` is not a cursor
+    /// (or names an event that is no longer stored, for a bare event id),
+    /// [`ActivityError::Store`] or [`ActivityError::Corrupt`] on read
     /// failures.
     pub fn list(&self, filter: &ActivityFilter) -> Result<Page, ActivityError> {
         let limit = filter.page_size();
         let rows = self.store.with_conn(|conn| {
             let cursor = match &filter.before_id {
-                Some(id) => match cursor_of(conn, id)? {
+                Some(token) => match resolve_cursor(conn, token)? {
                     Some(cursor) => Some(cursor),
                     None => return Ok(None),
                 },
@@ -412,7 +414,9 @@ impl Recorder {
             .map(RawRow::into_event)
             .collect::<Result<Vec<_>, _>>()?;
         let next_cursor = if has_more {
-            events.last().map(|e| e.id.to_string())
+            events
+                .last()
+                .map(|e| format_cursor(e.occurred_at, &e.id.to_string()))
         } else {
             None
         };
@@ -505,10 +509,13 @@ impl Recorder {
             .detail("retention_days", days)
             .detail("cutoff", cutoff)
             .build()?;
+        // A prune also runs in the background (the daily retention task):
+        // it never pays for rebuilding an older file.
         self.delete_and_record(
             event,
             |conn| conn.execute("DELETE FROM core_activity WHERE occurred_at < ?", [cutoff]),
             true,
+            |conn| Store::reclaim_free_space(conn, Reclaim::Quick),
         )
     }
 
@@ -516,8 +523,16 @@ impl Recorder {
     /// `activity.cleared` (clearing is itself logged). Returns the number of
     /// removed events.
     ///
+    /// Clearing is the one place where a database file from an older
+    /// version is rebuilt to shrink it ([`Reclaim::Rebuild`]). That happens
+    /// at most once per file and holds the store while it copies what is
+    /// left of the file, so every other store call waits for it; the user
+    /// asked for this action and waits for it too.
+    ///
     /// # Errors
-    /// [`ActivityError::Store`] when the delete fails.
+    /// [`ActivityError::Store`] when the delete fails. Space that could not
+    /// be released afterwards is not an error: the events are gone, the
+    /// failure is logged and the next clear releases the space.
     pub fn clear(&self, connection_id: Option<&str>) -> Result<u64, ActivityError> {
         let mut builder = ActivityEvent::builder(Category::App, ACTION_CLEARED).detail(
             "scope",
@@ -539,20 +554,35 @@ impl Recorder {
                 None => conn.execute("DELETE FROM core_activity", []),
             },
             false,
+            |conn| Store::reclaim_free_space(conn, Reclaim::Rebuild),
         )
     }
 
     /// Runs `delete` and records `event` (with the removed count) in one
     /// transaction. With `only_when_removed`, nothing is recorded when the
     /// delete removed no rows.
-    fn delete_and_record(
+    ///
+    /// After the commit, still under the store lock, `reclaim` hands the
+    /// freed pages back and empties the write-ahead log
+    /// ([`Store::reclaim_free_space`]), so the removed text is gone from
+    /// `app.db-wal` as well (the store zeroes deleted rows in `app.db`).
+    /// That runs after every clear, also one that removed nothing, so
+    /// clearing again finishes a reclaim that failed before; a prune runs
+    /// it only when it removed events.
+    ///
+    /// A failed reclaim (a full disk, a lock another process holds) does
+    /// not fail the delete, which is committed by then: the removed count
+    /// is returned and the failure is logged. The result has no place for
+    /// a warning, so the caller is not told.
+    pub(crate) fn delete_and_record(
         &self,
         event: ActivityEvent,
         delete: impl FnOnce(&Connection) -> rusqlite::Result<usize>,
         only_when_removed: bool,
+        reclaim: impl FnOnce(&Connection) -> Result<(), StoreError>,
     ) -> Result<u64, ActivityError> {
         let mut prepared = self.prepare(event)?;
-        let (removed, recorded) = self.store.with_conn(|conn| {
+        let (removed, recorded, reclaimed) = self.store.with_conn(|conn| {
             let tx = conn.unchecked_transaction()?;
             let removed = u64::try_from(delete(&tx)?).unwrap_or(u64::MAX);
             let recorded = !(only_when_removed && removed == 0);
@@ -560,13 +590,25 @@ impl Recorder {
                 insert_with_removed(&tx, &prepared, removed)?;
             }
             tx.commit()?;
-            Ok((removed, recorded))
+            let reclaimed = if removed > 0 || !only_when_removed {
+                reclaim(conn)
+            } else {
+                Ok(())
+            };
+            Ok((removed, recorded, reclaimed))
         })?;
         if recorded {
             if let Value::Object(map) = &mut prepared.event.details {
                 map.insert("removed".into(), json!(removed));
             }
             self.notify(&prepared.event);
+        }
+        if let Err(error) = reclaimed {
+            tracing::warn!(
+                %error,
+                removed,
+                "activity events were deleted, but their space in the database file could not be released; the next clear tries again"
+            );
         }
         Ok(removed)
     }
@@ -623,10 +665,10 @@ impl Recorder {
         mut sink: impl FnMut(&[ActivityEvent]) -> Result<(), ActivityError>,
     ) -> Result<u64, ActivityError> {
         let mut cursor: Option<Cursor> = match &filter.before_id {
-            Some(id) => Some(
+            Some(token) => Some(
                 self.store
-                    .with_conn(|conn| cursor_of(conn, id))?
-                    .ok_or_else(|| ActivityError::UnknownCursor(id.clone()))?,
+                    .with_conn(|conn| resolve_cursor(conn, token))?
+                    .ok_or_else(|| ActivityError::UnknownCursor(token.clone()))?,
             ),
             None => None,
         };
