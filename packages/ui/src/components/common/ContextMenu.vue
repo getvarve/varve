@@ -150,7 +150,10 @@ onMounted(async () => {
       top: Math.max(4, Math.min(props.y, window.innerHeight - el.offsetHeight - 4)),
     };
   }
-  buttons(menu.value)[0]?.focus();
+  // With nothing enabled to focus, the menu itself takes focus, so Escape still closes it.
+  const first = buttons(menu.value)[0];
+  if (first) first.focus();
+  else menu.value?.focus();
 });
 
 onBeforeUnmount(() => {
@@ -165,6 +168,7 @@ onBeforeUnmount(() => {
       ref="menu"
       class="menu root"
       role="menu"
+      tabindex="-1"
       :aria-label="label"
       :style="{ left: `${position.left}px`, top: `${position.top}px`, transformOrigin: origin }"
       @keydown="onKeydown"
@@ -266,6 +270,11 @@ onBeforeUnmount(() => {
 
 .root {
   animation: menu-in 120ms var(--ease-out);
+}
+
+/* Focused only when it has no enabled entry; the entries show focus themselves. */
+.root:focus {
+  outline: none;
 }
 
 @keyframes menu-in {

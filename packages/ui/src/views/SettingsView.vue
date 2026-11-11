@@ -2,6 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
+import { onBeforeRouteLeave } from 'vue-router';
 import { fetchActivitySettings, saveActivitySettings } from '../api/activity';
 import type { TextLevel } from '../api/activity';
 import { presentError, toCmdError } from '../api/errors';
@@ -143,8 +144,8 @@ async function readChangedElsewhere(): Promise<void> {
   }
 }
 
-// Quitting with unsaved settings asks first.
-const removeQuitCheck = registerUnsavedCheck(async () => {
+/** True when there are no unsaved settings, or the user chose to discard them. */
+async function confirmDiscard(): Promise<boolean> {
   if (!meta.value.dirty) return true;
   return dialogs.askConfirm({
     title: 'Discard settings changes?',
@@ -152,8 +153,12 @@ const removeQuitCheck = registerUnsavedCheck(async () => {
     confirmLabel: 'Discard',
     danger: true,
   });
-});
+}
+
+// Quitting or leaving the page with unsaved settings asks first.
+const removeQuitCheck = registerUnsavedCheck(confirmDiscard);
 onBeforeUnmount(removeQuitCheck);
+onBeforeRouteLeave(confirmDiscard);
 
 const save = handleSubmit(async (form) => {
   // Never store defaults over settings that could not be read.
@@ -389,7 +394,7 @@ async function forgetSecrets(): Promise<void> {
       </p>
       <p
         v-if="ui.changedElsewhere && !ui.loadError"
-        class="notice"
+        class="notice tone-info"
         role="status"
       >
         <Icon name="info" />
@@ -768,7 +773,7 @@ async function forgetSecrets(): Promise<void> {
 
 h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: var(--text-title);
   font-weight: 600;
 }
 

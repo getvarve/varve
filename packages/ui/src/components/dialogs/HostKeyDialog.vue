@@ -174,7 +174,7 @@ const ackId = useId();
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--ground);
+  background: var(--inset);
 }
 
 .keys dt {

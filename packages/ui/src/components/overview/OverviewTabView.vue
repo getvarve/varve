@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { kindLabel } from '../../api/catalog';
 import type { ObjectKind } from '../../api/catalog';
-import { useTabs } from '../../composables/useTabs';
+import { useTabs, useTabVisible } from '../../composables/useTabs';
 import type { OverviewTab } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import type { MenuItem } from '../../lib/menu';
@@ -122,23 +122,39 @@ const OVERSCAN = 10;
 const body = ref<HTMLElement | null>(null);
 const viewport = reactive({ top: 0, height: 0 });
 let resizeObserver: ResizeObserver | null = null;
+// While the tab is hidden the list is `display: none`: it measures 0 px and its scroll offset reads 0 (and may
+// be lost). Nothing is measured or remembered then; shown again, the remembered offset is restored and measured.
+const tabVisible = useTabVisible();
 
 function measure(): void {
-  if (!body.value) return;
+  if (!body.value || !tabVisible.value) return;
   viewport.top = body.value.scrollTop;
   viewport.height = body.value.clientHeight;
 }
 
 function onScroll(): void {
+  if (!tabVisible.value) return;
   measure();
   if (body.value) view.scrollTop = body.value.scrollTop;
 }
 
-onMounted(async () => {
-  // Back on this tab: where the user had scrolled to.
-  await nextTick();
+/** Back on this tab: where the user had scrolled to, and the list's real height. */
+function restoreScroll(): void {
   if (body.value) body.value.scrollTop = view.scrollTop;
   measure();
+}
+
+watch(
+  tabVisible,
+  (shown) => {
+    if (shown) restoreScroll();
+  },
+  { flush: 'post' },
+);
+
+onMounted(async () => {
+  await nextTick();
+  restoreScroll();
   if (typeof ResizeObserver !== 'undefined' && body.value) {
     resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(body.value);
@@ -657,8 +673,10 @@ function kindText(kind: ObjectKind): string {
   outline: none;
 }
 
+/* The app's focus ring, drawn inside: the grid fills its scrolling body. */
 .grid:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus-ring);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .rows {

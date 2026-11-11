@@ -90,4 +90,17 @@ describe('ContextMenu submenus', () => {
     expect(wrapper.emitted('select')).toBeUndefined();
     wrapper.unmount();
   });
+
+  it('takes focus itself when no entry is enabled, so Escape still closes it', async () => {
+    const wrapper = mount(ContextMenu, {
+      props: { items: [{ id: 'only', label: 'Only', disabled: true }], x: 10, y: 10, label: 'Actions' },
+      attachTo: document.body,
+    });
+    await settle();
+    const root = document.querySelector('.menu.root');
+    expect(document.activeElement).toBe(root);
+    key(document.activeElement, 'Escape');
+    expect(wrapper.emitted('close')).toHaveLength(1);
+    wrapper.unmount();
+  });
 });

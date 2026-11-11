@@ -141,10 +141,19 @@ function reschedule(): void {
   if (state.info?.mechanism === 'tauri' && state.info.autoCheck) scheduleCheck(FIRST_CHECK_DELAY_MS);
 }
 
-/** Shows a failure in the dialog, or as a toast when the dialog is closed. */
+/**
+ * Shows a failure in the dialog, or as a toast when the dialog is closed.
+ * With the dialog closed nothing would ever leave the error state (only
+ * closing the dialog does), so the update stays offered in the status bar
+ * and automatic checks keep running, as after closing the dialog.
+ */
 function fail(error: unknown, update: AvailableUpdate | null, title: string): void {
-  state.status = { kind: 'error', message: messageOf(error), update };
-  if (!state.dialogOpen) useToasts().pushError(error, title);
+  if (state.dialogOpen) {
+    state.status = { kind: 'error', message: messageOf(error), update };
+    return;
+  }
+  useToasts().pushError(error, title);
+  state.status = update ? { kind: 'available', update } : { kind: 'idle' };
 }
 
 /**

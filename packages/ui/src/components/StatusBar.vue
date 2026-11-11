@@ -24,6 +24,16 @@ const encryption = computed(() =>
   session.value && profile.value ? encryptionStatus(session.value.encryption, profile.value.ssh.enabled) : null,
 );
 
+/** The connection segment's text; it is cut with an ellipsis when the bar is too narrow, so it is also the tooltip. */
+const connectionText = computed(() => {
+  const p = profile.value;
+  if (!p) return '';
+  let text = `${p.name} · ${ENGINE_INFO[p.engine].name}`;
+  if (session.value) text += ` ${session.value.server.version}`;
+  if (p.ssh.enabled) text += ' · via SSH';
+  return text;
+});
+
 const lastRun = computed(() => {
   const t = tab.value;
   // A failed run shows its error in the results, not as the last run's counts.
@@ -48,9 +58,10 @@ const lastRun = computed(() => {
         class="band"
         :style="{ background: env.color, color: env.onColor }"
       >{{ env.short }}</span>
-      <span class="seg">
-        {{ profile.name }} · {{ ENGINE_INFO[profile.engine].name }}<template v-if="session"> {{ session.server.version }}</template><template v-if="profile.ssh.enabled"> · via SSH</template>
-      </span>
+      <span
+        class="seg name"
+        :title="connectionText"
+      >{{ connectionText }}</span>
       <span
         v-if="tab?.status === 'connecting'"
         class="seg"
@@ -111,6 +122,7 @@ const lastRun = computed(() => {
 
 .band {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   height: 100%;
   padding: 0 10px;
@@ -118,8 +130,17 @@ const lastRun = computed(() => {
 }
 
 .seg {
+  flex-shrink: 0;
   padding: 0 12px;
   border-right: 1px solid var(--border);
+}
+
+/* Only the connection name gives way when the bar is full, so the items on the right stay in view. */
+.seg.name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seg.end {

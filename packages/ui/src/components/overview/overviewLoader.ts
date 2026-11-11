@@ -76,7 +76,8 @@ export function createOverviewLoader(tabId: string) {
     return found?.kind === 'overview' ? found : null;
   };
 
-  const message = (error: unknown): string => presentError(tabs.reportTabError(tabId, error)).message;
+  /** The message of a failed call, reported to the tab for the session the call was sent on (read before the await). */
+  const message = (error: unknown, sessionId: string): string => presentError(tabs.reportTabError(tabId, error, sessionId)).message;
 
   async function prepare(): Promise<void> {
     const current = tab();
@@ -86,22 +87,23 @@ export function createOverviewLoader(tabId: string) {
     state.preparing = true;
     state.prepareError = null;
     const pg = session.engine === 'postgres';
+    const sessionId = session.id;
     const database = pgDatabase(current);
     // The capabilities (menu entries) do not depend on the picker list: a failing list keeps them.
-    const capabilitiesRead = catalogCapabilities(session.id)
+    const capabilitiesRead = catalogCapabilities(sessionId)
       .then((capabilities) => {
         if (mine !== prepareToken) return;
         state.capabilities = markRaw(capabilities);
         state.capabilitiesError = null;
       })
       .catch((error: unknown) => {
-        if (mine === prepareToken) state.capabilitiesError = message(error);
+        if (mine === prepareToken) state.capabilitiesError = message(error, sessionId);
       });
     try {
       if (pg && database === null) {
         throw new Error('This session did not report its database, so its schemas cannot be listed. Reconnect the tab.');
       }
-      const list = await (pg && database !== null ? catalogSchemas(session.id, database) : catalogDatabases(session.id));
+      const list = await (pg && database !== null ? catalogSchemas(sessionId, database) : catalogDatabases(sessionId));
       if (mine !== prepareToken) return;
       const include = useObjectBrowser().includeSystem(current.connectionId);
       const visible = list.filter((c) => include || !c.system);
@@ -116,7 +118,7 @@ export function createOverviewLoader(tabId: string) {
         tabs.setOverviewScope(tabId, { database: defaultDatabase(pool, session.database) });
       }
     } catch (error: unknown) {
-      if (mine === prepareToken) state.prepareError = message(error);
+      if (mine === prepareToken) state.prepareError = message(error, sessionId);
     } finally {
       await capabilitiesRead;
       if (mine === prepareToken) state.preparing = false;
@@ -154,7 +156,7 @@ export function createOverviewLoader(tabId: string) {
       state.rowsFor = key;
     } catch (error: unknown) {
       if (mine === loadToken) {
-        state.loadError = message(error);
+        state.loadError = message(error, session.id);
         state.rows = [];
         state.rowsFor = null;
         loaded = null;

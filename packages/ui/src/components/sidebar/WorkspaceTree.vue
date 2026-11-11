@@ -5,6 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRouter } from 'vue-router';
 import { sameObject } from '../../api/catalog';
 import type { ObjectRef } from '../../api/catalog';
+import type { ConnectionProfile, SavedQuery } from '../../api/records';
 import { useDialogs } from '../../composables/useDialogs';
 import { useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
@@ -24,9 +25,11 @@ import VarveMark from '../VarveMark.vue';
 import EngineTile from '../common/EngineTile.vue';
 import Icon from '../common/Icon.vue';
 import { defaultAction, isObjectAction, objectMenuItems, runObjectAction } from '../tree/objectActions';
+import type { ObjectActionId } from '../tree/objectActions';
 import { useObjectBrowser } from '../tree/objectBrowser';
 import ObjectIcon from '../tree/ObjectIcon.vue';
 import { openConnectionOverview } from '../tree/openConnection';
+import { actionOpensTab, showWorkspace } from '../tree/showWorkspace';
 
 const workspace = useWorkspace();
 
@@ -233,7 +236,25 @@ function activateObject(row: SidebarRow, node: ObjNode): void {
     toggle(row);
     return;
   }
-  runObjectAction(action, node, profile);
+  runObject(action, node, profile);
+}
+
+/** Runs an object tree action and shows the workspace when it opened a tab. */
+function runObject(id: ObjectActionId, node: ObjNode, profile: ConnectionProfile): void {
+  runObjectAction(id, node, profile);
+  if (actionOpensTab(id)) showWorkspace(router);
+}
+
+function openOverview(profile: ConnectionProfile): void {
+  openConnectionOverview(profile);
+  showWorkspace(router);
+}
+
+/** Opens a saved query; the workspace is shown once its tab is active (not when the connection picker was cancelled). */
+async function openSavedQuery(query: SavedQuery): Promise<void> {
+  await actions.openQuery(query);
+  const tab = tabs.active.value;
+  if (tab?.kind === 'query' && tab.savedQuery?.id === query.id) showWorkspace(router);
 }
 
 
@@ -264,9 +285,9 @@ function activate(row: SidebarRow): void {
   if (node.kind === 'folder') {
     workspace.setExpanded(node.key, !workspace.expanded.has(node.key));
   } else if (node.kind === 'connection') {
-    openConnectionOverview(node.connection);
+    openOverview(node.connection);
   } else {
-    void actions.openQuery(node.query);
+    void openSavedQuery(node.query);
   }
 }
 
@@ -384,8 +405,8 @@ function connectionMenu(node: Extract<TreeNode, { kind: 'connection' }>): MenuIt
   return items;
 }
 
-const menuItems = computed<MenuItem[]>(() => {
-  const row = menu.value?.row ?? null;
+/** The context menu entries of a row (`null`: the empty space of the tree). */
+function itemsFor(row: SidebarRow | null): MenuItem[] {
   if (!row) {
     return [
       { id: 'new-connection', label: 'New connection' },
@@ -416,7 +437,9 @@ const menuItems = computed<MenuItem[]>(() => {
     { id: 'move', label: 'Move to…', disabled: node.attached },
     { id: 'delete', label: 'Delete saved query…', danger: true },
   ];
-});
+}
+
+const menuItems = computed<MenuItem[]>(() => itemsFor(menu.value?.row ?? null));
 
 const menuLabel = computed(() => {
   const row = menu.value?.row ?? null;
@@ -425,7 +448,8 @@ const menuLabel = computed(() => {
 });
 
 function openMenu(event: MouseEvent | KeyboardEvent, row: SidebarRow | null): void {
-  if (row?.item.type === 'object' && objectMenuItems(row.item.node, objects.capabilities(row.item.node.connectionId)).length === 0) return;
+  // A row without entries (an object without actions, a loading or empty status row) opens no menu.
+  if (itemsFor(row).length === 0) return;
   if (event instanceof MouseEvent && event.type === 'contextmenu') {
     menu.value = { x: event.clientX, y: event.clientY, row };
   } else {
@@ -444,7 +468,7 @@ function onMenuSelect(id: string): void {
   if (row?.item.type === 'object') {
     const node = row.item.node;
     const profile = workspace.connection(node.connectionId);
-    if (profile && isObjectAction(id)) runObjectAction(id, node, profile);
+    if (profile && isObjectAction(id)) runObject(id, node, profile);
     return;
   }
   const node = row?.item.type === 'node' ? row.item.node : null;
@@ -465,13 +489,19 @@ function onMenuSelect(id: string): void {
       if (node) void moveTo(node);
       break;
     case 'overview':
-      if (node?.kind === 'connection') openConnectionOverview(node.connection);
+      if (node?.kind === 'connection') openOverview(node.connection);
       break;
     case 'new-query':
-      if (node?.kind === 'connection') actions.openConnection(node.connection);
+      if (node?.kind === 'connection') {
+        actions.openConnection(node.connection);
+        showWorkspace(router);
+      }
       break;
     case 'keys':
-      if (node?.kind === 'connection') tabs.openKeysTab(node.connection);
+      if (node?.kind === 'connection') {
+        tabs.openKeysTab(node.connection);
+        showWorkspace(router);
+      }
       break;
     case 'objects-browse':
       if (node?.kind === 'connection') {
@@ -498,7 +528,7 @@ function onMenuSelect(id: string): void {
       if (node?.kind === 'connection') void actions.duplicate(node.connection);
       break;
     case 'open':
-      if (node?.kind === 'query') void actions.openQuery(node.query);
+      if (node?.kind === 'query') void openSavedQuery(node.query);
       break;
   }
 }

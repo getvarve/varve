@@ -16,7 +16,7 @@ import {
   statusText,
 } from './notifyLog';
 import type { LogEntry } from './notifyLog';
-import { applyBatch, applyState, clearPanel, newPanel, rate, setPaused } from './notifyPanel';
+import { applyBatch, applyState, clearPanel, newPanel, prettyPayload, rate, setPaused } from './notifyPanel';
 
 function state(over: Partial<NotifyState> = {}): NotifyState {
   return {
@@ -188,5 +188,16 @@ describe('a panel', () => {
   it('computes the rate over the last seconds', () => {
     expect(rate([1_000, 2_000, 9_000, 10_000], 10_000)).toBe(0.4);
     expect(rate([], 10_000)).toBe(0);
+  });
+});
+
+describe('the pretty payload', () => {
+  it('keeps numbers as the server sent them', () => {
+    expect(prettyPayload('{"id": 9007199254740993, "price": 1.10}')).toBe('{\n  "id": 9007199254740993,\n  "price": 1.10\n}');
+  });
+
+  it('shows text that is not JSON as it is', () => {
+    expect(prettyPayload('order 42 shipped')).toBe('order 42 shipped');
+    expect(prettyPayload('')).toBe('');
   });
 });

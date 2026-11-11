@@ -306,6 +306,7 @@ export function runObjectAction(id: ObjectActionId, node: ObjNode, profile: Conn
       if (ref) tabs.openDdlTab(profile, ref);
       return;
     case 'new-query':
+      // The tab's session opens on that database (MySQL and MariaDB: as its default schema).
       if (node.type === 'database') tabs.openQueryTab(profile, null, '', node.name);
       else if (node.type === 'schema') {
         // A new session starts on the default search path; this line puts the schema first when run.

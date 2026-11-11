@@ -203,7 +203,7 @@ const submit = handleSubmit((form) => {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: var(--ground);
+  background: var(--inset);
   font-size: 12px;
 }
 

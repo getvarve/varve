@@ -150,10 +150,46 @@ describe('the update flow (tauri)', () => {
       throw new Error('disk full');
     };
     await updates.download();
-    expect(updates.state.status).toMatchObject({ kind: 'error', update: { version: '0.2.0' } });
     expect(toasts.toasts.at(-1)?.title).toBe('Could not download the update');
+    // Nothing would close a dialog that is not open: the update is offered again right away.
+    expect(updates.state.status).toMatchObject({ kind: 'available', update: { version: '0.2.0' } });
+    expect(updates.notice.value).toBe('Update available');
+    remove();
+  });
+
+  it('shows a failed download in the open dialog until it is closed', async () => {
+    const { updates, toasts, remove } = await load(info({ autoCheck: false }));
+    answers.update_check = () => AVAILABLE;
+    await updates.checkNow();
+    const toastCount = toasts.toasts.length;
+    answers.update_download = () => {
+      throw new Error('disk full');
+    };
+    await updates.download();
+    expect(updates.state.status).toMatchObject({ kind: 'error', update: { version: '0.2.0' } });
+    expect(toasts.toasts.length).toBe(toastCount);
     updates.closeDialog();
     expect(updates.state.status.kind).toBe('available');
+    remove();
+  });
+
+  it('keeps automatic checks running after a download failed behind the closed dialog', async () => {
+    vi.useFakeTimers();
+    const { updates, mod, remove } = await load();
+    answers.update_check = () => AVAILABLE;
+    await vi.advanceTimersByTimeAsync(mod.FIRST_CHECK_DELAY_MS);
+    expect(updates.notice.value).toBe('Update available');
+    const download = deferred<undefined>();
+    answers.update_download = () => download.promise;
+    const downloading = updates.download();
+    await flush();
+    download.reject(new Error('connection reset'));
+    await downloading;
+    expect(updates.notice.value).toBe('Update available');
+    answers.update_check = () => ({ kind: 'available', version: '0.3.0', notes: '', date: null });
+    await vi.advanceTimersByTimeAsync(mod.CHECK_INTERVAL_MS);
+    expect(calls('update_check')).toBe(2);
+    expect(updates.state.status).toMatchObject({ kind: 'available', update: { version: '0.3.0' } });
     remove();
   });
 

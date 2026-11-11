@@ -1,5 +1,6 @@
 import { markRaw } from 'vue';
 import type { NotifyBatch, NotifyState } from '../../api/notify';
+import { reindentJson } from '../../lib/values';
 import { isNewer, pushCapped, stateMarkers } from './notifyLog';
 import type { LogEntry } from './notifyLog';
 
@@ -118,4 +119,18 @@ export function rate(times: readonly number[], now: number, windowMs = 5000): nu
     count += 1;
   }
   return Math.round((count / (windowMs / 1000)) * 10) / 10;
+}
+
+/**
+ * A payload for the "pretty" view: JSON is re-indented from its text, so
+ * big integers and long decimals show exactly what the server sent; any
+ * other text is shown as it is.
+ */
+export function prettyPayload(text: string): string {
+  try {
+    JSON.parse(text);
+  } catch {
+    return text;
+  }
+  return reindentJson(text);
 }

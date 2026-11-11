@@ -2,7 +2,7 @@ import type * as RecordsModule from '../../api/records';
 import { flushPromises, mount } from '@vue/test-utils';
 import { CommandFailure } from '../../api/errors';
 import type { ConnectionProfile } from '../../api/records';
-import { rememberTypedSecrets, typedSecretsOf } from '../../composables/useConnect';
+import { rememberTypedSecrets, typedSecretsOf, withConnectPrompts } from '../../composables/useConnect';
 import ConnectionEditor from './ConnectionEditor.vue';
 
 const profile: ConnectionProfile = {
@@ -38,8 +38,10 @@ const updateConnection = vi.fn(async (..._args: unknown[]): Promise<ConnectionPr
 });
 const saveSecret = vi.fn(async (..._args: unknown[]): Promise<ConnectionProfile> => ({ ...stored, savedSecrets: ['db_password'], version: 3 }));
 const fetchTree = vi.fn(async () => ({ folders: [], connections: [{ ...stored, version: 9 }], queries: [] }));
+const createConnection = vi.fn(async (..._args: unknown[]): Promise<ConnectionProfile> => ({ ...profile, id: 'p-new', savedSecrets: [], version: 4 }));
 vi.mock('../../api/records', async (original) => ({
   ...(await original<typeof RecordsModule>()),
+  createConnection: (...args: unknown[]) => createConnection(...args),
   updateConnection: (...args: unknown[]) => updateConnection(...args),
   saveSecret: (...args: unknown[]) => saveSecret(...args),
   fetchTree: () => fetchTree(),
@@ -198,6 +200,36 @@ describe('ConnectionEditor', () => {
     const plain = mount(ConnectionEditor, { attachTo: document.body, props: { profile, engine: 'postgres', folderId: null } });
     expect(document.body.querySelector('input[placeholder^="Leave empty for an unencrypted key"]')).toBeNull();
     plain.unmount();
+  });
+
+  it('remembers a password typed for a new connection for the version it was saved as', async () => {
+    const wrapper = mount(ConnectionEditor, { attachTo: document.body, props: { profile: null, engine: 'postgres', folderId: null } });
+    for (const [field, value] of [['name', 'Orders'], ['host', 'db']] as const) {
+      const input = document.body.querySelector<HTMLInputElement>(`input[id$="-${field}"]`);
+      if (!input) throw new Error(`no ${field} field`);
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    }
+    const password = document.body.querySelector<HTMLInputElement>('input[type="password"]');
+    if (!password) throw new Error('no password field');
+    password.value = 'typed-pw';
+    password.dispatchEvent(new Event('input'));
+    // Kept in memory only, not in the keychain.
+    const save = password.parentElement?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    if (!save) throw new Error('no save checkbox');
+    if (save.checked) {
+      save.checked = false;
+      save.dispatchEvent(new Event('change'));
+    }
+    await flushPromises();
+    await submit();
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    expect(saveSecret).not.toHaveBeenCalled();
+    expect(typedSecretsOf('p-new')).toEqual({ password: 'typed-pw' });
+    // The next connect sends it with the saved version, so the backend checks it against that one.
+    const sent = await withConnectPrompts({ ...profile, id: 'p-new', version: 4 }, async (secrets) => secrets);
+    expect(sent).toEqual({ password: 'typed-pw', typedFor: { password: 4 } });
+    wrapper.unmount();
   });
 
   it('shows a saved TLS key passphrase until the key file changes', async () => {
