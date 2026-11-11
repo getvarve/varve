@@ -22,7 +22,7 @@
 //! quoted through [`varve_catalog::sql::string`].
 
 use serde::{Deserialize, Serialize};
-use varve_activity::{REDACTED, SqlDialect, redact_secrets};
+use varve_activity::{REDACTED, SqlDialect, redact_secrets, secret_server_variable};
 use varve_catalog::EditPlan;
 use varve_catalog::rows::{self, Row};
 use varve_catalog::sql;
@@ -423,6 +423,22 @@ fn is_decimal_number(text: &str) -> bool {
         && fraction.is_none_or(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit()))
 }
 
+/// The range of a MySQL variable from `variables_info`. Variables
+/// declared without a range (`timestamp`, `VALID_RANGE(0, 0)` in the
+/// server) report 0 to 0 there: that means "no range", not "only 0", so
+/// neither bound is kept and the server checks the value itself.
+fn mysql_declared_range(
+    min_value: Option<String>,
+    max_value: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let zero = |bound: &Option<String>| bound.as_deref().map(str::trim) == Some("0");
+    if zero(&max_value) && (min_value.is_none() || zero(&min_value)) {
+        (None, None)
+    } else {
+        (min_value, max_value)
+    }
+}
+
 /// The type of a MySQL variable without `variables_metadata`: numeric
 /// variables have a non-zero maximum in `variables_info`; others are
 /// booleans when their value is `ON` or `OFF`, reals when the value is a
@@ -516,8 +532,8 @@ fn mysql_variable(
         None
     };
     let reported_session = row.text("session_value")?;
-    let min_value = row.text("min_value")?;
-    let max_value = row.text("max_value")?;
+    let (min_value, max_value) =
+        mysql_declared_range(row.text("min_value")?, row.text("max_value")?);
     // Scope: from the metadata, else from this thread's variables, else
     // only "global or not".
     let scope = if has_metadata {
@@ -684,37 +700,11 @@ fn mariadb_variable(row: &Row<'_>) -> LiveResult<ServerVariable> {
 /// What a masked secret value shows instead.
 pub const HIDDEN: &str = "(hidden)";
 
-/// Variables whose whole value is a secret, by exact (lowercase) name.
-const SECRET_NAMES: [&str; 3] = [
-    "ssl_passphrase_command",
-    "wsrep_sst_auth",
-    "report_password",
-];
-
-/// Name parts that mark a string variable as a secret. Paths and file names
-/// (`*_path`, `*_file`, `*_dir`) are not secrets, and numeric, boolean and
-/// enum variables (`password_history`, `default_password_lifetime`) cannot
-/// hold one.
-const SECRET_PARTS: [&str; 6] = [
-    "password",
-    "secret",
-    "passphrase",
-    "token",
-    "pwd",
-    "filekey",
-];
-
+/// True for a variable whose value is masked. The list of secret names
+/// lives in the activity crate ([`secret_server_variable`]), so the
+/// redactor hides a `SET` of every variable that is masked here.
 fn is_secret_name(variable: &ServerVariable) -> bool {
-    let name = variable.name.to_ascii_lowercase();
-    if SECRET_NAMES.contains(&name.as_str()) {
-        return true;
-    }
-    let path_like = ["_path", "_file", "_dir"]
-        .iter()
-        .any(|suffix| name.ends_with(suffix));
-    variable.var_type == VariableType::String
-        && !path_like
-        && SECRET_PARTS.iter().any(|part| name.contains(part))
+    secret_server_variable(&variable.name, variable.var_type == VariableType::String)
 }
 
 /// True when a value may be a libpq connection string carrying a secret: a
@@ -1820,6 +1810,22 @@ mod tests {
         assert_eq!(mysql_value(&time, "2.5")?, "2.5");
         assert!(mysql_value(&time, "-1").is_err());
         assert!(mysql_value(&time, "2.5s").is_err());
+        // `timestamp` reports the range 0 to 0, which means none.
+        let mut stamp = variable("timestamp", VariableType::Real, &[EditScope::Session]);
+        (stamp.min_value, stamp.max_value) =
+            mysql_declared_range(Some("0".into()), Some("0".into()));
+        assert_eq!(mysql_value(&stamp, "1731312000")?, "1731312000");
+        let mut counter = variable("insert_id", VariableType::Integer, &[EditScope::Session]);
+        (counter.min_value, counter.max_value) = mysql_declared_range(None, Some(" 0 ".into()));
+        assert_eq!(mysql_value(&counter, "42")?, "42");
+        assert_eq!(
+            mysql_declared_range(Some("0".into()), Some("100".into())),
+            (Some("0".into()), Some("100".into()))
+        );
+        assert_eq!(
+            mysql_declared_range(Some("-5".into()), Some("0".into())),
+            (Some("-5".into()), Some("0".into()))
+        );
         let text = variable("init_connect", VariableType::String, &MYSQL_GLOBAL_SCOPES);
         assert_eq!(
             mysql_value(&text, "SET x='a\\b'")?,

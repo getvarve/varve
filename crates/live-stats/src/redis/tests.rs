@@ -12,7 +12,7 @@ use varve_core::Engine;
 use varve_driver::{ServerInfo, StatementResult, Value};
 
 use super::info::{config_count, database_list};
-use super::memory::{Measured, Scale, key_prefix, summarize};
+use super::memory::{Measured, Scale, key_prefix, queue_new_keys, summarize};
 use super::reply::{reply_value, text};
 use super::*;
 
@@ -426,6 +426,24 @@ fn memory_grouping_by_prefix_and_type() -> TestResult {
     assert_eq!(other.bytes, 15);
     assert_eq!(other.estimated_bytes, Some(15));
     Ok(())
+}
+
+#[test]
+fn memory_scan_queues_each_key_once() {
+    let page = |keys: &[&str]| {
+        keys.iter()
+            .map(|k| k.as_bytes().to_vec())
+            .collect::<Vec<_>>()
+    };
+    let mut pending = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    queue_new_keys(&mut pending, &mut seen, page(&["a", "b", "a"]).into_iter());
+    // Measured from the end: SCAN order is a, b.
+    assert_eq!(pending, page(&["b", "a"]));
+    pending.clear();
+    // A later page returns `b` again while the keyspace is rehashed.
+    queue_new_keys(&mut pending, &mut seen, page(&["c", "b", "d"]).into_iter());
+    assert_eq!(pending, page(&["d", "c"]));
 }
 
 #[test]

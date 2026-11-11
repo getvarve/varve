@@ -194,7 +194,9 @@ fn pg_query(server: &ServerInfo) -> String {
     };
     // Every name is qualified: the statement is parsed under the user's
     // search_path, where an unqualified function or operator could resolve
-    // to an object planted in another schema.
+    // to an object planted in another schema. pg_blocking_pids takes the
+    // lock manager's locks on each call, so it only runs for backends that
+    // wait for a lock (only those can be blocked).
     format!(
         "SELECT a.pid, a.pid OPERATOR(pg_catalog.=) pg_catalog.pg_backend_pid() AS own, \
          a.usename AS user_name, a.datname AS database_name, a.application_name, \
@@ -205,7 +207,8 @@ fn pg_query(server: &ServerInfo) -> String {
          CASE WHEN a.state OPERATOR(pg_catalog.=) 'active' \
          THEN a.query_start ELSE a.state_change END) OPERATOR(pg_catalog.*) 1000)::bigint \
          AS duration_ms, \
-         a.query, pg_catalog.array_to_string(pg_catalog.pg_blocking_pids(a.pid), ',') \
+         a.query, CASE WHEN a.wait_event_type OPERATOR(pg_catalog.=) 'Lock' \
+         THEN pg_catalog.array_to_string(pg_catalog.pg_blocking_pids(a.pid), ',') END \
          AS blocked_by, a.leader_pid, {query_id} AS query_id \
          FROM pg_catalog.pg_stat_activity a ORDER BY a.pid"
     )
@@ -548,6 +551,19 @@ mod tests {
         assert!(
             pg_query(&server(Engine::Postgres, 18, 0, None)).contains("a.query_id AS query_id")
         );
+    }
+
+    #[test]
+    fn pg_query_asks_for_blockers_only_of_lock_waits() {
+        let sql = pg_query(&server(Engine::Postgres, 18, 0, None));
+        assert!(
+            sql.contains(
+                "CASE WHEN a.wait_event_type OPERATOR(pg_catalog.=) 'Lock' \
+                 THEN pg_catalog.array_to_string(pg_catalog.pg_blocking_pids(a.pid), ',') END"
+            ),
+            "{sql}"
+        );
+        assert_eq!(sql.matches("pg_blocking_pids").count(), 1);
     }
 
     #[test]

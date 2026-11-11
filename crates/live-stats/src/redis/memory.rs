@@ -12,7 +12,7 @@
 //! and the budget is checked before every `SCAN` step and every batch. The
 //! scan can overrun the budget by at most about one batch.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -407,6 +407,19 @@ impl Budget {
     }
 }
 
+/// Queues the keys of one SCAN page that no earlier page returned: SCAN
+/// may return a key more than once (while the keyspace is rehashed), and a
+/// key measured twice would be counted twice. `pending` is measured from
+/// its end, so the new keys go in reversed to keep SCAN order.
+pub(super) fn queue_new_keys(
+    pending: &mut Vec<Vec<u8>>,
+    seen: &mut HashSet<Vec<u8>>,
+    keys: impl Iterator<Item = Vec<u8>>,
+) {
+    let new: Vec<Vec<u8>> = keys.filter(|key| seen.insert(key.clone())).collect();
+    pending.extend(new.into_iter().rev());
+}
+
 /// Measures one batch of keys: `TYPE` and `MEMORY USAGE` each.
 async fn measure(
     session: &dyn Session,
@@ -489,6 +502,8 @@ pub async fn analyze_memory_until(
         .ok_or_else(|| unexpected("DBSIZE is not a number"))?;
     let mut measured: Vec<Measured> = Vec::new();
     let mut pending: Vec<Vec<u8>> = Vec::new();
+    // Every key SCAN returned so far: at most the key budget plus one page.
+    let mut seen: HashSet<Vec<u8>> = HashSet::new();
     let mut cursor = String::from("0");
     let mut scan_done = false;
     let stopped_by = loop {
@@ -518,8 +533,7 @@ pub async fn analyze_memory_until(
                 ),
                 _ => return Err(unexpected("SCAN did not return a cursor and keys")),
             };
-            // Measured from the end of `pending`; reverse to keep SCAN order.
-            pending.extend(keys.iter().rev().filter_map(bytes));
+            queue_new_keys(&mut pending, &mut seen, keys.iter().filter_map(bytes));
             scan_done = next == "0";
             cursor = next;
             continue;
