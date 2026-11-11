@@ -2,10 +2,13 @@
 # Installs apt packages on a GitHub Ubuntu runner without waiting on a dead mirror.
 #
 # The runner images list several mirrors in /etc/apt/apt-mirrors.txt, the Azure one first. When
-# that mirror does not answer, apt waits 20 seconds on every single file before it tries the
-# next mirror, which turns a one minute install into hours. This script asks each listed mirror
-# for its release file first and removes the ones that do not answer, so apt only talks to
-# mirrors that work. If none answers, the main Ubuntu archive is used.
+# a mirror does not answer, apt waits 20 seconds on every single file before it tries the next
+# one, which turns a one minute install into hours. This script asks each listed mirror for its
+# release file first and keeps only the ones that answer. When none of them answers (Canonical's
+# hosts have been unreachable from the runners as a group), it uses the independent mirrors
+# below instead. apt still checks every package against Ubuntu's signing keys, so which mirror
+# serves the files does not matter for what gets installed. When no mirror answers at all, it
+# fails at once instead of hanging.
 #
 # Usage: scripts/ci/apt-install.sh PACKAGE [PACKAGE...]
 set -euo pipefail
@@ -15,6 +18,17 @@ if (($# == 0)); then
   exit 2
 fi
 
+fallbacks=(
+  https://mirrors.edge.kernel.org/ubuntu/
+  https://mirror.leaseweb.com/ubuntu/
+  https://mirrors.ocf.berkeley.edu/ubuntu/
+)
+
+# answers URL: whether the mirror serves the release file of this Ubuntu version.
+answers() {
+  curl --silent --fail --head --max-time 8 --output /dev/null "${1%/}/dists/${codename}/InRelease"
+}
+
 mirrors=/etc/apt/apt-mirrors.txt
 if [[ -f "$mirrors" ]]; then
   codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
@@ -22,16 +36,30 @@ if [[ -f "$mirrors" ]]; then
   while IFS= read -r line; do
     url="${line%%[[:space:]]*}"
     [[ -n "$url" ]] || continue
-    if curl --silent --fail --head --max-time 8 --output /dev/null "${url%/}/dists/${codename}/InRelease"; then
+    if answers "$url"; then
       printf '%s\n' "$line" >>"$kept"
     else
       echo "apt-install.sh: mirror does not answer, skipping it: $url" >&2
     fi
   done <"$mirrors"
   if [[ ! -s "$kept" ]]; then
-    echo "apt-install.sh: no listed mirror answers; using archive.ubuntu.com" >&2
-    printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' >"$kept"
+    echo "apt-install.sh: no listed mirror answers; trying independent mirrors" >&2
+    priority=1
+    for url in "${fallbacks[@]}"; do
+      if answers "$url"; then
+        printf '%s\tpriority:%d\n' "$url" "$priority" >>"$kept"
+        priority=$((priority + 1))
+      else
+        echo "apt-install.sh: mirror does not answer, skipping it: $url" >&2
+      fi
+    done
   fi
+  if [[ ! -s "$kept" ]]; then
+    echo "apt-install.sh: no Ubuntu mirror answers from this runner" >&2
+    exit 1
+  fi
+  echo "apt-install.sh: using these mirrors:" >&2
+  cat "$kept" >&2
   sudo cp "$kept" "$mirrors"
 fi
 
