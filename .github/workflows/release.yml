@@ -111,13 +111,15 @@ jobs:
         # No signing keys here: every build script and download in this step could read them.
         # The update signatures are made in their own steps below.
         run: pnpm tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" ${EXTRA_CONFIG:+--config "$EXTRA_CONFIG"}
-      - name: Collect assets under fixed names
+      - name: Collect assets under their release names
         shell: bash
         env:
           ASSET: ${{ matrix.asset }}
           BUNDLE: target/${{ matrix.target }}/release/bundle
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          VERSION="${TAG#v}"
           mkdir -p dist
           # Exactly one file per glob, or the release would ship the wrong one.
           one() {
@@ -135,7 +137,8 @@ jobs:
               app="$(one "$BUNDLE/macos" '*.app')"
               # COPYFILE_DISABLE keeps macOS metadata files out of the archive.
               COPYFILE_DISABLE=1 tar -czf "dist/varve-${ASSET}.app.tar.gz" -C "$(dirname "$app")" "$(basename "$app")"
-              cp "$(one "$BUNDLE/dmg" '*.dmg')" "dist/varve-${ASSET}.dmg"
+              # The installer carries the version in its name, like the other apps: Varve-1.2.3-arm64.dmg.
+              cp "$(one "$BUNDLE/dmg" '*.dmg')" "dist/Varve-${VERSION}-${ASSET#macos-}.dmg"
               ;;
             windows-*)
               cp "$(one "$BUNDLE/nsis" '*-setup.exe')" "dist/varve-${ASSET}-setup.exe"
@@ -221,12 +224,15 @@ jobs:
       - name: Icon for the Linux desktop entry
         run: cp app/src-tauri/icons/128x128.png dist/varve-icon-128.png
       - name: Write SHA256SUMS
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          VERSION="${TAG#v}"
           cd dist
           expected=(
-            varve-macos-arm64.app.tar.gz varve-macos-arm64.dmg
-            varve-macos-x64.app.tar.gz varve-macos-x64.dmg
+            varve-macos-arm64.app.tar.gz "Varve-${VERSION}-arm64.dmg"
+            varve-macos-x64.app.tar.gz "Varve-${VERSION}-x64.dmg"
             varve-windows-x64-setup.exe varve-windows-x64.msi
             varve-linux-x64.AppImage varve-linux-x64.deb
             varve-linux-arm64.AppImage varve-linux-arm64.deb

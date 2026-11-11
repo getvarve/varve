@@ -67,8 +67,8 @@ Every [release](https://github.com/getvarve/varve/releases/latest) has these fil
 
 | Platform | Installer | Also |
 | --- | --- | --- |
-| macOS Apple silicon | `varve-macos-arm64.dmg` | `varve-macos-arm64.app.tar.gz` |
-| macOS Intel | `varve-macos-x64.dmg` | `varve-macos-x64.app.tar.gz` |
+| macOS Apple silicon | `Varve-<version>-arm64.dmg` | `varve-macos-arm64.app.tar.gz` |
+| macOS Intel | `Varve-<version>-x64.dmg` | `varve-macos-x64.app.tar.gz` |
 | Windows x64 | `varve-windows-x64-setup.exe` | `varve-windows-x64.msi` |
 | Linux x64 | `varve-linux-x64.AppImage` | `varve-linux-x64.deb` |
 | Linux arm64 | `varve-linux-arm64.AppImage` | `varve-linux-arm64.deb` |
