@@ -6,6 +6,7 @@ namespace App;
 
 use App\Account\PurgeAbandonedSignUps;
 use App\Security\OAuth\PurgeExpiredOAuthTokens;
+use App\Sync\PurgeSyncTombstones;
 use Symfony\Component\Scheduler\Attribute\AsSchedule;
 use Symfony\Component\Scheduler\RecurringMessage;
 use Symfony\Component\Scheduler\Schedule as SymfonySchedule;
@@ -29,6 +30,7 @@ final readonly class Schedule implements ScheduleProviderInterface
             ->stateful($this->cache)
             ->processOnlyLastMissedRun(true)
             ->add(RecurringMessage::cron('47 3 * * *', new PurgeAbandonedSignUps()))
-            ->add(RecurringMessage::cron('53 3 * * *', new PurgeExpiredOAuthTokens()));
+            ->add(RecurringMessage::cron('53 3 * * *', new PurgeExpiredOAuthTokens()))
+            ->add(RecurringMessage::cron('59 3 * * *', new PurgeSyncTombstones()));
     }
 }

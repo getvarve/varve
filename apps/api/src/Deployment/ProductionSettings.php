@@ -40,6 +40,9 @@ final readonly class ProductionSettings
      */
     public const array SWITCHES = ['VARVE_BILLING'];
 
+    /** Limits, read as a whole number above 0. The repository's .env gives each a default. */
+    public const array COUNTS = ['VARVE_SYNC_MAX_RECORDS', 'VARVE_SYNC_MAX_USER_RECORDS'];
+
     /** Placeholder spellings the example settings use. */
     private const string PLACEHOLDER = '/change-?me/i';
 
@@ -70,7 +73,7 @@ final readonly class ProductionSettings
             }
         }
 
-        $problems = [...$problems, ...$this->originProblems(), ...$this->switchProblems(), ...$this->mailProblems()];
+        $problems = [...$problems, ...$this->originProblems(), ...$this->switchProblems(), ...$this->countProblems(), ...$this->mailProblems()];
 
         if (1 !== preg_match('{^rediss?://\S+$}', $this->value('REDIS_URL'))) {
             $problems[] = 'REDIS_URL must be the redis:// or rediss:// address of your Redis, which holds sign-in sessions and limits.';
@@ -156,6 +159,19 @@ final readonly class ProductionSettings
         foreach (self::SWITCHES as $name) {
             if (null === filter_var($this->value($name), \FILTER_VALIDATE_BOOL, \FILTER_NULL_ON_FAILURE)) {
                 $problems[] = \sprintf('%s must be 0 or 1.', $name);
+            }
+        }
+
+        return $problems;
+    }
+
+    /** @return list<string> */
+    private function countProblems(): array
+    {
+        $problems = [];
+        foreach (self::COUNTS as $name) {
+            if (1 !== preg_match('/^[1-9][0-9]{0,8}$/', $this->value($name))) {
+                $problems[] = \sprintf('%s must be a whole number above 0.', $name);
             }
         }
 

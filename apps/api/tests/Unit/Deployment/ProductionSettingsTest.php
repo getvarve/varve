@@ -33,6 +33,8 @@ final class ProductionSettingsTest extends TestCase
             'OAUTH_PASSPHRASE is not set.',
             'OAUTH_ENCRYPTION_KEY is not set.',
             'API_PUBLIC_URL must be an https address as a browser writes it (lower case, no path, trailing slash or :443), such as https://varve.example.com.',
+            'VARVE_SYNC_MAX_RECORDS must be a whole number above 0.',
+            'VARVE_SYNC_MAX_USER_RECORDS must be a whole number above 0.',
             'MAILER_DSN is not set to your mail server, such as smtp://user:password@smtp.example.com:587; account mail would go nowhere.',
             'VARVE_MAIL_FROM must be the sender of account mail on your own domain, such as "Varve <accounts@varve.example.com>".',
             'REDIS_URL must be the redis:// or rediss:// address of your Redis, which holds sign-in sessions and limits.',
@@ -159,6 +161,18 @@ final class ProductionSettingsTest extends TestCase
         }
     }
 
+    public function testRecordLimitsAreWholeNumbersAboveZero(): void
+    {
+        foreach (['', '0', '-5', '1.5', 'many', '10000000000'] as $value) {
+            self::assertSame(
+                ['VARVE_SYNC_MAX_RECORDS must be a whole number above 0.'],
+                new ProductionSettings([...self::complete(), 'VARVE_SYNC_MAX_RECORDS' => $value], self::DEVELOPMENT)->problems(),
+                $value,
+            );
+        }
+        self::assertSame([], new ProductionSettings([...self::complete(), 'VARVE_SYNC_MAX_USER_RECORDS' => '1'], self::DEVELOPMENT)->problems());
+    }
+
     public function testTheOAuthKeysMustBeSetLongAndNotTheDevelopmentOnes(): void
     {
         self::assertSame(
@@ -245,6 +259,8 @@ final class ProductionSettingsTest extends TestCase
             'API_PUBLIC_URL' => 'https://api.varve.example.com',
             'CORS_ALLOW_ORIGIN' => 'https://varve.example.com tauri://localhost http://tauri.localhost',
             'VARVE_BILLING' => '0',
+            'VARVE_SYNC_MAX_RECORDS' => '50000',
+            'VARVE_SYNC_MAX_USER_RECORDS' => '10000',
             'OAUTH_PASSPHRASE' => str_repeat('p', 32),
             'OAUTH_ENCRYPTION_KEY' => str_repeat('e', 32),
             'MAILER_DSN' => 'smtp://varve:'.str_repeat('m', 16).'@smtp.example.com:587',

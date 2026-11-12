@@ -57,6 +57,12 @@ docker compose exec api sh -c 'bin/console cache:warmup --env=test && vendor/bin
 `.env` holds development defaults only. In production set at least `APP_SECRET`, `DATABASE_URL`, `API_PUBLIC_URL`,
 `CORS_ALLOW_ORIGIN` (origins separated by spaces), `OAUTH_PASSPHRASE`, `OAUTH_ENCRYPTION_KEY`, `MAILER_DSN`,
 `VARVE_MAIL_FROM` and `REDIS_URL`; `WEB_APP_URL` once the server has a web client. `VARVE_BILLING` stays `0` on a
-self-hosted server. The production
-image runs `bin/console app:settings:check` first and does not start while one of them is missing or still a
-development value.
+self-hosted server. `VARVE_SYNC_MAX_RECORDS` (50000) and `VARVE_SYNC_MAX_USER_RECORDS` (10000) cap the live synced
+records of an organization and of a user; raise them if you need to. The production image runs
+`bin/console app:settings:check` first and does not start while one of them is missing or still a development value.
+
+## Sync
+
+Clients sync connection profiles, folders, saved queries and per-user records through `/api/v1/sync/...`; the wire
+format, with its limits and errors, is in [docs/sync.md](docs/sync.md). Tombstones are purged 90 days after the delete
+by the scheduled `App\Sync\PurgeSyncTombstones`, which the `scheduler_default` worker runs with the other purges.

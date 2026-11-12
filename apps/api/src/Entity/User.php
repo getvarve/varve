@@ -49,6 +49,17 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
+    /**
+     * The last change number of the user's own records ({@see UserRecord}), as {@see Organization::$recordSeq} is for
+     * an organization's. Written by App\Sync in SQL.
+     */
+    #[ORM\Column(type: Types::BIGINT, options: ['default' => 0])]
+    private int $recordSeq = 0;
+
+    /** The highest change number of a purged tombstone of the user's own records. */
+    #[ORM\Column(type: Types::BIGINT, options: ['default' => 0])]
+    private int $recordPurgeSeq = 0;
+
     public function __construct(string $email, string $displayName, \DateTimeImmutable $createdAt)
     {
         $this->id = Uuid::v7();

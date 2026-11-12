@@ -26,6 +26,30 @@ framework:
             interval: '15 minutes'
             cache_pool: cache.rate_limiter_shared
 
+        # Sync (App\Sync\SyncLimits). A client pushes and pulls on start, after a local change (debounced), on a realtime
+        # notice and every few minutes; a first pull of a large organization takes a page per request. Per user over
+        # all their scopes, and per organization over all its members.
+        sync_push_user:
+            policy: sliding_window
+            limit: 300
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_push_organization:
+            policy: sliding_window
+            limit: 600
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_pull_user:
+            policy: sliding_window
+            limit: 600
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_pull_organization:
+            policy: sliding_window
+            limit: 1200
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+
 when@prod:
     framework:
         cache:
@@ -35,7 +59,7 @@ when@prod:
                     adapter: cache.adapter.redis
                     provider: '%env(REDIS_URL)%'
 
-when@dev: &local_limits
+when@dev:
     framework:
         cache:
             pools:
@@ -44,4 +68,31 @@ when@dev: &local_limits
                 cache.rate_limiter_shared:
                     adapter: cache.adapter.filesystem
 
-when@test: *local_limits
+when@test:
+    framework:
+        rate_limiter:
+            # Low enough for a test to reach; the limit per organization below the one per user, so a test reaches each.
+            sync_push_user:
+                policy: sliding_window
+                limit: 30
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_push_organization:
+                policy: sliding_window
+                limit: 20
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_pull_user:
+                policy: sliding_window
+                limit: 30
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_pull_organization:
+                policy: sliding_window
+                limit: 20
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+        cache:
+            pools:
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.filesystem

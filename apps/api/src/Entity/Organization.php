@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Bridge\Doctrine\Types\UuidType;
 use Symfony\Component\Uid\Uuid;
@@ -34,6 +35,17 @@ class Organization
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
+
+    /**
+     * The last change number of the organization's synced records ({@see Record}). A push locks this row and counts on
+     * from here, so pushes to one organization commit in the order of their numbers. Written by App\Sync in SQL.
+     */
+    #[ORM\Column(type: Types::BIGINT, options: ['default' => 0])]
+    private int $recordSeq = 0;
+
+    /** The highest change number of a tombstone purged so far: a cursor before it has missed a delete. */
+    #[ORM\Column(type: Types::BIGINT, options: ['default' => 0])]
+    private int $recordPurgeSeq = 0;
 
     private function __construct(?string $name, ?User $personalOwner, \DateTimeImmutable $createdAt)
     {
