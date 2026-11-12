@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use varve_activity::{
-    ActivityEvent, ActivityFilter, Category, Outcome, Recorder, RecorderSettings, RowCounts,
-    SqlDialect,
+    ActivityEvent, ActivityFilter, ActivityOrder, Category, ConnectionNames, Outcome, Recorder,
+    RecorderSettings, RowCounts, SortColumn, SortDirection, SqlDialect,
 };
 use varve_store::{Store, core_migrations};
 
@@ -26,8 +26,9 @@ fn bound() -> Duration {
     }
 }
 
-#[test]
-fn filtered_page_over_50k_events_is_fast() -> TestResult {
+/// A recorder holding [`EVENTS`] events: one per second over 20
+/// connections, a tenth connects, a tenth failed queries, the rest queries.
+fn seeded() -> Result<Recorder, Box<dyn std::error::Error>> {
     let store = Arc::new(Store::open_in_memory()?);
     store.migrate(&[core_migrations()])?;
     let recorder = Recorder::new(store, RecorderSettings::local("device-1"));
@@ -75,6 +76,12 @@ fn filtered_page_over_50k_events_is_fast() -> TestResult {
         }
     }
     recorder.record_batch(batch)?;
+    Ok(recorder)
+}
+
+#[test]
+fn filtered_page_over_50k_events_is_fast() -> TestResult {
+    let recorder = seeded()?;
 
     // (name, filter, expected rows on the first page)
     let filters = [
@@ -167,5 +174,60 @@ fn filtered_page_over_50k_events_is_fast() -> TestResult {
         started.elapsed()
     );
     assert_eq!(days.iter().map(|d| d.count).sum::<u64>(), 5_000);
+    Ok(())
+}
+
+/// Sorting on any column pages through the whole log at the same speed as
+/// newest first: each sort value is one index range and the next value one
+/// index seek (`core_activity_*_time`), also deep inside a value that
+/// thousands of events share.
+#[test]
+fn sorted_pages_over_50k_events_are_fast() -> TestResult {
+    let recorder = seeded()?;
+    // Connections 15 to 19 have no profile any more.
+    let names: ConnectionNames = (0..15)
+        .map(|i| (format!("conn-{i}"), format!("Connection {i}")))
+        .collect();
+    let columns = [
+        SortColumn::Time,
+        SortColumn::Action,
+        SortColumn::Outcome,
+        SortColumn::Duration,
+        SortColumn::Connection,
+    ];
+    let ranges = [
+        ("whole log", None),
+        ("last 10 000 events", Some(START + 40_000_000)),
+    ];
+    for column in columns {
+        for direction in [SortDirection::Ascending, SortDirection::Descending] {
+            for (range, from) in ranges {
+                let order = ActivityOrder { column, direction };
+                let mut filter = ActivityFilter {
+                    from,
+                    order,
+                    limit: 100,
+                    ..ActivityFilter::default()
+                };
+                let mut slowest = Duration::ZERO;
+                for page in 1..=5 {
+                    let started = Instant::now();
+                    let read = recorder.list_named(&filter, &names)?;
+                    let elapsed = started.elapsed();
+                    slowest = slowest.max(elapsed);
+                    assert_eq!(read.events.len(), 100, "{order}, {range}, page {page}");
+                    assert!(
+                        elapsed < bound(),
+                        "{order}, {range}, page {page}: {elapsed:?} exceeds {:?}",
+                        bound()
+                    );
+                    filter.before_id = Some(read.next_cursor.ok_or("no next page")?);
+                }
+                println!(
+                    "list ({order}, {range}) over {EVENTS} events: slowest of 5 pages {slowest:?}"
+                );
+            }
+        }
+    }
     Ok(())
 }

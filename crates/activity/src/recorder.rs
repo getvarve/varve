@@ -13,8 +13,8 @@ use varve_store::{Reclaim, Store, StoreError};
 use crate::error::ActivityError;
 use crate::event::{ActivityEvent, Category, LOCAL_ACTOR, now_ms, validate_action};
 use crate::query::{
-    self, ActivityFilter, COLUMNS, Cursor, DayCount, Page, RawRow, fetch_rows, format_cursor,
-    resolve_cursor,
+    self, ActivityFilter, ActivityOrder, COLUMNS, ConnectionNames, DayCount, Group, Page, Position,
+    RawRow, Resolved, fetch_page, format_cursor, resolve_cursor,
 };
 use crate::redact::{
     ERROR_MESSAGE_WITHHELD, MAX_REDACTED_BYTES, PreparedStatement, SqlDialect, TextLevel,
@@ -383,40 +383,58 @@ impl Recorder {
         }
     }
 
-    /// One page of events matching `filter`, newest first.
+    /// One page of events matching `filter`, in its order. Knows no
+    /// connection names: in the connection order every connection sorts as
+    /// a deleted one (by time). [`Recorder::list_named`] takes the names.
+    ///
+    /// # Errors
+    /// As [`Recorder::list_named`].
+    pub fn list(&self, filter: &ActivityFilter) -> Result<Page, ActivityError> {
+        self.list_named(filter, &ConnectionNames::new())
+    }
+
+    /// One page of events matching `filter`, in its order; the connection
+    /// order sorts by `names` (profile id to name).
     ///
     /// # Errors
     /// [`ActivityError::UnknownCursor`] when `before_id` is not a cursor
     /// (or names an event that is no longer stored, for a bare event id),
-    /// [`ActivityError::Store`] or [`ActivityError::Corrupt`] on read
-    /// failures.
-    pub fn list(&self, filter: &ActivityFilter) -> Result<Page, ActivityError> {
+    /// [`ActivityError::CursorOrderMismatch`] when it is a cursor of
+    /// another order, [`ActivityError::Store`] or [`ActivityError::Corrupt`]
+    /// on read failures.
+    pub fn list_named(
+        &self,
+        filter: &ActivityFilter,
+        names: &ConnectionNames,
+    ) -> Result<Page, ActivityError> {
         let limit = filter.page_size();
-        let rows = self.store.with_conn(|conn| {
-            let cursor = match &filter.before_id {
-                Some(token) => match resolve_cursor(conn, token)? {
-                    Some(cursor) => Some(cursor),
-                    None => return Ok(None),
+        let fetched = self.store.with_conn(|conn| {
+            let after = match &filter.before_id {
+                Some(token) => match resolve_cursor(conn, token, filter.order)? {
+                    Resolved::At(position) => Some(position),
+                    refused => return Ok(Err(refused.into_error(token, filter.order))),
                 },
                 None => None,
             };
-            fetch_rows(conn, filter, cursor.as_ref(), limit + 1).map(Some)
+            fetch_page(conn, filter, names, after.as_ref(), limit + 1).map(Ok)
         })?;
-        let Some(mut rows) = rows else {
-            return Err(ActivityError::UnknownCursor(
-                filter.before_id.clone().unwrap_or_default(),
-            ));
-        };
+        let mut rows = fetched?;
         let has_more = rows.len() > limit as usize;
         rows.truncate(limit as usize);
+        let (rows, groups): (Vec<RawRow>, Vec<Option<Group>>) = rows.into_iter().unzip();
         let events = rows
             .into_iter()
             .map(RawRow::into_event)
             .collect::<Result<Vec<_>, _>>()?;
         let next_cursor = if has_more {
-            events
-                .last()
-                .map(|e| format_cursor(e.occurred_at, &e.id.to_string()))
+            events.last().map(|e| {
+                format_cursor(
+                    filter.order,
+                    e.occurred_at,
+                    &e.id.to_string(),
+                    groups.last().and_then(Option::as_ref),
+                )
+            })
         } else {
             None
         };
@@ -614,8 +632,9 @@ impl Recorder {
     }
 
     /// Streams every event matching `filter` (newest first, starting below
-    /// `before_id` when set; `limit` is ignored) as CSV with a header row.
-    /// Returns the number of events written.
+    /// `before_id` when set, which must then be a newest-first cursor;
+    /// `order` and `limit` are ignored) as CSV with a header row. Returns
+    /// the number of events written.
     ///
     /// # Errors
     /// [`ActivityError::Io`] when writing fails, otherwise as
@@ -657,36 +676,48 @@ impl Recorder {
         Ok(count)
     }
 
-    /// Reads `filter` in pages of [`EXPORT_PAGE`] and hands each page to
-    /// `sink`. The connection is not held while `sink` runs.
+    /// Reads `filter` newest first (its order is ignored) in pages of
+    /// [`EXPORT_PAGE`] and hands each page to `sink`. The connection is not
+    /// held while `sink` runs.
     fn for_each_export_page(
         &self,
         filter: &ActivityFilter,
         mut sink: impl FnMut(&[ActivityEvent]) -> Result<(), ActivityError>,
     ) -> Result<u64, ActivityError> {
-        let mut cursor: Option<Cursor> = match &filter.before_id {
-            Some(token) => Some(
-                self.store
-                    .with_conn(|conn| resolve_cursor(conn, token))?
-                    .ok_or_else(|| ActivityError::UnknownCursor(token.clone()))?,
-            ),
+        let filter = ActivityFilter {
+            order: ActivityOrder::default(),
+            ..filter.clone()
+        };
+        let mut cursor: Option<Position> = match &filter.before_id {
+            Some(token) => match self
+                .store
+                .with_conn(|conn| resolve_cursor(conn, token, filter.order))?
+            {
+                Resolved::At(position) => Some(position),
+                refused => return Err(refused.into_error(token, filter.order)),
+            },
             None => None,
         };
+        let names = ConnectionNames::new();
         let mut total = 0u64;
         loop {
-            let rows = self
-                .store
-                .with_conn(|conn| fetch_rows(conn, filter, cursor.as_ref(), EXPORT_PAGE))?;
+            let rows = self.store.with_conn(|conn| {
+                fetch_page(conn, &filter, &names, cursor.as_ref(), EXPORT_PAGE)
+            })?;
             let fetched = rows.len();
             let events = rows
                 .into_iter()
-                .map(RawRow::into_event)
+                .map(|(row, _)| row.into_event())
                 .collect::<Result<Vec<_>, _>>()?;
             sink(&events)?;
             total += events.len() as u64;
             match events.last() {
                 Some(last) if fetched == EXPORT_PAGE as usize => {
-                    cursor = Some((last.occurred_at, last.id.to_string()));
+                    cursor = Some(Position {
+                        occurred_at: last.occurred_at,
+                        id: last.id.to_string(),
+                        group: None,
+                    });
                 }
                 _ => return Ok(total),
             }

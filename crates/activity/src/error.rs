@@ -2,6 +2,8 @@
 
 use varve_store::StoreError;
 
+use crate::query::ActivityOrder;
+
 /// Errors from recording, querying, pruning or exporting activity.
 #[derive(Debug, thiserror::Error)]
 pub enum ActivityError {
@@ -20,6 +22,19 @@ pub enum ActivityError {
     /// cursor form) of an event that does not exist (any more).
     #[error("unknown activity cursor `{0}`")]
     UnknownCursor(String),
+    /// A `before_id` is a cursor of another order than the filter's: its
+    /// pages would be wrong, so the list starts again from the first page.
+    #[error(
+        "activity cursor `{cursor}` continues the {cursor_order} order, not {order}; read the first page again"
+    )]
+    CursorOrderMismatch {
+        /// The cursor as given.
+        cursor: String,
+        /// The order it was made for.
+        cursor_order: ActivityOrder,
+        /// The order of the filter.
+        order: ActivityOrder,
+    },
     /// The retention setting is not usable.
     #[error("invalid retention: {0}")]
     InvalidRetention(String),

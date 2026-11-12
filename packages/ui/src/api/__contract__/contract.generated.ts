@@ -3688,8 +3688,82 @@ export const s141 = {
   "sizeBytes": null
 } satisfies activity.ExportRecord;
 
-// MemoryAnalysis.stopped
+// activity(filter) newest first
 export const s142 = {
+  "from": 1792411200000,
+  "limit": 100,
+  "order": {
+    "column": "time",
+    "direction": "descending"
+  }
+} satisfies activity.ActivityFilter;
+
+// activity(filter) sorted, next page
+export const s143 = {
+  "actions": [
+    "query.*"
+  ],
+  "beforeId": "duration.desc:1792411200000:0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d40:#250",
+  "categories": [
+    "query"
+  ],
+  "connectionId": "0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d33",
+  "limit": 100,
+  "order": {
+    "column": "duration",
+    "direction": "descending"
+  },
+  "outcomes": [
+    "failure"
+  ],
+  "text": "orders"
+} satisfies activity.ActivityFilter;
+
+// export_activity(filter)
+export const s144 = {
+  "from": 1792411200000,
+  "outcomes": [
+    "success"
+  ]
+} satisfies activity.ActivityFilter;
+
+// activity -> Page
+export const s145 = {
+  "events": [
+    {
+      "action": "query.failed",
+      "actorId": "local",
+      "category": "query",
+      "connectionId": "0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d33",
+      "details": {
+        "error": {
+          "code": "42P01",
+          "message": "relation does not exist"
+        },
+        "statement": "SELECT * FROM orders WHERE id = ?",
+        "text_level": "normalized"
+      },
+      "deviceId": "device-1",
+      "durationMs": 250,
+      "id": "0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d40",
+      "occurredAt": 1792411200000,
+      "outcome": "failure",
+      "serverKey": "db.internal:5432",
+      "target": "public.orders",
+      "workspaceId": "personal"
+    }
+  ],
+  "nextCursor": "duration.desc:1792411200000:0199e4c2-7d1a-7c41-9a51-2f0c6b8e1d40:#250"
+} satisfies activity.ActivityPage;
+
+// activity -> last Page
+export const s146 = {
+  "events": [],
+  "nextCursor": null
+} satisfies activity.ActivityPage;
+
+// MemoryAnalysis.stopped
+export const s147 = {
   "complete": false,
   "dbSize": 50000,
   "elapsedMs": 150,
@@ -3718,7 +3792,7 @@ export const s142 = {
 } satisfies live.MemoryAnalysis;
 
 // ValueChunk.timeSeries
-export const s143 = {
+export const s148 = {
   "data": {
     "info": {
       "fields": [
@@ -3786,7 +3860,7 @@ export const s143 = {
 } satisfies redis.ValueChunk | null;
 
 // ValueChunk.probabilistic
-export const s144 = {
+export const s149 = {
   "data": {
     "fields": [
       {
@@ -3831,7 +3905,7 @@ export const s144 = {
 } satisfies redis.ValueChunk | null;
 
 // ModuleReport
-export const s145 = {
+export const s150 = {
   "features": [
     {
       "available": true,
@@ -3896,7 +3970,7 @@ export const s145 = {
 } satisfies redis.ModuleReport;
 
 // ModuleReport.noModuleList
-export const s146 = {
+export const s151 = {
   "features": [
     {
       "available": false,
@@ -3909,7 +3983,7 @@ export const s146 = {
 } satisfies redis.ModuleReport;
 
 // SearchIndex
-export const s147 = {
+export const s152 = {
   "attributes": [
     {
       "attribute": "name",
@@ -3964,10 +4038,10 @@ export const s147 = {
 } satisfies redis.SearchIndex | null;
 
 // SearchIndex(null)
-export const s148 = null satisfies redis.SearchIndex | null;
+export const s153 = null satisfies redis.SearchIndex | null;
 
 // TsRangeQuery(arg)
-export const s149 = {
+export const s154 = {
   "count": 200,
   "cursor": "1999",
   "from": "1000",
@@ -3976,7 +4050,7 @@ export const s149 = {
 } satisfies redis.TsRangeQuery;
 
 // TsRangePage
-export const s150 = {
+export const s155 = {
   "next": null,
   "samples": [
     {
@@ -3990,7 +4064,7 @@ export const s150 = {
 } satisfies redis.TsRangePage | null;
 
 // ModuleQuery.bloomExists(arg)
-export const s151 = {
+export const s156 = {
   "items": [
     {
       "t": "text",
@@ -4005,7 +4079,7 @@ export const s151 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.cuckooCount(arg)
-export const s152 = {
+export const s157 = {
   "items": [
     {
       "t": "text",
@@ -4016,7 +4090,7 @@ export const s152 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.cmsQuery(arg)
-export const s153 = {
+export const s158 = {
   "items": [
     {
       "t": "text",
@@ -4027,7 +4101,7 @@ export const s153 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.topkQuery(arg)
-export const s154 = {
+export const s159 = {
   "items": [
     {
       "t": "text",
@@ -4038,7 +4112,7 @@ export const s154 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.tdigestQuantile(arg)
-export const s155 = {
+export const s160 = {
   "op": "tdigestQuantile",
   "quantiles": [
     {
@@ -4049,7 +4123,7 @@ export const s155 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.tdigestByRank(arg)
-export const s156 = {
+export const s161 = {
   "op": "tdigestByRank",
   "ranks": [
     {
@@ -4060,7 +4134,7 @@ export const s156 = {
 } satisfies redis.ModuleQuery;
 
 // ModuleQuery.tdigestTrimmedMean(arg)
-export const s157 = {
+export const s162 = {
   "high": {
     "t": "text",
     "v": "0.9"
@@ -4073,7 +4147,7 @@ export const s157 = {
 } satisfies redis.ModuleQuery;
 
 // QueryResult
-export const s158 = {
+export const s163 = {
   "command": "BF.MEXISTS bf a b",
   "rows": [
     {
@@ -4100,7 +4174,7 @@ export const s158 = {
 } satisfies redis.QueryResult | null;
 
 // CommandHelp
-export const s159 = {
+export const s164 = {
   "arity": -3,
   "complexity": "O(1)",
   "deprecatedSince": null,
@@ -4121,19 +4195,19 @@ export const s159 = {
 } satisfies redis.CommandHelp;
 
 // BulkFilter(arg)
-export const s160 = {
+export const s165 = {
   "keyType": "hash",
   "pattern": "user:*"
 } satisfies redis.BulkFilter;
 
 // BulkFilter.any(arg)
-export const s161 = {
+export const s166 = {
   "keyType": null,
   "pattern": ""
 } satisfies redis.BulkFilter;
 
 // BulkCount
-export const s162 = {
+export const s167 = {
   "cluster": false,
   "complete": false,
   "db": 2,
@@ -4144,7 +4218,7 @@ export const s162 = {
 } satisfies redis.BulkCount;
 
 // BulkTtlRequest(arg)
-export const s163 = {
+export const s168 = {
   "action": {
     "kind": "expire",
     "ttlMs": "60000"
@@ -4157,7 +4231,7 @@ export const s163 = {
 } satisfies redis.BulkTtlRequest;
 
 // BulkTtlRequest.persist(arg)
-export const s164 = {
+export const s169 = {
   "action": {
     "kind": "persist"
   },
@@ -4171,12 +4245,12 @@ export const s164 = {
 } satisfies redis.BulkTtlRequest;
 
 // BulkTtlJob
-export const s165 = {
+export const s170 = {
   "jobId": "j1"
 } satisfies redis.BulkTtlJob;
 
 // BulkTtlStatus
-export const s166 = {
+export const s171 = {
   "action": {
     "kind": "expire",
     "ttlMs": "60000"
@@ -4207,7 +4281,7 @@ export const s166 = {
 } satisfies redis.BulkTtlStatus;
 
 // RedisEditRequest.tsAdd(arg)
-export const s167 = {
+export const s172 = {
   "edits": [
     {
       "op": "tsAdd",
@@ -4237,7 +4311,7 @@ export const s167 = {
 } satisfies redis.RedisEditRequest;
 
 // RedisEditRequest.tsDeleteRange(arg)
-export const s168 = {
+export const s173 = {
   "edits": [
     {
       "from": "-",
@@ -4264,7 +4338,7 @@ export const s168 = {
 } satisfies redis.RedisEditRequest;
 
 // RedisEditRequest.tsAlter(arg)
-export const s169 = {
+export const s174 = {
   "edits": [
     {
       "duplicatePolicy": null,
@@ -4299,7 +4373,7 @@ export const s169 = {
 } satisfies redis.RedisEditRequest;
 
 // RedisEditRequest.probabilistic(arg)
-export const s170 = {
+export const s175 = {
   "edits": [
     {
       "items": [
@@ -4330,7 +4404,7 @@ export const s170 = {
 } satisfies redis.RedisEditRequest;
 
 // RedisEditRequest.adds(arg)
-export const s171 = {
+export const s176 = {
   "edits": [
     {
       "items": [
@@ -4383,7 +4457,7 @@ export const s171 = {
 } satisfies redis.RedisEditRequest;
 
 // SearchIndex.raw
-export const s172 = {
+export const s177 = {
   "attributes": [
     {
       "attribute": "t",
@@ -4424,7 +4498,7 @@ export const s172 = {
 } satisfies redis.SearchIndex | null;
 
 // BulkTtlStatus.list
-export const s173 = [
+export const s178 = [
   {
     "action": {
       "kind": "persist"
@@ -4448,7 +4522,7 @@ export const s173 = [
 ] satisfies redis.BulkTtlStatus[];
 
 // BulkFilter.moduleType(arg)
-export const s174 = {
+export const s179 = {
   "keyType": {
     "other": "TSDB-TYPE"
   },
@@ -4456,7 +4530,7 @@ export const s174 = {
 } satisfies redis.BulkFilter;
 
 // update_info() sparkle
-export const s175 = {
+export const s180 = {
   "autoCheck": true,
   "currentVersion": "0.1.6",
   "mechanism": "sparkle",
@@ -4464,7 +4538,7 @@ export const s175 = {
 } satisfies updates.UpdateInfo;
 
 // update_info() tauri
-export const s176 = {
+export const s181 = {
   "autoCheck": false,
   "currentVersion": "0.1.6",
   "mechanism": "tauri",
@@ -4472,7 +4546,7 @@ export const s176 = {
 } satisfies updates.UpdateInfo;
 
 // update_info() none
-export const s177 = {
+export const s182 = {
   "autoCheck": false,
   "currentVersion": "0.1.6",
   "mechanism": "none",
@@ -4480,7 +4554,7 @@ export const s177 = {
 } satisfies updates.UpdateInfo;
 
 // update_check() available
-export const s178 = {
+export const s183 = {
   "date": "2026-10-28T14:00:00Z",
   "kind": "available",
   "notes": "## What's new\n\n- **New:** Updates",
@@ -4488,7 +4562,7 @@ export const s178 = {
 } satisfies updates.UpdateCheck;
 
 // update_check() available without notes
-export const s179 = {
+export const s184 = {
   "date": null,
   "kind": "available",
   "notes": null,
@@ -4496,35 +4570,35 @@ export const s179 = {
 } satisfies updates.UpdateCheck;
 
 // update_check() upToDate
-export const s180 = {
+export const s185 = {
   "kind": "upToDate"
 } satisfies updates.UpdateCheck;
 
 // update_check() sparkle
-export const s181 = {
+export const s186 = {
   "kind": "sparkle"
 } satisfies updates.UpdateCheck;
 
 // varve://update-progress
-export const s182 = {
+export const s187 = {
   "downloaded": 1048576,
   "total": 34603008
 } satisfies updates.UpdateProgress;
 
 // varve://update-progress without length
-export const s183 = {
+export const s188 = {
   "downloaded": 1048576,
   "total": null
 } satisfies updates.UpdateProgress;
 
 // set_mcp_settings(settings)
-export const s184 = {
+export const s189 = {
   "enabled": true,
   "port": 7465
 } satisfies mcp.McpSettings;
 
 // mcp_status() running
-export const s185 = {
+export const s190 = {
   "bridgeCommand": [
     "/Applications/Varve.app/Contents/MacOS/varve",
     "mcp"
@@ -4539,7 +4613,7 @@ export const s185 = {
 } satisfies mcp.McpStatus;
 
 // mcp_status() port taken
-export const s186 = {
+export const s191 = {
   "bridgeCommand": [],
   "error": "Port 7465 is in use by another program. Pick another port.",
   "settings": {
@@ -4551,7 +4625,7 @@ export const s186 = {
 } satisfies mcp.McpStatus;
 
 // mcp_status() off
-export const s187 = {
+export const s192 = {
   "bridgeCommand": [
     "C:\\Users\\me\\AppData\\Local\\Varve\\varve.exe",
     "mcp"
@@ -4566,7 +4640,7 @@ export const s187 = {
 } satisfies mcp.McpStatus;
 
 // ObjectDetails.composite.pg18
-export const s188 = subsetOf<ddl.ObjectDetails>()({
+export const s193 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "attributes": [
@@ -4596,7 +4670,7 @@ export const s188 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.database.ma123
-export const s189 = subsetOf<ddl.ObjectDetails>()({
+export const s194 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "charset": "utf8mb4",
@@ -4613,7 +4687,7 @@ export const s189 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.database.my97
-export const s190 = subsetOf<ddl.ObjectDetails>()({
+export const s195 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "charset": "utf8mb4",
@@ -4630,7 +4704,7 @@ export const s190 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.domain.pg18
-export const s191 = subsetOf<ddl.ObjectDetails>()({
+export const s196 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "baseType": "integer",
@@ -4659,7 +4733,7 @@ export const s191 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.enum.pg18
-export const s192 = subsetOf<ddl.ObjectDetails>()({
+export const s197 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "kind": "enumType",
@@ -4679,7 +4753,7 @@ export const s192 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.event.ma123
-export const s193 = subsetOf<ddl.ObjectDetails>()({
+export const s198 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4708,7 +4782,7 @@ export const s193 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.event.my97
-export const s194 = subsetOf<ddl.ObjectDetails>()({
+export const s199 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4737,7 +4811,7 @@ export const s194 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.ma123
-export const s195 = subsetOf<ddl.ObjectDetails>()({
+export const s200 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4768,7 +4842,7 @@ export const s195 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.my97
-export const s196 = subsetOf<ddl.ObjectDetails>()({
+export const s201 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4799,7 +4873,7 @@ export const s196 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.function.pg18
-export const s197 = subsetOf<ddl.ObjectDetails>()({
+export const s202 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "arguments": [
@@ -4847,7 +4921,7 @@ export const s197 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.matview.pg18
-export const s198 = subsetOf<ddl.ObjectDetails>()({
+export const s203 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -4895,7 +4969,7 @@ export const s198 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.policy.pg18
-export const s199 = subsetOf<ddl.ObjectDetails>()({
+export const s204 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "command": "all",
@@ -4914,7 +4988,7 @@ export const s199 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.ma123
-export const s200 = subsetOf<ddl.ObjectDetails>()({
+export const s205 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4945,7 +5019,7 @@ export const s200 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.my97
-export const s201 = subsetOf<ddl.ObjectDetails>()({
+export const s206 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "altered": null,
@@ -4976,7 +5050,7 @@ export const s201 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.procedure.pg18
-export const s202 = subsetOf<ddl.ObjectDetails>()({
+export const s207 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "arguments": [
@@ -5018,7 +5092,7 @@ export const s202 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.range.pg18
-export const s203 = subsetOf<ddl.ObjectDetails>()({
+export const s208 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "canonical": null,
@@ -5040,7 +5114,7 @@ export const s203 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.rule.pg18
-export const s204 = subsetOf<ddl.ObjectDetails>()({
+export const s209 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -5056,7 +5130,7 @@ export const s204 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.schema.pg18
-export const s205 = subsetOf<ddl.ObjectDetails>()({
+export const s210 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -5069,7 +5143,7 @@ export const s205 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.ma123
-export const s206 = subsetOf<ddl.ObjectDetails>()({
+export const s211 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "actionOrder": 1,
@@ -5092,7 +5166,7 @@ export const s206 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.my97
-export const s207 = subsetOf<ddl.ObjectDetails>()({
+export const s212 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "actionOrder": 1,
@@ -5115,7 +5189,7 @@ export const s207 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.trigger.pg18
-export const s208 = subsetOf<ddl.ObjectDetails>()({
+export const s213 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "comment": null,
@@ -5143,7 +5217,7 @@ export const s208 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.ma123
-export const s209 = subsetOf<ddl.ObjectDetails>()({
+export const s214 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "algorithm": "UNDEFINED",
@@ -5206,7 +5280,7 @@ export const s209 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.my97
-export const s210 = subsetOf<ddl.ObjectDetails>()({
+export const s215 = subsetOf<ddl.ObjectDetails>()({
   "engine": "mysql",
   "object": {
     "algorithm": "UNDEFINED",
@@ -5269,7 +5343,7 @@ export const s210 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // ObjectDetails.view.pg18
-export const s211 = subsetOf<ddl.ObjectDetails>()({
+export const s216 = subsetOf<ddl.ObjectDetails>()({
   "engine": "postgres",
   "object": {
     "checkOption": null,
@@ -5335,7 +5409,7 @@ export const s211 = subsetOf<ddl.ObjectDetails>()({
 });
 
 // TableDetails.items.ma106
-export const s212 = subsetOf<grid.TableDetails>()({
+export const s217 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5588,7 +5662,7 @@ export const s212 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.ma123
-export const s213 = subsetOf<grid.TableDetails>()({
+export const s218 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5841,7 +5915,7 @@ export const s213 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.ma106
-export const s214 = subsetOf<grid.TableDetails>()({
+export const s219 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -5958,7 +6032,7 @@ export const s214 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.ma123
-export const s215 = subsetOf<grid.TableDetails>()({
+export const s220 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -6075,7 +6149,7 @@ export const s215 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.my80
-export const s216 = subsetOf<grid.TableDetails>()({
+export const s221 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -6388,7 +6462,7 @@ export const s216 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.items.my97
-export const s217 = subsetOf<grid.TableDetails>()({
+export const s222 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": null,
@@ -6701,7 +6775,7 @@ export const s217 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.my80
-export const s218 = subsetOf<grid.TableDetails>()({
+export const s223 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": "1",
@@ -6818,7 +6892,7 @@ export const s218 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.mem.my97
-export const s219 = subsetOf<grid.TableDetails>()({
+export const s224 = subsetOf<grid.TableDetails>()({
   "engine": "mysql",
   "object": {
     "autoIncrement": "1",
@@ -6935,7 +7009,7 @@ export const s219 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.orders.pg13
-export const s220 = subsetOf<grid.TableDetails>()({
+export const s225 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -7770,7 +7844,7 @@ export const s220 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.orders.pg18
-export const s221 = subsetOf<grid.TableDetails>()({
+export const s226 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -8667,7 +8741,7 @@ export const s221 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted.pg13
-export const s222 = subsetOf<grid.TableDetails>()({
+export const s227 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": null,
@@ -8806,7 +8880,7 @@ export const s222 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted.pg18
-export const s223 = subsetOf<grid.TableDetails>()({
+export const s228 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": null,
@@ -8945,7 +9019,7 @@ export const s223 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted_p1.pg13
-export const s224 = subsetOf<grid.TableDetails>()({
+export const s229 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -9080,7 +9154,7 @@ export const s224 = subsetOf<grid.TableDetails>()({
 });
 
 // TableDetails.parted_p1.pg18
-export const s225 = subsetOf<grid.TableDetails>()({
+export const s230 = subsetOf<grid.TableDetails>()({
   "engine": "postgres",
   "object": {
     "accessMethod": "heap",
@@ -9215,7 +9289,7 @@ export const s225 = subsetOf<grid.TableDetails>()({
 });
 
 // Planned<RedisEditPlan>
-export const s226 = {
+export const s231 = {
   "plan": {
     "checks": [
       "k is a string"
@@ -9234,7 +9308,7 @@ export const s226 = {
 } satisfies redis.Planned<redis.RedisEditPlan>;
 
 // Planned<RedisPlanView>
-export const s227 = {
+export const s232 = {
   "plan": {
     "destructive": true,
     "display": [
@@ -9249,7 +9323,7 @@ export const s227 = {
 } satisfies live.Planned<live.RedisPlanView>;
 
 // Planned<EditPlanView>
-export const s228 = {
+export const s233 = {
   "plan": {
     "destructive": true,
     "shown": [
@@ -9265,7 +9339,7 @@ export const s228 = {
 } satisfies ddl.Planned<ddl.EditPlan>;
 
 // Planned<EditPlanView>.runTime
-export const s229 = {
+export const s234 = {
   "plan": {
     "destructive": false,
     "shown": [
@@ -9287,7 +9361,7 @@ export const s229 = {
 } satisfies ddl.Planned<ddl.EditPlan>;
 
 // EditApplied
-export const s230 = {
+export const s235 = {
   "durationMs": 4,
   "outputs": [
     {
@@ -9307,7 +9381,7 @@ export const s230 = {
 } satisfies ddl.EditApplied;
 
 // DdlApplied
-export const s231 = {
+export const s236 = {
   "collationDatabase": "shop",
   "durationMs": 9,
   "output": {
@@ -9328,7 +9402,7 @@ export const s231 = {
 } satisfies ddl.DdlApplied;
 
 // SessionInfo
-export const s232 = {
+export const s237 = {
   "confirmDestructive": false,
   "connectionId": "c1",
   "database": null,
@@ -9353,7 +9427,7 @@ export const s232 = {
 } satisfies sessions.SessionInfo;
 
 // NotifyState
-export const s233 = {
+export const s238 = {
   "attempt": 2,
   "backendPid": 77,
   "channels": [
@@ -9378,7 +9452,7 @@ export const s233 = {
 } satisfies notify.NotifyState;
 
 // NotifyBatch
-export const s234 = {
+export const s239 = {
   "dropped": 0,
   "listenerId": 2,
   "messages": [
@@ -9396,7 +9470,7 @@ export const s234 = {
 } satisfies notify.NotifyBatch;
 
 // PubSubSubscriptionInfo[]
-export const s235 = [
+export const s240 = [
   {
     "channels": [
       "orders"
@@ -9413,7 +9487,7 @@ export const s235 = [
 ] satisfies redis.PubSubSubscriptionInfo[];
 
 // EditOutcome.applied
-export const s236 = {
+export const s241 = {
   "replies": [
     {
       "t": "text",
@@ -9428,7 +9502,7 @@ export const s236 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.conflict
-export const s237 = {
+export const s242 = {
   "edit": 0,
   "message": "changed",
   "reason": "valueChanged",
@@ -9436,7 +9510,7 @@ export const s237 = {
 } satisfies redis.RedisEditOutcome;
 
 // EditOutcome.failed
-export const s238 = {
+export const s243 = {
   "command": 1,
   "error": {
     "code": "OOM",
@@ -9451,7 +9525,7 @@ export const s238 = {
 } satisfies redis.RedisEditOutcome;
 
 // PubSubEvent.batch
-export const s239 = {
+export const s244 = {
   "dropped": 0,
   "kind": "batch",
   "messages": [
@@ -9472,7 +9546,7 @@ export const s239 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.subscribed
-export const s240 = {
+export const s245 = {
   "count": 1,
   "kind": "subscribed",
   "name": "orders",
@@ -9481,7 +9555,7 @@ export const s240 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.error
-export const s241 = {
+export const s246 = {
   "code": "NOPERM",
   "kind": "error",
   "message": "NOPERM",
@@ -9491,7 +9565,7 @@ export const s241 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.reconnecting
-export const s242 = {
+export const s247 = {
   "attempt": 1,
   "kind": "reconnecting",
   "reason": "lost",
@@ -9499,7 +9573,7 @@ export const s242 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.gap
-export const s243 = {
+export const s248 = {
   "kind": "gap",
   "lostAt": 1,
   "reason": "lost",
@@ -9508,26 +9582,26 @@ export const s243 = {
 } satisfies redis.PubSubEvent;
 
 // PubSubEvent.closed
-export const s244 = {
+export const s249 = {
   "kind": "closed",
   "reason": "unsubscribed",
   "subscriptionId": "sub1"
 } satisfies redis.PubSubEvent;
 
 // CmdError.invalid.0
-export const s245 = {
+export const s250 = {
   "kind": "invalid",
   "message": "bad"
 } satisfies errors.CmdError;
 
 // CmdError.notFound.1
-export const s246 = {
+export const s251 = {
   "kind": "notFound",
   "message": "This plan is no longer available."
 } satisfies errors.CmdError;
 
 // CmdError.session.2
-export const s247 = {
+export const s252 = {
   "error": {
     "error": {
       "code": "23505",
@@ -9544,7 +9618,7 @@ export const s247 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.3
-export const s248 = {
+export const s253 = {
   "error": {
     "kind": "notFound",
     "sessionId": "s1"
@@ -9553,7 +9627,7 @@ export const s248 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.4
-export const s249 = {
+export const s254 = {
   "error": {
     "environment": "production",
     "kind": "confirmationRequired",
@@ -9565,7 +9639,7 @@ export const s249 = {
 } satisfies errors.CmdError;
 
 // CmdError.session.5
-export const s250 = {
+export const s255 = {
   "error": {
     "kind": "openTransaction",
     "message": "open"
@@ -9574,19 +9648,19 @@ export const s250 = {
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.6
-export const s251 = {
+export const s256 = {
   "kind": "secretRequired",
   "secret": "db_password"
 } satisfies errors.CmdError;
 
 // CmdError.secretRequired.7
-export const s252 = {
+export const s257 = {
   "kind": "secretRequired",
   "secret": "tls_key_passphrase"
 } satisfies errors.CmdError;
 
 // CmdError.session.8
-export const s253 = {
+export const s258 = {
   "error": {
     "error": {
       "code": "tls_key_passphrase_wrong",
@@ -9603,19 +9677,19 @@ export const s253 = {
 } satisfies errors.CmdError;
 
 // CmdError.reconnectRequired.9
-export const s254 = {
+export const s259 = {
   "kind": "reconnectRequired",
   "message": "reconnect"
 } satisfies errors.CmdError;
 
 // CmdError.readOnly.10
-export const s255 = {
+export const s260 = {
   "kind": "readOnly",
   "message": "read only"
 } satisfies errors.CmdError;
 
 // CmdError.catalog.11
-export const s256 = {
+export const s261 = {
   "error": {
     "kind": "unsupported",
     "message": "no"
@@ -9624,7 +9698,7 @@ export const s256 = {
 } satisfies errors.CmdError;
 
 // CmdError.live.12
-export const s257 = {
+export const s262 = {
   "error": {
     "kind": "unsupported",
     "message": "This node is not part of a Galera cluster."
@@ -9633,7 +9707,7 @@ export const s257 = {
 } satisfies errors.CmdError;
 
 // CmdError.internal.13
-export const s258 = {
+export const s263 = {
   "kind": "internal",
   "message": "x"
 } satisfies errors.CmdError;
@@ -9782,6 +9856,11 @@ export const CONTRACT_IDS: readonly string[] = [
   "edit_plan.pg.constraintCommentRemoved(arg)",
   "record_export(record)",
   "record_export(record) without connection",
+  "activity(filter) newest first",
+  "activity(filter) sorted, next page",
+  "export_activity(filter)",
+  "activity -> Page",
+  "activity -> last Page",
   "MemoryAnalysis.stopped",
   "ValueChunk.timeSeries",
   "ValueChunk.probabilistic",

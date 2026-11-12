@@ -13,7 +13,7 @@ import { useDialogs } from '../composables/useDialogs';
 import { useToasts } from '../composables/useToasts';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useWorkspaceActions } from '../composables/useWorkspaceActions';
-import { formatDateTime, formatDay, formatTime } from '../lib/display';
+import { formatDateTime, formatDay } from '../lib/display';
 import {
   actionFilterTitle,
   CATEGORY_ICONS,
@@ -21,7 +21,7 @@ import {
   categoryTone,
   connectionFilterTitle,
   DEFAULT_SORT,
-  effectiveSort,
+  eventTime,
   groupEvents,
   hiddenSortTitle,
   nextSort,
@@ -37,7 +37,7 @@ import { activityFilterSchema } from '../lib/forms';
 import type { ActivityFilterValues } from '../lib/forms';
 import { formatCount, formatDuration, reindentJson } from '../lib/values';
 
-/** The local activity log (design doc 9.6): filters, newest first or sorted by a column, details, export and clear. */
+/** The local activity log (design doc 9.6): filters, sorted by any column over the whole log, details, export and clear. */
 const route = useRoute();
 const router = useRouter();
 const workspace = useWorkspace();
@@ -57,6 +57,13 @@ const RANGES: { value: Range; label: string }[] = [
 
 /** The time range (toggle buttons) and the categories (the category column's filter); the other fields are a validated form. */
 const filters = reactive<{ range: Range; categories: Category[] }>({ range: '7d', categories: [] });
+
+/**
+ * The order the column headers ask for. The backend sorts over every
+ * matching event and pages in that order, so a click loads the list again
+ * from the top and "Load more" continues the same order.
+ */
+const sort = ref<ActivitySort>(DEFAULT_SORT);
 
 const filterForm = useForm({
   validationSchema: toTypedSchema(activityFilterSchema),
@@ -79,8 +86,8 @@ const nextCursor = ref<string | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const selected = ref<ActivityEvent | null>(null);
-/** True when the loaded events are every event that matches their filter (no "Load more" left). */
-const allLoaded = ref(false);
+/** The order the shown events were loaded in; the header shows `sort` at once, the rows follow when the page arrives. */
+const listedSort = ref<ActivitySort>(DEFAULT_SORT);
 
 function rangeStart(range: Range): number | undefined {
   const now = new Date();
@@ -95,7 +102,7 @@ function rangeStart(range: Range): number | undefined {
  * cached value: the time range ("last 7 days") is computed when it is used.
  */
 function currentFilter(): ActivityFilter {
-  const out: ActivityFilter = { limit: 100 };
+  const out: ActivityFilter = { limit: 100, order: { ...sort.value } };
   const from = rangeStart(filters.range);
   if (from !== undefined) out.from = from;
   if (filters.categories.length > 0) out.categories = [...filters.categories];
@@ -112,7 +119,7 @@ function currentFilter(): ActivityFilter {
 const knownActions = computed(() => [...new Set(events.value.map((e) => e.action))].sort());
 
 let request = 0;
-/** The filter that produced `nextCursor`; "Load more" continues that filter, never one typed since. */
+/** The filter that produced `nextCursor`; "Load more" continues that filter and its order, never one chosen since. */
 let pageFilter: ActivityFilter | null = null;
 
 async function load(more = false): Promise<void> {
@@ -126,7 +133,7 @@ async function load(more = false): Promise<void> {
     if (mine !== request) return;
     events.value = more ? [...events.value, ...page.events] : page.events;
     nextCursor.value = page.nextCursor;
-    allLoaded.value = page.nextCursor === null;
+    listedSort.value = used.order ?? DEFAULT_SORT;
     pageFilter = used;
     error.value = null;
     if (!more) selected.value = null;
@@ -139,7 +146,14 @@ async function load(more = false): Promise<void> {
 
 let debounce: ReturnType<typeof setTimeout> | undefined;
 watch(
-  () => [filters.range, filters.categories.join(','), formValues.value.outcome, formValues.value.connectionId],
+  () => [
+    filters.range,
+    filters.categories.join(','),
+    formValues.value.outcome,
+    formValues.value.connectionId,
+    sort.value.column,
+    sort.value.direction,
+  ],
   () => {
     clearTimeout(debounce);
     void load();
@@ -176,31 +190,30 @@ function connectionName(id: string | null): string | null {
   return workspace.connection(id)?.name ?? 'Deleted connection';
 }
 
-// Sorting. The backend pages newest first only, so another order applies
-// once every matching event is loaded (lib/activityColumns.ts).
-
-const requestedSort = ref<ActivitySort>(DEFAULT_SORT);
-const sort = computed(() => effectiveSort(requestedSort.value, allLoaded.value));
+// Sorting: a new order reloads the list from the first page (the watch above).
 
 /** `key` is null for a column without sorting (the header passes its column's key as is). */
 function sortBy(key: ActivitySortKey | null): void {
-  // While more pages exist the button says why in its tooltip; it stays focusable so that tooltip can be read.
-  if (key === null || !allLoaded.value) return;
-  requestedSort.value = nextSort(sort.value, key);
+  if (key === null) return;
+  sort.value = nextSort(sort.value, key);
 }
 
-/** Back to the order the list loads in (the mark a narrow list shows for a sort on a column it hides). */
+/** Back to newest first (the mark a narrow list shows for a sort on a column it hides). */
 function sortByDefault(): void {
-  requestedSort.value = DEFAULT_SORT;
+  sort.value = DEFAULT_SORT;
 }
 
 function ariaSort(key: ActivitySortKey): 'ascending' | 'descending' | undefined {
-  return sort.value.key === key ? sort.value.direction : undefined;
+  return sort.value.column === key ? sort.value.direction : undefined;
 }
 
-const groups = computed(() =>
-  groupEvents(events.value, sort.value, formatDay, (e) => connectionName(e.connectionId) ?? ''),
-);
+/** Day headings when the shown events are in time order; one group without a heading otherwise. */
+const groups = computed(() => groupEvents(events.value, listedSort.value, formatDay));
+
+/** A row's time, with its date above it when the list has no day headings. */
+function rowTime(event: ActivityEvent): { date: string | null; time: string } {
+  return eventTime(event.occurredAt, listedSort.value);
+}
 
 // Column filters: each funnel opens a popover over the same filter state the list loads with.
 
@@ -439,7 +452,8 @@ async function exportLog(format: ActivityExportFormat): Promise<void> {
       filters: [format === 'csv' ? { name: 'CSV', extensions: ['csv'] } : { name: 'JSON Lines', extensions: ['jsonl'] }],
     });
     if (!path) return;
-    const { limit: _limit, ...exportFilter } = applied;
+    // The export is always newest first: it leaves the list's order out.
+    const { limit: _limit, order: _order, ...exportFilter } = applied;
     const count = await exportActivity(exportFilter, path, format);
     toasts.push('success', `Exported ${formatCount(count)} events`, path);
   } catch (e: unknown) {
@@ -580,13 +594,12 @@ async function clearLog(): Promise<void> {
                 v-if="c.sort"
                 type="button"
                 class="sort"
-                :class="{ sorted: sort.key === c.sort }"
-                :aria-disabled="allLoaded ? undefined : 'true'"
-                :title="sortTitle(c.sort, sort, allLoaded)"
+                :class="{ sorted: sort.column === c.sort }"
+                :title="sortTitle(c.sort, sort)"
                 @click="sortBy(c.sort)"
               >
                 <span class="sort-label">{{ c.label }}</span><Icon
-                  v-if="sort.key === c.sort"
+                  v-if="sort.column === c.sort"
                   :name="sort.direction === 'ascending' ? 'chevronUp' : 'chevronDown'"
                   :size="10"
                 />
@@ -660,9 +673,12 @@ async function clearLog(): Promise<void> {
         </p>
         <template
           v-for="g in groups"
-          :key="g.day"
+          :key="g.day ?? 'sorted'"
         >
-          <h2 class="day">
+          <h2
+            v-if="g.day !== null"
+            class="day"
+          >
             {{ g.day }}
           </h2>
           <ul class="events">
@@ -676,7 +692,13 @@ async function clearLog(): Promise<void> {
                 :aria-pressed="selected?.id === e.id"
                 @click="selected = e"
               >
-                <span class="time mono">{{ formatTime(e.occurredAt) }}</span>
+                <span
+                  class="time mono"
+                  :class="{ dated: rowTime(e).date !== null }"
+                ><span
+                  v-if="rowTime(e).date !== null"
+                  class="date"
+                >{{ rowTime(e).date }}</span><span>{{ rowTime(e).time }}</span></span>
                 <span
                   class="cat"
                   :class="`tone-${categoryTone(e.outcome)}`"
@@ -1118,13 +1140,8 @@ h1 {
 }
 
 .sort.sorted,
-.sort:hover:not([aria-disabled='true']) {
+.sort:hover {
   color: var(--text);
-}
-
-/* Sorting waits for every event to be loaded; the tooltip says so. */
-.sort[aria-disabled='true'] {
-  cursor: default;
 }
 
 .icon-btn.funnel {
@@ -1220,6 +1237,18 @@ h1 {
 
 .event .dur {
   text-align: right;
+}
+
+/* Sorted on another column there are no day headings: the date stands above the time. */
+.event .time.dated {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.event .time .date {
+  color: var(--text-subtle);
+  font-size: 11px;
 }
 
 .event .conn {
