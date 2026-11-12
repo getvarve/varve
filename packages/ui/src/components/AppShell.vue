@@ -69,6 +69,40 @@ function onDividerUp(event: PointerEvent): void {
   drag = null;
 }
 
+const shell = ref<HTMLElement | null>(null);
+
+/** How many pixels the texts of the sidebar's rows are cut off by, for the row that lacks the most. */
+function cutOff(side: Element): number {
+  let most = 0;
+  for (const row of side.querySelectorAll('.row, .menu-item')) {
+    let lacking = 0;
+    for (const part of row.children) lacking += Math.max(0, part.scrollWidth - part.clientWidth);
+    most = Math.max(most, lacking);
+  }
+  return most;
+}
+
+/**
+ * Makes the sidebar as wide as its rows need: no text cut off, and no wider than that. It measures the rows on
+ * screen at the smallest width and widens until nothing is cut off any more (a part of a row may take a share of
+ * the row's width, so one step is not always enough).
+ */
+function fitWidth(): void {
+  const root = shell.value;
+  const side = root?.querySelector('.side');
+  if (!root || !side) return;
+  let width = SIDEBAR_MIN;
+  for (let pass = 0; pass < 8; pass++) {
+    root.style.setProperty('--sidebar-width', `${width}px`);
+    const lacking = cutOff(side);
+    if (lacking === 0 || width >= SIDEBAR_MAX) break;
+    width = Math.min(SIDEBAR_MAX, width + lacking + 1);
+  }
+  sidebar.setWidth(width);
+  // The measuring wrote the width straight to the element; leave it at the width that was chosen.
+  root.style.setProperty('--sidebar-width', `${sidebar.state.width}px`);
+}
+
 function onDividerKey(event: KeyboardEvent): void {
   const width = sidebar.state.width;
   const next =
@@ -77,6 +111,11 @@ function onDividerKey(event: KeyboardEvent): void {
     : event.key === 'Home' ? SIDEBAR_MIN
     : event.key === 'End' ? SIDEBAR_MAX
     : null;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    fitWidth();
+    return;
+  }
   if (next === null) return;
   event.preventDefault();
   sidebar.setWidth(next);
@@ -128,6 +167,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div
+    ref="shell"
     class="shell"
     :class="{ collapsed: sidebar.state.collapsed }"
     :style="{ '--sidebar-width': `${sidebar.state.width}px` }"
@@ -166,19 +206,28 @@ onBeforeUnmount(() => {
             class="menu-item"
             to="/"
           >
-            <Icon name="home" />Workspace
+            <Icon
+              name="home"
+              :size="16"
+            />Workspace
           </RouterLink>
           <RouterLink
             class="menu-item"
             to="/activity"
           >
-            <Icon name="activity" />Activity
+            <Icon
+              name="activity"
+              :size="16"
+            />Activity
           </RouterLink>
           <RouterLink
             class="menu-item"
             to="/settings"
           >
-            <Icon name="settings" />Settings
+            <Icon
+              name="settings"
+              :size="16"
+            />Settings
           </RouterLink>
           <ExtensionSlot name="main-menu" />
         </nav>
@@ -203,12 +252,12 @@ onBeforeUnmount(() => {
         :aria-valuenow="sidebar.state.width"
         :aria-valuemin="SIDEBAR_MIN"
         :aria-valuemax="SIDEBAR_MAX"
-        title="Drag to resize, double click to reset"
+        title="Drag to resize, double click to fit the text"
         @pointerdown="onDividerDown"
         @pointermove="onDividerMove"
         @pointerup="onDividerUp"
         @pointercancel="onDividerUp"
-        @dblclick="sidebar.resetWidth()"
+        @dblclick="fitWidth"
         @keydown="onDividerKey"
       />
     </aside>
@@ -265,13 +314,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* The sidebar runs the full height beside the title bar, as a system sidebar does: its head
-   holds the button that hides it. Hidden, the title bar and the page take the whole width and
-   the button moves into the title bar. */
+/* The window frame follows the shared sizes of the app family, measured from a macOS 26 window: the sidebar is a
+   card that floats 8px inside the window with 10px to the content, its head holds the button that hides it on the
+   line of the window buttons, and the title strip is 52px with no line under it. Hidden, the title strip and the
+   page take the whole width and the button moves into the title strip. */
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: 44px minmax(0, 1fr) 24px;
+  grid-template-rows: 52px minmax(0, 1fr) 24px;
   height: 100%;
 }
 
@@ -287,18 +337,23 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  margin: 8px 10px 8px 8px;
   background: var(--chrome);
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  /* Concentric with the window's 26px corners, 8px further in. */
+  border-radius: 18px;
+  box-shadow: var(--shadow-card), var(--glass-edge);
 }
 
+/* 44px, so the first row starts 52px from the top of the window. The button's centre sits 26px from the top of the
+   window, on the line of the macOS window buttons, and its glyph ends 13px from the card's edge. */
 .side-head {
   flex: none;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   height: 44px;
-  /* 84px clears the macOS window buttons drawn over the bar. */
-  padding: 0 8px 0 84px;
+  padding: 3px 8px 0 0;
   user-select: none;
 }
 
@@ -308,23 +363,16 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 0 12px;
-  background: var(--chrome);
-  border-bottom: 1px solid var(--border);
+  padding: 0 8px 0 10px;
   user-select: none;
 }
 
-/* Without the sidebar the title bar starts under the macOS window buttons. */
+/* Without the sidebar the title strip starts under the macOS window buttons. */
 .shell.collapsed .titlebar {
   padding-left: 84px;
 }
 
 /* Windows and Linux draw their window buttons in a frame of their own. */
-:root[data-platform='windows'] .side-head,
-:root[data-platform='linux'] .side-head {
-  padding-left: 8px;
-}
-
 :root[data-platform='windows'] .shell.collapsed .titlebar,
 :root[data-platform='linux'] .shell.collapsed .titlebar {
   padding-left: 8px;
@@ -335,14 +383,15 @@ onBeforeUnmount(() => {
   grid-row: 3;
 }
 
-/* The edge of the sidebar: drag it, or use the arrow keys, to change the width. */
+/* The edge of the sidebar column: drag it, or use the arrow keys, to change the width. It sits in the gap between
+   the card and the content. */
 .divider {
   position: absolute;
-  top: 0;
-  right: -3px;
-  bottom: 0;
+  top: 18px;
+  right: -9px;
+  bottom: 18px;
   z-index: 1;
-  width: 6px;
+  width: 8px;
   cursor: col-resize;
   touch-action: none;
 }
@@ -350,29 +399,7 @@ onBeforeUnmount(() => {
 .divider:hover,
 .divider:focus-visible {
   outline: none;
-  background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
-}
-
-/* On glass the sidebar is a panel of its own that floats over the window, as on macOS 26. */
-:root[data-glass] .side {
-  margin: 6px 0 6px 6px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--glass-edge);
-}
-
-:root[data-glass] .side-head {
-  height: 38px;
-  padding-left: 78px;
-}
-
-:root[data-glass][data-platform='windows'] .side-head,
-:root[data-glass][data-platform='linux'] .side-head {
-  padding-left: 8px;
-}
-
-:root[data-glass] .sidebar {
-  border-radius: 0 0 11px 11px;
+  background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
 }
 
 .brand {
@@ -388,6 +415,7 @@ onBeforeUnmount(() => {
 }
 
 .brand-name {
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -403,19 +431,20 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
   min-height: 0;
   padding: 0 0 8px;
+  border-radius: 0 0 17px 17px;
   /* The whole sidebar scrolls, so extension sections below the tree are never clipped. */
   overflow-y: auto;
 }
 
+/* The navigation rows: 32px each with no gap, the fill 10px inside the card on both sides. A group without a label
+   is set apart by 13px of space. */
 .menu {
   display: flex;
   flex-direction: column;
-  padding-bottom: 8px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border-inner);
+  padding: 0 10px;
+  margin-bottom: 13px;
 }
 
 .menu-item,
@@ -423,8 +452,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: var(--row-tree);
+  height: 32px;
   padding: 0 12px;
+  border-radius: 8px;
   color: var(--text);
   text-decoration: none;
 }
@@ -440,9 +470,18 @@ onBeforeUnmount(() => {
   outline-offset: -2px;
 }
 
+/* The selected row is the system's rounded fill: grey while the content has focus, the system accent colour with
+   its own text colour while the sidebar has focus. The brand colour is only the fallback where the webview does not
+   know the system accent. */
 .menu-item.router-link-exact-active {
-  background: var(--accent-tint);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--row-selected);
+}
+
+.side:focus-within .menu-item.router-link-exact-active {
+  background: var(--accent);
+  background: AccentColor;
+  color: #FFFFFF;
+  color: AccentColorText;
 }
 
 .tree {
@@ -452,7 +491,7 @@ onBeforeUnmount(() => {
 .sidebar-foot {
   position: sticky;
   bottom: 0;
-  padding: 8px 12px;
+  padding: 8px 10px;
   background: var(--frost);
   /* Over glass the tree scrolls under this bar: frost it instead of letting rows show through. */
   -webkit-backdrop-filter: var(--overlay-blur);

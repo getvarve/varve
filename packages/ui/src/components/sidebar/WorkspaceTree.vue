@@ -816,7 +816,7 @@ function objectTitle(node: ObjNode): string | undefined {
         :aria-busy="row.item.type === 'status' && row.item.state.status === 'loading' ? true : undefined"
         :tabindex="tabStop === row.key ? 0 : -1"
         :draggable="draggable(row)"
-        :style="{ top: `${index * ROW_HEIGHT}px`, paddingLeft: `${8 + (row.level - 1) * 16}px` }"
+        :style="{ top: `${index * ROW_HEIGHT}px`, paddingLeft: `${12 + (row.level - 1) * 16}px` }"
         :title="row.item.type === 'object' ? objectTitle(row.item.node) : undefined"
         @focus="focusedKey = row.key"
         @click="focusRow(row.key)"
@@ -1118,10 +1118,12 @@ function objectTitle(node: ObjNode): string | undefined {
   list-style: none;
 }
 
+/* The fill of a row ends 10px inside the sidebar card on both sides, like the navigation rows above the tree. */
 .row {
   position: absolute;
-  right: 0;
-  left: 0;
+  right: 10px;
+  left: 10px;
+  border-radius: 8px;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -1140,10 +1142,15 @@ function objectTitle(node: ObjNode): string | undefined {
   outline: none;
 }
 
+/* The selected row is a rounded grey fill. It does not turn to the system accent colour with white text as the
+   navigation rows do: a tree row carries its own colours (environment, status, counts) that must stay readable. */
 .row:focus-visible,
 .row[aria-selected='true'] {
-  background: var(--accent-tint);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--row-selected);
+}
+
+.row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .row.current .name {

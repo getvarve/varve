@@ -97,8 +97,32 @@ describe('AppShell sidebar', () => {
     await divider.trigger('keydown', { key: 'Home' });
     expect(useSidebar().state.width).toBe(SIDEBAR_MIN);
     expect((wrapper.element as HTMLElement).style.getPropertyValue('--sidebar-width')).toBe(`${SIDEBAR_MIN}px`);
-    await divider.trigger('dblclick');
-    expect(useSidebar().state.width).toBe(SIDEBAR_IDEAL);
+    wrapper.unmount();
+  });
+
+  it('fits the width to the text on a double click of the divider', async () => {
+    const wrapper = shell();
+    await flushPromises();
+    const root = wrapper.element as HTMLElement;
+    // jsdom lays nothing out: stand in for a row whose name needs 300px at any sidebar width below 330.
+    const name = wrapper.get('.menu-item').element.firstElementChild as HTMLElement;
+    const needed = 330;
+    let fits = false;
+    Object.defineProperty(name, 'scrollWidth', { get: () => 300 });
+    Object.defineProperty(name, 'clientWidth', {
+      get: () => (fits ? 300 : Math.min(300, 300 - (needed - Number.parseInt(root.style.getPropertyValue('--sidebar-width'), 10)))),
+    });
+    useSidebar().setWidth(SIDEBAR_MAX);
+
+    await wrapper.get('.divider').trigger('dblclick');
+    expect(useSidebar().state.width).toBeGreaterThanOrEqual(needed);
+    expect(useSidebar().state.width).toBeLessThanOrEqual(needed + 2);
+    expect(root.style.getPropertyValue('--sidebar-width')).toBe(`${useSidebar().state.width}px`);
+
+    // Nothing cut off: it shrinks to the smallest width.
+    fits = true;
+    await wrapper.get('.divider').trigger('keydown', { key: 'Enter' });
+    expect(useSidebar().state.width).toBe(SIDEBAR_MIN);
     wrapper.unmount();
   });
 });

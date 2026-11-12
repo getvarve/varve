@@ -33,6 +33,9 @@
   --focus-ring: rgba(91, 75, 224, 0.20);
   --backdrop: rgba(20, 23, 28, 0.32);
   --shadow-dialog: 0 16px 48px rgba(20, 23, 28, 0.18);
+  /* The sidebar card over the window, and the fill of its selected row while the content has focus. */
+  --shadow-card: 0 1px 2px rgba(20, 23, 28, 0.06), 0 4px 12px rgba(20, 23, 28, 0.04);
+  --row-selected: #DCDCDC;
 
   --success: #2E9E64;
   --success-text: #1F7A4C;
@@ -130,6 +133,8 @@
     --focus-ring: rgba(139, 124, 255, 0.30);
     --backdrop: rgba(0, 0, 0, 0.55);
     --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.5);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+    --row-selected: var(--accent-tint);
     --success: #3FB97A;
     --success-text: #5FCB93;
     --success-tint: rgba(63, 185, 122, 0.16);
@@ -194,6 +199,8 @@
   --focus-ring: rgba(139, 124, 255, 0.30);
   --backdrop: rgba(0, 0, 0, 0.55);
   --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+  --row-selected: var(--accent-tint);
   --success: #3FB97A;
   --success-text: #5FCB93;
   --success-tint: rgba(63, 185, 122, 0.16);

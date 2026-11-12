@@ -1,10 +1,11 @@
 import { reactive, readonly } from 'vue';
 import { readStored, writeStored } from '../lib/storage';
 
-/** The sidebar's width range, the same as in the other apps of the family. */
+/** The sidebar's width range. The smallest and the default width are the same as in the other apps of the family. */
 export const SIDEBAR_MIN = 190;
 export const SIDEBAR_IDEAL = 220;
-export const SIDEBAR_MAX = 300;
+/** Wider than the family's 300: Varve's sidebar holds a deep tree of long object names. */
+export const SIDEBAR_MAX = 480;
 /** One arrow key press on the divider. */
 export const SIDEBAR_STEP = 10;
 
