@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { RouterLink, RouterView } from 'vue-router';
+import { RouterLink, RouterView, useRouter } from 'vue-router';
 import { setGlassShapes } from '../backend';
+import { installAppMenu } from '../composables/useAppMenu';
 import { installExternalChanges } from '../composables/useExternalChanges';
 import { installQuitGuard } from '../composables/useQuitGuard';
 import { SIDEBAR_MAX, SIDEBAR_MIN, SIDEBAR_STEP, useSidebar } from '../composables/useSidebar';
@@ -154,6 +155,9 @@ function fitWidth(): void {
   root.style.setProperty('--sidebar-width', `${sidebar.state.width}px`);
 }
 
+// The menu bar asks for a fit; the sidebar may have just been shown for it, so measure after the render.
+watch(sidebar.fitRequests, () => void nextTick(fitWidth));
+
 function onDividerKey(event: KeyboardEvent): void {
   const width = sidebar.state.width;
   const next =
@@ -175,6 +179,8 @@ function onDividerKey(event: KeyboardEvent): void {
 let removeQuitGuard: (() => void) | null = null;
 let removeUpdates: (() => void) | null = null;
 let removeExternalChanges: (() => void) | null = null;
+let removeAppMenu: (() => void) | null = null;
+const router = useRouter();
 let unmounted = false;
 
 onMounted(() => {
@@ -211,6 +217,14 @@ onMounted(() => {
     .catch((error: unknown) => {
       console.error('Could not set up the update checks', error);
     });
+  installAppMenu(router)
+    .then((remove) => {
+      if (unmounted) remove();
+      else removeAppMenu = remove;
+    })
+    .catch((error: unknown) => {
+      console.error('Could not follow the menu bar', error);
+    });
   installExternalChanges()
     .then((remove) => {
       if (unmounted) remove();
@@ -232,6 +246,7 @@ onBeforeUnmount(() => {
   removeQuitGuard?.();
   removeUpdates?.();
   removeExternalChanges?.();
+  removeAppMenu?.();
 });
 </script>
 

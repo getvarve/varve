@@ -194,6 +194,13 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
             request_quit(app);
         }
         RunEvent::MenuEvent(event) if event.id() == QUIT_MENU_ID => request_quit(app),
+        RunEvent::MenuEvent(event) if crate::menu::ui_action(event.id().as_ref()).is_some() => {
+            if let Some(action) = crate::menu::ui_action(event.id().as_ref())
+                && !crate::menu::send_ui_action(app, action)
+            {
+                tracing::warn!(action, "no window to carry out the menu action");
+            }
+        }
         #[cfg(target_os = "macos")]
         RunEvent::MenuEvent(event) if event.id() == crate::updates::CHECK_FOR_UPDATES_MENU_ID => {
             crate::updates::handle_menu_event(app, event.id().as_ref());
@@ -254,8 +261,10 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
     if crate::updates::menu_item_enabled() {
         items.push(&check_for_updates);
     }
+    let settings = crate::menu::settings(app)?;
     items.extend([
         &separators[0] as &dyn tauri::menu::IsMenuItem<R>,
+        &settings,
         &forget_secrets,
         &separators[1],
         &services,
@@ -288,12 +297,21 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
         &[
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, None)?,
-            &PredefinedMenuItem::close_window(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &window])
+    // Closing the window quits Varve, so Command-W closes the tab in front instead (File menu),
+    // as in other tabbed apps; the window closes with its red button or with Quit.
+    Menu::with_items(
+        app,
+        &[
+            &app_menu,
+            &crate::menu::file(app)?,
+            &edit,
+            &crate::menu::view(app)?,
+            &crate::menu::tools(app)?,
+            &window,
+        ],
+    )
 }
 
 /// The UI installed its quit handler; from now on quit requests ask it.

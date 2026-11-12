@@ -1,4 +1,4 @@
-import { reactive, readonly } from 'vue';
+import { reactive, readonly, ref } from 'vue';
 import { readStored, writeStored } from '../lib/storage';
 
 /** The sidebar's width range. The smallest and the default width are the same as in the other apps of the family. */
@@ -35,6 +35,9 @@ function load(): Stored {
 
 const state = reactive<Stored>(load());
 
+/** Counts the requests to fit the sidebar to its text (the menu bar asks; the shell, which can measure, does it). */
+const fitRequests = ref(0);
+
 function save(): void {
   writeStored(KEY, { collapsed: state.collapsed, width: state.width });
 }
@@ -58,6 +61,16 @@ export function useSidebar() {
     resetWidth(): void {
       state.width = SIDEBAR_IDEAL;
       save();
+    },
+    /** Changes on every request to fit the sidebar to its text. */
+    fitRequests: readonly(fitRequests),
+    /** Asks the shell to make the sidebar as wide as its text needs, and shows it first when it is hidden. */
+    requestFit(): void {
+      if (state.collapsed) {
+        state.collapsed = false;
+        save();
+      }
+      fitRequests.value += 1;
     },
     /** Reads the stored state again (tests). */
     reload(): void {

@@ -1,10 +1,13 @@
 import { flushPromises, mount } from '@vue/test-utils';
+import type * as VueRouter from 'vue-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SIDEBAR_IDEAL, SIDEBAR_MAX, SIDEBAR_MIN, useSidebar } from '../composables/useSidebar';
 import AppShell from './AppShell.vue';
 
 const setGlassShapes = vi.fn((_shapes: unknown[]) => Promise.resolve(true));
 vi.mock('../backend', () => ({ setGlassShapes: (shapes: unknown[]) => setGlassShapes(shapes) }));
+vi.mock('../composables/useAppMenu', () => ({ installAppMenu: () => Promise.resolve(() => undefined) }));
+vi.mock('vue-router', async (original) => ({ ...(await original<typeof VueRouter>()), useRouter: () => ({}) }));
 vi.mock('../composables/useWorkspace', () => ({ useWorkspace: () => ({ refresh: () => Promise.resolve() }) }));
 vi.mock('../composables/useWorkspaceActions', () => ({ useWorkspaceActions: () => ({ newConnection: vi.fn() }) }));
 vi.mock('../composables/useUpdates', () => ({
