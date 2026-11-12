@@ -1,0 +1,28 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Confirm your address{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="confirm-title">
+        {% if state == 'ask' %}
+            <h1 id="confirm-title">Confirm your address</h1>
+            <p class="lead">Confirm this address for your Varve account. Then you can sign in.</p>
+            {% if error %}
+                <p class="error" role="alert">{{ error }}</p>
+            {% endif %}
+            <form class="form" method="post" action="{{ path('app_confirm_email') }}">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('confirm_email') }}">
+                <button type="submit" class="button">Confirm</button>
+            </form>
+        {% elseif state == 'confirmed' %}
+            <h1 id="confirm-title">Address confirmed</h1>
+            <p class="lead">Your Varve account is ready. Sign in from the Varve app, or here.</p>
+            <p class="links"><a href="{{ path('app_login') }}">Sign in</a></p>
+        {% else %}
+            <h1 id="confirm-title">Link no longer works</h1>
+            <p class="lead">This link expired, was used already, or a newer one was sent since. If your address is not confirmed yet, ask for a new link.</p>
+            <p class="links"><a href="{{ path('app_resend_confirmation') }}">Send a new link</a> or <a href="{{ path('app_login') }}">sign in</a></p>
+        {% endif %}
+    </section>
+{% endblock %}

@@ -1,0 +1,47 @@
+framework:
+    rate_limiter:
+        # Sign-ups per IPv4 address or IPv6 /64 (App\Account\ClientAddress).
+        registration:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Account mail (confirmation links, password reset links) per receiving address, whoever asks for them.
+        account_mail_recipient:
+            policy: sliding_window
+            limit: 5
+            interval: '1 day'
+            cache_pool: cache.rate_limiter_shared
+        # The same mail per IPv4 address or IPv6 /64 that asks, whatever the address.
+        account_mail_sender:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Checking the current password before a password change or an account deletion, per user: a stolen access
+        # token must not be a way to guess the password.
+        password_check:
+            policy: sliding_window
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+
+when@prod:
+    framework:
+        cache:
+            pools:
+                # Shared by every API instance, so a limit holds across them.
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.redis
+                    provider: '%env(REDIS_URL)%'
+
+when@dev: &local_limits
+    framework:
+        cache:
+            pools:
+                # One API instance in development and tests. Kept across requests (unlike an array, which is reset after
+                # every request); tests reset the limits they use.
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.filesystem
+
+when@test: *local_limits

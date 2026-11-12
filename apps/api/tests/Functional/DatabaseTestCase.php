@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional;
 
 use Doctrine\DBAL\Connection;
+use Psr\Cache\CacheItemPoolInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
@@ -40,7 +41,9 @@ abstract class DatabaseTestCase extends WebTestCase
     }
 
     /**
-     * The JSON body of the last response.
+     * The JSON body of the last response; changes with every request.
+     *
+     * @phpstan-impure
      *
      * @return array<mixed>
      */
@@ -50,5 +53,26 @@ abstract class DatabaseTestCase extends WebTestCase
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    /** API_PUBLIC_URL, which the issuer of tokens and links in mail are built on. */
+    protected function apiAddress(): string
+    {
+        $address = $_SERVER['API_PUBLIC_URL'] ?? null;
+        self::assertIsString($address);
+
+        return rtrim($address, '/');
+    }
+
+    /**
+     * Forgets every rate limit: the sign-in form's, the account pages' and the password checks'. They live outside the
+     * database, so they outlive a test, and a failed sign-in counts against the network address of every test client
+     * (127.0.0.1) for 15 minutes.
+     */
+    protected function resetRateLimits(): void
+    {
+        $pool = static::getContainer()->get('cache.rate_limiter_shared');
+        self::assertInstanceOf(CacheItemPoolInterface::class, $pool);
+        self::assertTrue($pool->clear());
     }
 }

@@ -1,0 +1,26 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Confirm your address{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="resend-title">
+        <h1 id="resend-title">Send a new confirmation link</h1>
+        <p class="lead">Enter the address you signed up with. If its account still waits for confirmation, a new link is sent; earlier links stop working.</p>
+
+        {% include 'account/_form_error.html.twig' %}
+
+        <form class="form" method="post" action="{{ path('app_resend_confirmation') }}" novalidate>
+            <label class="field" for="email">
+                Email
+                <input type="email" id="email" name="email" value="{{ email }}" autocomplete="email" maxlength="320" required autofocus{% if errors.email is defined %} aria-invalid="true" aria-describedby="email-error"{% endif %}>
+                {% if errors.email is defined %}<span class="field-error" id="email-error">{{ errors.email }}</span>{% endif %}
+            </label>
+
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('resend_confirmation') }}">
+
+            <button type="submit" class="button">Send link</button>
+        </form>
+    </section>
+
+    <p class="footnote"><a href="{{ path('app_login') }}">Back to sign in</a></p>
+{% endblock %}

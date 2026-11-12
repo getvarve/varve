@@ -2,9 +2,45 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
+    # The browser session of the account pages (firewall `main`: /login, /oauth/authorize, signing up, confirming the
+    # address, resetting the password), the only place a session is started. It ends two hours after the last request
+    # or when the browser closes; "Keep me signed in" (the remember-me cookie in security.yaml) signs the browser in
+    # again for 30 days after that.
+    session:
+        cookie_lifetime: 0
+        cookie_secure: auto
+        cookie_httponly: true
+        cookie_samesite: lax
+        gc_maxlifetime: 7200
+
     #esi: true
     #fragments: true
+
+when@prod:
+    framework:
+        session:
+            # Kept in Redis, so every API instance sees the same session and a deploy signs nobody out.
+            handler_id: app.session_handler
+
+    services:
+        app.session_redis:
+            class: Redis
+            factory: ['Symfony\Component\Cache\Adapter\RedisAdapter', 'createConnection']
+            arguments: ['%env(REDIS_URL)%', { lazy: true }]
+        # Redis expires a session two hours after its last request (the ttl), so no garbage collection is needed.
+        app.session_handler:
+            class: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+            arguments: ['@app.session_redis', { prefix: 'session:', ttl: 7200 }]
+
+when@dev:
+    framework:
+        session:
+            # One API instance in development: files in var/sessions, which a restart keeps.
+            handler_id: session.handler.native_file
+            save_path: '%kernel.project_dir%/var/sessions/%kernel.environment%'
 
 when@test:
     framework:
         test: true
+        session:
+            storage_factory_id: session.storage.factory.mock_file

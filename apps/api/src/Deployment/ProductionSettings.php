@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Deployment;
 
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Exception\RfcComplianceException;
+
 /**
  * Whether a production server's settings are safe to start with. The repository's .env files hold development values
  * that are public; a production image falls back to them when a setting is missing, so every secret has to be set,
@@ -18,10 +21,15 @@ final readonly class ProductionSettings
     /** Secrets with the minimum length each needs. */
     public const array SECRETS = [
         'APP_SECRET' => 32,
+        'OAUTH_PASSPHRASE' => 16,
+        'OAUTH_ENCRYPTION_KEY' => 32,
     ];
 
     /** Addresses that must be a bare origin: tokens and links are built on them. */
     public const array ORIGINS = ['API_PUBLIC_URL'];
+
+    /** Addresses a server may leave empty (it then has no such thing), but that must be a bare origin when set. */
+    public const array OPTIONAL_ORIGINS = ['WEB_APP_URL'];
 
     /** The desktop app's own origins (WebKit on macOS and Linux, WebView2 on Windows). */
     public const array DESKTOP_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'];
@@ -62,7 +70,11 @@ final readonly class ProductionSettings
             }
         }
 
-        $problems = [...$problems, ...$this->originProblems(), ...$this->switchProblems()];
+        $problems = [...$problems, ...$this->originProblems(), ...$this->switchProblems(), ...$this->mailProblems()];
+
+        if (1 !== preg_match('{^rediss?://\S+$}', $this->value('REDIS_URL'))) {
+            $problems[] = 'REDIS_URL must be the redis:// or rediss:// address of your Redis, which holds sign-in sessions and limits.';
+        }
 
         $database = $this->value('DATABASE_URL');
         $password = rawurldecode((string) parse_url($database, \PHP_URL_PASS));
@@ -70,6 +82,32 @@ final readonly class ProductionSettings
             $problems[] = 'DATABASE_URL is not set to your database.';
         } elseif (\strlen($password) < 16) {
             $problems[] = 'The database password in DATABASE_URL must be at least 16 characters.';
+        }
+
+        return $problems;
+    }
+
+    /**
+     * Account mail (address confirmation, password reset) must go out, from an address of the server's own.
+     *
+     * @return list<string>
+     */
+    private function mailProblems(): array
+    {
+        $problems = [];
+        $dsn = $this->value('MAILER_DSN');
+        if ('' === $dsn || str_starts_with($dsn, 'null:') || 1 === preg_match(self::PLACEHOLDER, $dsn) || $this->isDevelopmentValue('MAILER_DSN', $dsn)) {
+            $problems[] = 'MAILER_DSN is not set to your mail server, such as smtp://user:password@smtp.example.com:587; account mail would go nowhere.';
+        }
+
+        $from = $this->value('VARVE_MAIL_FROM');
+        try {
+            $address = '' === $from ? null : Address::create($from)->getAddress();
+        } catch (RfcComplianceException|\InvalidArgumentException) {
+            $address = null;
+        }
+        if (null === $address || $this->isDevelopmentValue('VARVE_MAIL_FROM', $from) || 1 === preg_match('/@(localhost|[^@]*\.(test|example|invalid|localhost))$/i', $address)) {
+            $problems[] = 'VARVE_MAIL_FROM must be the sender of account mail on your own domain, such as "Varve <accounts@varve.example.com>".';
         }
 
         return $problems;
@@ -85,14 +123,26 @@ final readonly class ProductionSettings
             }
         }
 
+        foreach (self::OPTIONAL_ORIGINS as $name) {
+            $value = $this->value($name);
+            if ('' !== $value && !self::isOrigin($value)) {
+                $problems[] = \sprintf('%s must be empty or an https address as a browser writes it (lower case, no path, trailing slash or :443), such as https://varve.example.com.', $name);
+            }
+        }
+
         $cors = $this->value('CORS_ALLOW_ORIGIN');
         if (str_starts_with($cors, '^')) {
             $problems[] = 'CORS_ALLOW_ORIGIN must list origins separated by spaces, not a regular expression.';
         } else {
-            foreach (CorsOrigins::origins($cors) as $origin) {
+            $origins = CorsOrigins::origins($cors);
+            foreach ($origins as $origin) {
                 if (!\in_array($origin, self::DESKTOP_ORIGINS, true) && !self::isOrigin($origin)) {
                     $problems[] = \sprintf('CORS_ALLOW_ORIGIN lists "%s", which is not an https origin as a browser writes it, such as https://varve.example.com.', $origin);
                 }
+            }
+            $web = $this->value('WEB_APP_URL');
+            if (self::isOrigin($web) && !\in_array($web, $origins, true)) {
+                $problems[] = 'CORS_ALLOW_ORIGIN does not list WEB_APP_URL, so the web client cannot call the API.';
             }
         }
 

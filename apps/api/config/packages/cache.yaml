@@ -14,6 +14,25 @@ framework:
         # APCu (not recommended with heavy random-write workloads as memory fragmentation can cause perf issues)
         #app: cache.adapter.apcu
 
-        # Namespaced pools use the above "app" backend by default
         #pools:
             #my.dedicated.cache: null
+
+when@prod:
+    framework:
+        cache:
+            pools:
+                # What a refresh token rotation left behind for its short grace (App\Security\OAuth\RefreshTokenRotation);
+                # shared by every API instance.
+                cache.oauth_rotation:
+                    adapter: cache.adapter.redis
+                    provider: '%env(REDIS_URL)%'
+
+when@dev: &local_rotation
+    framework:
+        cache:
+            pools:
+                # One API instance in development and tests.
+                cache.oauth_rotation:
+                    adapter: cache.adapter.filesystem
+
+when@test: *local_rotation

@@ -1,0 +1,10 @@
+{% autoescape false %}
+Hi {{ name }},
+
+Confirm this address to finish creating your Varve account (the link works for two days):
+{{ link }}
+
+If you did not create a Varve account, ignore this mail: nobody can sign in with this address until it is confirmed.
+
+This mail was sent by the Varve server at {{ app_address }} because someone used this address there.
+{% endautoescape %}

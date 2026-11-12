@@ -3,10 +3,10 @@ security:
         Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: 'auto'
 
     providers:
-        # There are no accounts yet, so no request can sign in: everything under /api/ except server-info is refused.
-        no_users:
-            memory:
-                users: []
+        app_user_provider:
+            entity:
+                class: App\Entity\User
+                property: email
 
     firewalls:
         dev:
@@ -15,12 +15,57 @@ security:
         health:
             pattern: ^/health$
             security: false
+        # The token endpoint and token revocation (RFC 7009): clients identify themselves in the request.
+        oauth_token:
+            pattern: ^/oauth/(token|revoke)$
+            security: false
+        # Authorization server and protected resource metadata (RFC 8414, RFC 9728): public documents.
+        oauth_metadata:
+            pattern: ^/\.well-known/oauth-
+            security: false
+        # Bearer tokens issued by our own OAuth2 server to our own apps. Every one belongs to a device
+        # (App\Device\DeviceGuard): a signed-out device's tokens no longer work.
         api:
             pattern: ^/api/
             stateless: true
-            provider: no_users
+            provider: app_user_provider
+            oauth2: true
+        # Browser session used only for the account pages: signing in on the way to /oauth/authorize, signing up,
+        # confirming the address and resetting a forgotten password.
+        main:
+            lazy: true
+            provider: app_user_provider
+            user_checker: App\Security\ConfirmedEmailChecker
+            form_login:
+                login_path: app_login
+                check_path: app_login
+                enable_csrf: true
+                # A sign-in normally goes back to the /oauth/authorize request that asked for it; one opened directly
+                # ends on a page that says so.
+                default_target_path: app_signed_in
+            # Five wrong passwords for one address from one network address, or 25 from one network address, lock the
+            # form for 15 minutes. In cache.rate_limiter_shared, so the limit holds across API instances.
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
+                cache_pool: cache.rate_limiter_shared
+            # "Keep me signed in" (on by default on the sign-in form): the browser signs in again from this cookie for
+            # 30 days after the session ended, as long as the refresh tokens of our apps. A new password ends it.
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000
+                secure: auto
+                httponly: true
+                samesite: lax
+                signature_properties: ['password']
+            # Only a POST from Varve gets here (App\Security\SignOutGuard); it ends the session and the cookie above.
+            logout:
+                path: app_logout
 
     access_control:
+        - { path: ^/login$, roles: PUBLIC_ACCESS }
+        - { path: ^/(register|confirm-email|forgot-password|reset-password|signed-in|signed-out)(/|$), roles: PUBLIC_ACCESS }
+        - { path: ^/oauth/authorize, roles: ROLE_USER }
         # What this server is: open before sign-in.
         - { path: ^/api/v1/server-info$, roles: PUBLIC_ACCESS }
         - { path: ^/api/, roles: IS_AUTHENTICATED_FULLY }

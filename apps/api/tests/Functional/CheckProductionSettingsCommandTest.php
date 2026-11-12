@@ -42,6 +42,8 @@ final class CheckProductionSettingsCommandTest extends KernelTestCase
         self::assertStringContainsString('APP_SECRET is still a development or example value', $output);
         self::assertStringContainsString('API_PUBLIC_URL must be an https address', $output);
         self::assertStringContainsString('CORS_ALLOW_ORIGIN must list origins separated by spaces', $output);
+        self::assertStringContainsString('OAUTH_PASSPHRASE is still a development or example value', $output);
+        self::assertStringContainsString('MAILER_DSN is not set to your mail server', $output);
         self::assertStringNotContainsString('$ecretf0rt3st', $output, 'No secret is printed.');
     }
 
@@ -53,6 +55,12 @@ final class CheckProductionSettingsCommandTest extends KernelTestCase
             'API_PUBLIC_URL' => 'https://api.varve.example.com',
             'CORS_ALLOW_ORIGIN' => 'https://varve.example.com tauri://localhost http://tauri.localhost',
             'VARVE_BILLING' => '1',
+            'OAUTH_PASSPHRASE' => str_repeat('o', 24),
+            'OAUTH_ENCRYPTION_KEY' => str_repeat('k', 40),
+            'MAILER_DSN' => 'smtp://varve:'.str_repeat('m', 16).'@smtp.example.com:587',
+            'VARVE_MAIL_FROM' => 'Varve <accounts@varve.example.com>',
+            'WEB_APP_URL' => 'https://varve.example.com',
+            'REDIS_URL' => 'redis://redis:6379',
         ]);
         $tester = new CommandTester(new Application(self::bootKernel())->find('app:settings:check'));
 

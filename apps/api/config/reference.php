@@ -817,6 +817,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *             provider?: scalar|Param|null,
  *             user?: scalar|Param|null, // Default: "REMOTE_USER"
  *         },
+ *         oauth2?: array<mixed>,
  *         login_link?: array{
  *             check_route?: scalar|Param|null, // Route that will validate the login link - e.g. "app_login_link_verify".
  *             check_post_only?: scalar|Param|null, // If true, only HTTP POST requests to "check_route" will be handled by the authenticator. // Default: false
@@ -1014,6 +1015,60 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         roles?: Param|string|list<scalar|Param|null>,
  *     }>,
  *     role_hierarchy?: array<string, Param|string|list<scalar|Param|null>>,
+ * }
+ * @psalm-type LeagueOauth2ServerConfig = array{
+ *     authorization_server?: array{
+ *         private_key?: scalar|Param|null, // Full path to the private key file. How to generate a private key: https://oauth2.thephpleague.com/installation/#generating-public-and-private-keys
+ *         private_key_passphrase?: scalar|Param|null, // Passphrase of the private key, if any // Default: null
+ *         encryption_key?: scalar|Param|null, // The plain string or the ascii safe string used to create a Defuse\Crypto\Key to be used as an encryption key. How to generate an encryption key: https://oauth2.thephpleague.com/installation/#string-password
+ *         encryption_key_type?: scalar|Param|null, // The type of value of 'encryption_key' Should be either 'plain' or 'defuse' // Default: "plain"
+ *         access_token_ttl?: scalar|Param|null, // How long the issued access token should be valid for. The value should be a valid interval: http://php.net/manual/en/dateinterval.construct.php#refsect1-dateinterval.construct-parameters // Default: "PT1H"
+ *         refresh_token_ttl?: scalar|Param|null, // How long the issued refresh token should be valid for. The value should be a valid interval: http://php.net/manual/en/dateinterval.construct.php#refsect1-dateinterval.construct-parameters // Default: "P1M"
+ *         auth_code_ttl?: scalar|Param|null, // How long the issued auth code should be valid for. The value should be a valid interval: http://php.net/manual/en/dateinterval.construct.php#refsect1-dateinterval.construct-parameters // Default: "PT10M"
+ *         device_code_ttl?: scalar|Param|null, // How long the issued device code should be valid for. The value should be a valid interval: http://php.net/manual/en/dateinterval.construct.php#refsect1-dateinterval.construct-parameters // Default: "PT10M"
+ *         enable_client_credentials_grant?: bool|Param, // Whether to enable the client credentials grant // Default: true
+ *         enable_password_grant?: bool|Param, // Whether to enable the password grant // Default: false
+ *         enable_refresh_token_grant?: bool|Param, // Whether to enable the refresh token grant // Default: true
+ *         enable_auth_code_grant?: bool|Param, // Whether to enable the authorization code grant // Default: true
+ *         require_code_challenge_for_public_clients?: bool|Param, // Whether to require code challenge for public clients for the auth code grant // Default: true
+ *         enable_implicit_grant?: bool|Param, // Whether to enable the implicit grant // Default: false
+ *         persist_access_token?: bool|Param, // Whether to enable access token saving to persistence layer // Default: true
+ *         response_type_class?: scalar|Param|null, // Define a custom ResponseType // Default: null
+ *         revoke_refresh_tokens?: bool|Param, // Whether to revoke refresh tokens after they were used for all grant types // Default: true
+ *         enable_device_code_grant?: bool|Param, // Whether to enable the device code grant // Default: false
+ *         device_code_verification_uri?: scalar|Param|null, // The full URI the user will need to visit to enter the user code // Default: ""
+ *         enable_device_code_verification_uri_complete_generation?: bool|Param, // Whether to enable the generation of verification_uri_complete // Default: true
+ *         device_code_polling_interval?: scalar|Param|null, // How soon (in seconds) can the device code be used to poll for the access token without being throttled // Default: 5
+ *         enable_device_code_polling_interval_visibility?: bool|Param, // Whether to enable the visibility of polling interval // Default: true
+ *     },
+ *     resource_server?: array{
+ *         public_key?: scalar|Param|null, // Full path to the public key file How to generate a public key: https://oauth2.thephpleague.com/installation/#generating-public-and-private-keys
+ *         jwt_leeway?: scalar|Param|null, // The leeway in seconds to allow for clock skew in JWT verification. Default PT0S (no leeway). // Default: null
+ *     },
+ *     scopes?: array{
+ *         available?: list<scalar|Param|null>,
+ *         default?: list<scalar|Param|null>,
+ *     },
+ *     persistence?: array{ // Configures different persistence methods that can be used by the bundle for saving client and token data. Only one persistence method can be configured at a time.
+ *         doctrine?: array{
+ *             entity_manager?: scalar|Param|null, // Name of the entity manager that you wish to use for managing clients and tokens. // Default: "default"
+ *             table_prefix?: scalar|Param|null, // Table name prefix. // Default: "oauth2_"
+ *         },
+ *         in_memory?: scalar|Param|null,
+ *         custom?: array{
+ *             access_token_manager?: scalar|Param|null, // Service id of the custom access token manager
+ *             authorization_code_manager?: scalar|Param|null, // Service id of the custom authorization code manager
+ *             client_manager?: scalar|Param|null, // Service id of the custom client manager
+ *             refresh_token_manager?: scalar|Param|null, // Service id of the custom refresh token manager
+ *             device_code_manager?: scalar|Param|null, // Service id of the custom device code manager
+ *             credentials_revoker?: scalar|Param|null, // Service id of the custom credentials revoker
+ *         },
+ *     },
+ *     client?: array{
+ *         classname?: scalar|Param|null, // Set a custom client class. Must be a League\Bundle\OAuth2ServerBundle\Model\AbstractClient // Default: "League\\Bundle\\OAuth2ServerBundle\\Model\\Client"
+ *         allow_plaintext_secrets?: bool|Param|null, // Deprecated: The "allow_plaintext_secrets" option is deprecated. Value is ignored. Remove it from your configuration. // Plaintext client secrets are no longer supported. // Default: null
+ *     },
+ *     role_prefix?: scalar|Param|null, // Set a custom prefix that replaces the default 'ROLE_OAUTH2_' role prefix // Default: "ROLE_OAUTH2_"
  * }
  * @psalm-type NelmioCorsConfig = array{
  *     defaults?: array{
@@ -1747,6 +1802,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *     services?: ServicesConfig,
  *     framework?: FrameworkConfig,
  *     security?: SecurityConfig,
+ *     league_oauth2_server?: LeagueOauth2ServerConfig,
  *     nelmio_cors?: NelmioCorsConfig,
  *     monolog?: MonologConfig,
  *     doctrine?: DoctrineConfig,
@@ -1760,6 +1816,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         framework?: FrameworkConfig,
  *         maker?: MakerConfig,
  *         security?: SecurityConfig,
+ *         league_oauth2_server?: LeagueOauth2ServerConfig,
  *         nelmio_cors?: NelmioCorsConfig,
  *         monolog?: MonologConfig,
  *         doctrine?: DoctrineConfig,
@@ -1773,6 +1830,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         services?: ServicesConfig,
  *         framework?: FrameworkConfig,
  *         security?: SecurityConfig,
+ *         league_oauth2_server?: LeagueOauth2ServerConfig,
  *         nelmio_cors?: NelmioCorsConfig,
  *         monolog?: MonologConfig,
  *         doctrine?: DoctrineConfig,
@@ -1786,6 +1844,7 @@ use Symfony\Component\Config\Loader\ParamConfigurator as Param;
  *         services?: ServicesConfig,
  *         framework?: FrameworkConfig,
  *         security?: SecurityConfig,
+ *         league_oauth2_server?: LeagueOauth2ServerConfig,
  *         nelmio_cors?: NelmioCorsConfig,
  *         monolog?: MonologConfig,
  *         doctrine?: DoctrineConfig,

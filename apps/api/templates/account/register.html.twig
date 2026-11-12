@@ -1,0 +1,39 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Create an account{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="register-title">
+        <h1 id="register-title">Create an account</h1>
+        <p class="lead">Keep your connections, folders and saved queries in sync between your computers. Passwords and keys never leave them.</p>
+
+        {% include 'account/_form_error.html.twig' %}
+
+        <form class="form" method="post" action="{{ path('app_register') }}" novalidate>
+            <label class="field" for="email">
+                Email
+                <input type="email" id="email" name="email" value="{{ values.email }}" autocomplete="email" maxlength="320" required autofocus{% if errors.email is defined %} aria-invalid="true" aria-describedby="email-error"{% endif %}>
+                {% if errors.email is defined %}<span class="field-error" id="email-error">{{ errors.email }}</span>{% endif %}
+            </label>
+
+            <label class="field" for="name">
+                Name
+                <input type="text" id="name" name="name" value="{{ values.name }}" autocomplete="name" maxlength="120" required{% if errors.name is defined %} aria-invalid="true" aria-describedby="name-error"{% endif %}>
+                {% if errors.name is defined %}<span class="field-error" id="name-error">{{ errors.name }}</span>{% endif %}
+            </label>
+
+            <label class="field" for="password">
+                Password
+                <input type="password" id="password" name="password" autocomplete="new-password" minlength="12" required aria-describedby="password-hint{% if errors.password is defined %} password-error{% endif %}"{% if errors.password is defined %} aria-invalid="true"{% endif %}>
+                <span class="field-hint" id="password-hint">At least 12 characters.</span>
+                {% if errors.password is defined %}<span class="field-error" id="password-error">{{ errors.password }}</span>{% endif %}
+            </label>
+
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('register') }}">
+
+            <button type="submit" class="button">Create account</button>
+        </form>
+    </section>
+
+    <p class="footnote">Have an account? <a href="{{ path('app_login') }}">Sign in</a>.</p>
+{% endblock %}

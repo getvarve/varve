@@ -1,0 +1,17 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Check your mail{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="mail-sent-title">
+        <h1 id="mail-sent-title">Check your mail</h1>
+        {% if reason == 'reset' %}
+            <p class="lead">If <strong>{{ email }}</strong> has a Varve account, a link to set a new password is on its way. It works for an hour.</p>
+        {% else %}
+            <p class="lead">We sent a mail to <strong>{{ email }}</strong>. Open the link in it to confirm your address; it works for two days. Then sign in.</p>
+        {% endif %}
+        <p class="links">No mail after a few minutes? Look in your spam folder, or <a href="{{ path(reason == 'reset' ? 'app_forgot_password' : 'app_resend_confirmation', {email: email}) }}">ask again</a>.</p>
+    </section>
+
+    <p class="footnote"><a href="{{ path('app_login') }}">Back to sign in</a></p>
+{% endblock %}

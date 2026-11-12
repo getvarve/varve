@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{% block title %}Varve{% endblock %} · Varve</title>
+        <link rel="icon" type="image/svg+xml" href="/auth/varve.svg">
+        {% block stylesheets %}
+            <link rel="stylesheet" href="/auth/auth.css">
+        {% endblock %}
+    </head>
+    <body>
+        <main class="page">
+            <div class="brand">
+                <svg class="mark" width="32" height="32" viewBox="0 0 512 512" aria-hidden="true">
+                    <rect width="512" height="512" rx="114" class="mark-ground"/>
+                    <g fill="none" stroke-linecap="round" transform="rotate(-62 256 256)">
+                        <circle cx="256" cy="256" r="168" stroke-width="60" stroke-dasharray="880 1056" class="mark-outer"/>
+                        <circle cx="256" cy="256" r="96" stroke-width="44" stroke-dasharray="503 604" class="mark-inner"/>
+                    </g>
+                    <circle cx="256" cy="256" r="30" class="mark-dot"/>
+                </svg>
+                Varve
+            </div>
+
+            {% block body %}{% endblock %}
+        </main>
+    </body>
+</html>
