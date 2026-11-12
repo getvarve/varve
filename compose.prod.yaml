@@ -112,10 +112,15 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    # The image's check asks the web server, which only the API container runs. The worker exits after an hour or at
-    # its memory limit, and restart brings it back.
+    # The image's own check asks the web server, which only the API container runs. The worker is healthy while its
+    # consumer is the container's main process; it exits after an hour or at its memory limit, and restart brings it
+    # back. Without a check of its own, `up --wait` fails on some Compose versions.
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "tr '\\0' ' ' < /proc/1/cmdline | grep -q 'messenger:consume'"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s
     restart: unless-stopped
     logging: *logging
 

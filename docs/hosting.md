@@ -103,7 +103,7 @@ The command asks for a password, which you pass on to that person; they can sign
 
 All commands run in the server's folder.
 
-1. All five containers run, `api` is `healthy`, and `maintenance` is up (it has no health check of its own):
+1. All five containers run and are `healthy`:
 
    ```bash
    docker compose -f compose.prod.yaml ps
