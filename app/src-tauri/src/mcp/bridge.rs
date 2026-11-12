@@ -218,7 +218,6 @@ fn data_dir() -> Option<PathBuf> {
 }
 
 /// Entry point of `varve mcp`. Logs go to stderr: stdout is the protocol.
-#[must_use]
 pub fn main() -> ExitCode {
     let filter = tracing_subscriber::EnvFilter::try_from_env("VARVE_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));

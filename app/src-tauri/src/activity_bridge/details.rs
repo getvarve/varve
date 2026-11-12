@@ -300,8 +300,9 @@ impl Reader {
         let mut parts = Vec::new();
         let mut depth = 0i32;
         let mut start = from;
-        for at in from..to.min(self.toks.len()) {
-            match self.toks[at].kind {
+        let end = to.min(self.toks.len());
+        for (at, tok) in self.toks.iter().enumerate().take(end).skip(from) {
+            match tok.kind {
                 LexKind::Punct('(') => depth += 1,
                 LexKind::Punct(')') => depth -= 1,
                 LexKind::Punct(',') if depth == 0 => {

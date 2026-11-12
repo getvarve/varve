@@ -127,6 +127,22 @@ pub(super) fn options_json(array: &str, prefix: &str) -> String {
     )
 }
 
+/// Like [`options_json`], for the options of a table or index column
+/// (`pg_attribute.attoptions`), without the entries the server keeps there
+/// for itself. Their names start with `pg_` (PostgreSQL 18 images from
+/// November 2026 store `pg_attver` on every column), their values differ per
+/// table, and `ALTER ... SET (...)` does not accept them: shown as options
+/// they would make every copy of a table differ from its source and end up
+/// in DDL the server refuses. Options a user can set never start with `pg_`.
+pub(super) fn column_options_json(array: &str) -> String {
+    format!(
+        "(SELECT pg_catalog.json_agg(pg_catalog.json_build_object('name', o.option_name, \
+         'value', o.option_value) ORDER BY o.ord) \
+         FROM pg_catalog.pg_options_to_table({array}) WITH ORDINALITY o(option_name, option_value, ord) \
+         WHERE pg_catalog.\"left\"(o.option_name, 3) OPERATOR(pg_catalog.<>) 'pg_')"
+    )
+}
+
 /// `WITH (name = 'value', ...)` style list of options; names are quoted
 /// per dotted part.
 pub(super) fn option_list(options: &[PgOption], separator: &str) -> CatalogResult<String> {
@@ -377,6 +393,17 @@ mod tests {
         assert_eq!(setting_value("work_mem", "8MB")?, "'8MB'");
         assert_eq!(setting_value("search_path", "")?, "''");
         Ok(())
+    }
+
+    #[test]
+    fn column_options_leave_out_what_the_server_keeps_for_itself() {
+        let sql = column_options_json("a.attoptions");
+        assert!(sql.contains("pg_options_to_table(a.attoptions)"));
+        assert!(
+            sql.contains("pg_catalog.\"left\"(o.option_name, 3) OPERATOR(pg_catalog.<>) 'pg_'")
+        );
+        // The other option lists (tables, tablespaces, indexes) are read whole.
+        assert!(!options_json("c.reloptions", "").contains("'pg_'"));
     }
 
     #[test]

@@ -8,9 +8,9 @@ use crate::model::{CatalogResult, ObjectKind};
 use crate::rows::Row;
 
 use super::support::{
-    Pin, fetch, flag, int, is_lock_timeout, json, lit, non_empty, opt_int, opt_text, options_json,
-    pretty_bytes, strip_semicolon, system_relation, system_schema, text, text_list,
-    trigger_condition,
+    Pin, column_options_json, fetch, flag, int, is_lock_timeout, json, lit, non_empty, opt_int,
+    opt_text, options_json, pretty_bytes, strip_semicolon, system_relation, system_schema, text,
+    text_list, trigger_condition,
 };
 use crate::postgres::programs::{fdw_extension_sql, redact_option};
 
@@ -625,7 +625,7 @@ pub(super) async fn columns(
     } else {
         "NULL::pg_catalog.name"
     };
-    let options = options_json("a.attoptions", "");
+    let options = column_options_json("a.attoptions");
     let fdw_options = options_json("a.attfdwoptions", "");
     let sql = format!(
         "SELECT n.nspname AS schema, t.relname AS table_name, a.attname AS name, \
@@ -768,7 +768,7 @@ fn storage_name(code: &str) -> String {
 /// class with parameters is always listed, as the parameters need it.
 fn index_keys_sql() -> String {
     let n = "k.n OPERATOR(pg_catalog.-) 1";
-    let opclass_options = options_json("ia.attoptions", "");
+    let opclass_options = column_options_json("ia.attoptions");
     format!(
         "SELECT pg_catalog.json_agg(pg_catalog.json_build_object( \
            'definition', pg_catalog.pg_get_indexdef(i.indexrelid, k.n, true), \
