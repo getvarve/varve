@@ -30,6 +30,7 @@ Every release publishes the server as an image on GitHub's container registry, `
 - A Linux machine with [Docker Engine](https://docs.docker.com/engine/install/) and its Compose plugin, version 2.24 or newer (`docker compose version`). 1 GB of RAM is enough.
 - A DNS name for the server, such as `varve.example.com`, whose A (and, if you use IPv6, AAAA) record points at that machine.
 - Ports 80 and 443 of that machine reachable from the internet. The proxy uses port 80 to get its HTTPS certificate from Let's Encrypt and to send plain HTTP on to HTTPS.
+- A mail server (SMTP) that may send mail for an address on a domain of yours, such as your mail provider's SMTP server or a transactional mail service. The server mails a link to confirm a new account's address and a link to reset a forgotten password; without working mail nobody can finish signing up or reset a password.
 
 ### Files and settings
 
@@ -49,9 +50,23 @@ Then fill in `.env`. Docker Compose reads it from the folder by itself.
 | `VARVE_API_URL` | The address the app reaches the server at: `https://`, the DNS name in lower case, no path, no trailing slash. | Your DNS name, such as `https://varve.example.com`. |
 | `APP_SECRET` | The server's own secret. At least 32 characters. | `openssl rand -hex 32` |
 | `POSTGRES_PASSWORD` | The database password. At least 16 characters; use letters and digits only, since it goes into a URL. | `openssl rand -hex 24` |
+| `OAUTH_PASSPHRASE` | Encrypts the key the server signs its sign-in tokens with. At least 16 characters. | `openssl rand -hex 24` |
+| `OAUTH_ENCRYPTION_KEY` | Encrypts the refresh tokens the apps keep their sign-in with. At least 32 characters. | `openssl rand -hex 32` |
+| `MAILER_DSN` | The mail server account mail goes out through, as a URL: `smtp://<user>:<password>@<host>:<port>`. Characters such as `@`, `:` or `/` in the user or password are URL-encoded (`%40`, `%3A`, `%2F`). | From your mail provider, such as `smtp://varve%40example.com:<password>@smtp.example.com:587`. |
+| `VARVE_MAIL_FROM` | The sender of account mail: an address on your own domain that the mail server may send for. In quotes, because of the space. | Such as `"Varve <accounts@varve.example.com>"`. |
+| `VARVE_WEB_URL` | Optional: the address of a web client for this server, once you run one, written like `VARVE_API_URL`. Left out, only the desktop app signs in. | Your web client's address. |
 | `VARVE_VERSION` | Optional: the release to run. Left out, `latest`. | A version from the [releases](https://github.com/getvarve/varve/releases), such as `0.4.0`. |
 
 Generate every secret on the machine itself and keep a copy of `.env` somewhere safe. Set `POSTGRES_PASSWORD` before the first start: the database takes it once, when its volume is created, and ignores later changes. To change it afterwards, change it in the database first (`docker compose -f compose.prod.yaml exec postgres psql -U varve -d varve -c "ALTER USER varve PASSWORD '<new password>'"`), then in `.env`, then run `up -d` again.
+
+Two more settings are best set once and kept:
+
+- `OAUTH_PASSPHRASE` only applies when the signing key is made, on the first start. To change it, remove the key (`docker compose -f compose.prod.yaml run --rm --no-deps --entrypoint rm api -f config/jwt/private.pem config/jwt/public.pem`), set the new passphrase and run `up -d`: the API makes a new key, every access token the server handed out stops working, and each app has to renew its sign-in.
+- A new `OAUTH_ENCRYPTION_KEY` makes every refresh token unreadable: everyone signs in again on every device.
+
+A new `APP_SECRET` ends "Keep me signed in" in every browser.
+
+Many mail services only accept a sender on a domain you have verified with them. Send yourself a password reset after the first start (below) to check the mail settings: a wrong `MAILER_DSN` shows in `docker compose -f compose.prod.yaml logs api`.
 
 ### First start
 
@@ -59,21 +74,27 @@ Generate every secret on the machine itself and keep a copy of `.env` somewhere 
 docker compose -f compose.prod.yaml up -d
 ```
 
-This starts three containers: `postgres` (PostgreSQL 18, its data in the volume `varve_postgres_data`), `api` (the Varve server) and `proxy` (Caddy, which gets the HTTPS certificate for `VARVE_API_URL` and passes every request on to the API). Each restarts by itself after a crash or a reboot of the machine.
+This starts five containers, each of which restarts by itself after a crash or a reboot of the machine:
 
-Before anything else, the API checks its settings (`app:settings:check`). It refuses to start while a setting is missing, too short, still one of the development values in this repository, or while `VARVE_API_URL` is not a plain `https://` address, and lists every problem in its log. Once the settings are right, it migrates the database and starts serving. The first start takes up to a minute, including the certificate.
+- `postgres`: PostgreSQL 18, with everything the server keeps in the volume `varve_postgres_data`.
+- `redis`: Redis 8.8, which holds the sign-in pages' sessions, the limits on sign-ups, sign-in attempts and account mail, and a short grace period when an app renews its sign-in. It writes to disk (append-only, the volume `varve_redis_data`), so a restart keeps them.
+- `api`: the Varve server. It keeps the key it signs sign-in tokens with in the volume `varve_oauth_keys`.
+- `maintenance`: the same image, running the scheduled jobs: every night it removes sign-ups whose address was never confirmed and sign-in tokens that have expired.
+- `proxy`: Caddy, which gets the HTTPS certificate for `VARVE_API_URL` and passes every request on to the API. The API trusts it (and only containers of this stack can reach the API) to tell it each visitor's address, which the sign-in and sign-up limits count by.
+
+Before anything else, the API checks its settings (`app:settings:check`). It refuses to start while a setting is missing, too short, still one of the development values in this repository, while `VARVE_API_URL` (or `VARVE_WEB_URL`, when set) is not a plain `https://` address, or while the mail server or sender is missing, and lists every problem in its log. Once the settings are right, it makes its signing key on the first start (it keeps the one in `varve_oauth_keys` on every later start), migrates the database, creates or updates the OAuth2 clients of the desktop app and the web client, and starts serving. The `maintenance` container starts once the API is healthy. The first start takes up to a minute, including the certificate and the key.
 
 ### Check that it works
 
 All commands run in the server's folder.
 
-1. All three containers run, and `api` is `healthy`:
+1. All five containers run, `api` is `healthy`, and `maintenance` is up (it has no health check of its own):
 
    ```bash
    docker compose -f compose.prod.yaml ps
    ```
 
-   If `api` restarts over and over, read why: `docker compose -f compose.prod.yaml logs api`. A settings problem is listed there under "The production settings are not safe to start with".
+   If `api` restarts over and over, read why: `docker compose -f compose.prod.yaml logs api`. A settings problem is listed there under "The production settings are not safe to start with". `docker compose -f compose.prod.yaml logs maintenance` shows `Consuming messages from transport "scheduler_default"` once the worker runs.
 
 2. The settings check passes:
 
@@ -91,6 +112,8 @@ All commands run in the server's folder.
    ```
 
    `/health` answers `{"status":"ok","checks":{"database":"ok"}}` (and status 503 when the database does not answer). `/api/v1/server-info` answers `{"product":"varve","apiVersion":1,"billing":false,"trialDays":0}`; the app reads it to tell a Varve server, and whether it bills, before it signs in. If curl reports a certificate problem, check that the DNS name points at this machine and that port 80 is open, then read `docker compose -f compose.prod.yaml logs proxy`.
+
+4. Sign-in works: `curl https://varve.example.com/.well-known/oauth-authorization-server` names your address as `issuer`. Open `https://varve.example.com/register` in a browser, create your account, and open the link in the confirmation mail. Then use "Forgot your password?" on `https://varve.example.com/login` once: the reset mail proves the mail settings work for both kinds of mail.
 
 ### Updating
 
@@ -116,9 +139,15 @@ To go back to an older version, restore the backup you made before the update in
 
 ### Backups
 
-Everything the server keeps is in the PostgreSQL volume `varve_postgres_data`. The proxy's volumes hold only its certificates, which it fetches again by itself.
+Back up three things, and keep them off the machine:
 
-While the server runs, a dump is the simplest backup. Keep it off the machine:
+- The database, the volume `varve_postgres_data`: accounts, devices and everything the apps sync.
+- The signing key, the volume `varve_oauth_keys`. If it is lost, the API makes a new one on its next start: every access token the server handed out stops working at once, and each app has to renew its sign-in. The key is encrypted with `OAUTH_PASSPHRASE`, so a copy of it only works with that setting.
+- Your `.env`: without `OAUTH_PASSPHRASE` the key cannot be opened, and without `OAUTH_ENCRYPTION_KEY` no refresh token can be read.
+
+Redis (`varve_redis_data`) needs no backup: losing it only signs browsers out of the sign-in pages and resets the limits. The proxy's volumes hold only its certificates, which it fetches again by itself.
+
+While the server runs, a dump is the simplest backup of the database:
 
 ```bash
 docker compose -f compose.prod.yaml exec -T postgres pg_dump -U varve -d varve --format=custom > varve-$(date +%F).dump
@@ -132,7 +161,21 @@ docker compose -f compose.prod.yaml exec -T postgres pg_restore -U varve -d varv
 docker compose -f compose.prod.yaml up -d
 ```
 
-To copy the volume itself, as a disk snapshot would, stop the whole stack first so the files are consistent:
+The signing key never changes while the server runs, so copy it once after the first start (and again only if you make a new one):
+
+```bash
+docker run --rm -v varve_oauth_keys:/keys:ro -v "$PWD":/backup alpine tar -czf /backup/varve-oauth-keys.tar.gz -C /keys .
+```
+
+To restore it on a new machine, restore it before the API starts there for the first time; otherwise the API makes a new key and the restore has to replace it (stop the API first). `--numeric-owner` keeps the files the API's own (user id 1000) and the private key readable by it alone:
+
+```bash
+docker compose -f compose.prod.yaml up --no-start
+docker run --rm -v varve_oauth_keys:/keys -v "$PWD":/backup alpine tar -xzf /backup/varve-oauth-keys.tar.gz --numeric-owner -C /keys
+docker compose -f compose.prod.yaml up -d
+```
+
+To copy the database volume itself, as a disk snapshot would, stop the whole stack first so the files are consistent:
 
 ```bash
 docker compose -f compose.prod.yaml stop
@@ -148,7 +191,11 @@ A self-hosted server never bills anyone. `compose.prod.yaml` sets `VARVE_BILLING
 
 ### Without this compose file
 
-The image works with any container runtime. Give it the settings `compose.prod.yaml` gives the `api` container: `APP_ENV=prod`, `APP_SECRET`, `API_PUBLIC_URL` and `DEFAULT_URI` (both your `https://` address), `DATABASE_URL` (`postgresql://<user>:<password>@<host>:5432/<database>?serverVersion=18&charset=utf8`), `CORS_ALLOW_ORIGIN` (`tauri://localhost http://tauri.localhost`, separated by spaces), `SYMFONY_TRUSTED_PROXIES` (the addresses of your proxy, or `private_ranges`) and `VARVE_BILLING=0`. Exactly one API container needs `RUN_MIGRATIONS=1`: it migrates the database when it starts. The API listens on plain HTTP on port 80 inside the container and runs as user id 1000; put a proxy that terminates HTTPS in front of it. Its health check is `GET /health`.
+The image works with any container runtime. Give it the settings `compose.prod.yaml` gives the `api` container: `APP_ENV=prod`, `APP_SECRET`, `API_PUBLIC_URL` and `DEFAULT_URI` (both your `https://` address), `WEB_APP_URL` (your web client's address, or empty), `DATABASE_URL` (`postgresql://<user>:<password>@<host>:5432/<database>?serverVersion=18&charset=utf8`), `REDIS_URL` (`redis://<host>:6379`, or `rediss://` for TLS), `OAUTH_PASSPHRASE`, `OAUTH_ENCRYPTION_KEY`, `MAILER_DSN`, `VARVE_MAIL_FROM`, `CORS_ALLOW_ORIGIN` (the web client's address when there is one, then `tauri://localhost http://tauri.localhost`, separated by spaces), `SYMFONY_TRUSTED_PROXIES` and `VARVE_BILLING=0`.
+
+`SYMFONY_TRUSTED_PROXIES` lists the addresses of your proxy (or `private_ranges` when only the proxy can reach the API over a private network). The API takes a visitor's address from the proxy's `X-Forwarded-For` only when the request comes from one of them, and the limits on sign-ups, sign-in attempts and account mail count per visitor's address: with it unset, every visitor counts as the proxy's one address and a few wrong passwords lock the sign-in form for everyone. Never trust more than your proxy, or a visitor can claim any address.
+
+Exactly one API container needs `RUN_MIGRATIONS=1`: when it starts it makes the signing key in `/app/config/jwt` (once; keep that folder on a volume owned by user id 1000), migrates the database and creates the apps' OAuth2 clients. Every other container, more API containers and the worker, needs the same key: mount the volume read-only at `/app/config/jwt`. Run exactly one worker with the same settings and the command `php bin/console messenger:consume scheduler_default --time-limit=3600 --memory-limit=256M`, restarted whenever it exits. The API listens on plain HTTP on port 80 inside the container and runs as user id 1000; put a proxy that terminates HTTPS in front of it. Its health check is `GET /health`.
 
 ## Updates
 

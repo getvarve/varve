@@ -541,11 +541,23 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
-          extensions: pdo_pgsql, intl, sodium, zip, apcu
+          # The production image's extensions (docker/api/Dockerfile); redis is used only by the prod environment.
+          extensions: pdo_pgsql, redis, intl, sodium, zip, apcu
           tools: composer:v2
           coverage: none
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Generate OAuth2 signing keys
+        # Same as docker/api/entrypoint.sh: the passphrase comes from the .env files. The sign-in tests issue and check
+        # real tokens; 2048 bits is enough for a key that lives only as long as this job.
+        run: |
+          # The $ belongs to PHP.
+          # shellcheck disable=SC2016
+          OAUTH_PASSPHRASE="$(php -r 'require "vendor/autoload.php"; (new Symfony\Component\Dotenv\Dotenv())->bootEnv(".env"); echo $_SERVER["OAUTH_PASSPHRASE"];')"
+          export OAUTH_PASSPHRASE
+          mkdir -p config/jwt
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -aes-256-cbc -pass env:OAUTH_PASSPHRASE -out config/jwt/private.pem
+          openssl pkey -in config/jwt/private.pem -passin env:OAUTH_PASSPHRASE -pubout -out config/jwt/public.pem
       - name: Prepare test database
         env:
           APP_ENV: test
@@ -565,7 +577,8 @@ jobs:
         run: docker logs --tail 200 postgres
 
   # The production image (docker/api/Dockerfile) as the release publishes it, started with compose.prod.yaml: it must
-  # refuse missing and development settings, and serve /health and /api/v1/server-info over HTTPS with good ones
+  # refuse missing and development settings, and with good ones make its OAuth2 keys once, create the apps' OAuth2
+  # clients, start the maintenance worker and serve health, server-info and the sign-in pages over HTTPS
   # (scripts/ci/server-image-check.sh). Only amd64 here; the release builds arm64 too.
   server-image:
     name: Server image (build, settings check, start)
@@ -578,7 +591,7 @@ jobs:
         # retry.sh: Docker Hub answers "toomanyrequests" now and then. The build and compose.prod.yaml then find
         # every image here.
         run: |
-          for image in docker/dockerfile:1 dunglas/frankenphp:1.13-php8.5 composer:2 postgres:18-alpine caddy:2.10-alpine; do
+          for image in docker/dockerfile:1 dunglas/frankenphp:1.13-php8.5 composer:2 postgres:18-alpine redis:8.8-alpine caddy:2.10-alpine; do
             scripts/ci/retry.sh 4 docker pull --quiet "$image"
           done
       - name: Build the production image

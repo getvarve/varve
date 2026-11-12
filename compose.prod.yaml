@@ -10,6 +10,35 @@
 # varve-server) on the same machine.
 name: varve
 
+x-api-env: &api-env
+  APP_ENV: prod
+  APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+  DEFAULT_URI: ${VARVE_API_URL:?set VARVE_API_URL}
+  API_PUBLIC_URL: ${VARVE_API_URL}
+  # Optional: the web client's address, once it has a deployment. Its sign-in returns to <address>/auth/callback.
+  # Empty: this server has no web client, and only the desktop app signs in.
+  WEB_APP_URL: ${VARVE_WEB_URL:-}
+  # The origins that may call the API from a browser: the web client (when set) and the desktop app's own (WebKit and
+  # WebView2).
+  CORS_ALLOW_ORIGIN: ${VARVE_WEB_URL:-} tauri://localhost http://tauri.localhost
+  # Only the proxy in front talks to the API (the API publishes no port), and it tells the API the client's address
+  # and scheme. Docker gives the containers addresses in private ranges; nothing outside this stack can reach the API
+  # to claim another address. The sign-in, sign-up and account mail limits count per client address, so they rely on
+  # this: without it every visitor would count as the proxy's one address.
+  SYMFONY_TRUSTED_PROXIES: private_ranges
+  # The OAuth2 signing key (made on the first start, in the oauth_keys volume) is encrypted with OAUTH_PASSPHRASE;
+  # refresh tokens and authorization codes are encrypted with OAUTH_ENCRYPTION_KEY.
+  OAUTH_PASSPHRASE: ${OAUTH_PASSPHRASE:?set OAUTH_PASSPHRASE}
+  OAUTH_ENCRYPTION_KEY: ${OAUTH_ENCRYPTION_KEY:?set OAUTH_ENCRYPTION_KEY}
+  DATABASE_URL: postgresql://varve:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/varve?serverVersion=18&charset=utf8
+  # Sign-in sessions, sign-up and mail limits and the refresh token grace, shared by every API instance.
+  REDIS_URL: redis://redis:6379
+  # Account mail: address confirmation and password reset links.
+  MAILER_DSN: ${MAILER_DSN:?set MAILER_DSN}
+  VARVE_MAIL_FROM: ${VARVE_MAIL_FROM:?set VARVE_MAIL_FROM}
+  # Only Varve Cloud bills; a self-hosted server never bills, never blocks anyone and never contacts Stripe.
+  VARVE_BILLING: "0"
+
 services:
   proxy:
     image: caddy:2.10-alpine
@@ -30,21 +59,16 @@ services:
   api:
     image: ghcr.io/getvarve/varve-server:${VARVE_VERSION:-latest}
     environment:
-      APP_ENV: prod
-      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
-      DEFAULT_URI: ${VARVE_API_URL:?set VARVE_API_URL}
-      API_PUBLIC_URL: ${VARVE_API_URL}
-      # The origins that may call the API from a browser: the desktop app's own (WebKit and WebView2).
-      CORS_ALLOW_ORIGIN: tauri://localhost http://tauri.localhost
-      # Only the proxy in front talks to the API; it tells the API the client's address and scheme.
-      SYMFONY_TRUSTED_PROXIES: private_ranges
-      DATABASE_URL: postgresql://varve:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/varve?serverVersion=18&charset=utf8
-      # Only Varve Cloud bills; a self-hosted server never bills, never blocks anyone and never contacts Stripe.
-      VARVE_BILLING: "0"
-      # This container migrates the database on start, before it serves anything.
+      <<: *api-env
+      # This container makes the OAuth2 signing keys (once), migrates the database and creates the apps' OAuth2
+      # clients on start, before it serves anything.
       RUN_MIGRATIONS: "1"
+    volumes:
+      - oauth_keys:/app/config/jwt
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/health"]
@@ -52,6 +76,23 @@ services:
       timeout: 3s
       retries: 30
       start_period: 120s
+    restart: unless-stopped
+
+  # The nightly purges (abandoned sign-ups, expired tokens) of the schedule scheduler_default. The API image with
+  # another command; it starts once the API has migrated the database.
+  maintenance:
+    image: ghcr.io/getvarve/varve-server:${VARVE_VERSION:-latest}
+    command: ["php", "bin/console", "messenger:consume", "scheduler_default", "--time-limit=3600", "--memory-limit=256M"]
+    environment: *api-env
+    volumes:
+      - oauth_keys:/app/config/jwt:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    # The image's check asks the web server, which only the API container runs. The worker exits after an hour or at
+    # its memory limit, and restart brings it back.
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   postgres:
@@ -70,6 +111,18 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redis:
+    image: redis:8.8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
 configs:
   proxy:
     content: |
@@ -82,3 +135,6 @@ volumes:
   proxy_data:
   proxy_config:
   postgres_data:
+  redis_data:
+  # The OAuth2 signing keys. Losing them signs every app out.
+  oauth_keys:
