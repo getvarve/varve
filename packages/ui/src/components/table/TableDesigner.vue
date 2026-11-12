@@ -8,6 +8,7 @@ import type { SessionInfo } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
 import { buildDraftChanges, cloneDraft, draftFromDetails, newTableDraft, rebaseDraft, summarize } from '../../lib/gridDesigner';
 import type { TableDraft } from '../../lib/gridDesigner';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import ColumnsSection from './ColumnsSection.vue';
 import ConstraintsSection from './ConstraintsSection.vue';
@@ -578,6 +579,7 @@ async function reload(): Promise<void> {
           <span
             v-if="sectionChanges(s.id) > 0"
             class="badge changed"
+            :title="sectionChanges(s.id) === 1 ? 'One unsaved change' : `${sectionChanges(s.id)} unsaved changes`"
             :aria-label="`${sectionChanges(s.id)} unsaved`"
           >{{ sectionChanges(s.id) }}</span>
           <span
@@ -627,6 +629,7 @@ async function reload(): Promise<void> {
         <button
           type="button"
           class="icon-btn dismiss"
+          title="Dismiss"
           aria-label="Dismiss"
           @click="banner = null"
         >
@@ -707,6 +710,7 @@ async function reload(): Promise<void> {
           type="button"
           class="btn compact primary"
           :disabled="!dirty || planning || ctx.readOnly"
+          :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
           @click="preview"
         >
           {{ ctx.draft.isNew ? (ctx.draft.partitionBy.enabled ? 'Create partitioned table' : 'Create table') : 'Save' }}

@@ -274,6 +274,7 @@ async function exportBigKeys(): Promise<void> {
         v-if="usedShare !== null"
         class="meter used"
         role="img"
+        :title="`${Math.round(usedShare * 100)}% of maxmemory in use`"
         :aria-label="`${Math.round(usedShare * 100)}% of maxmemory in use`"
       ><span :style="{ width: `${usedShare * 100}%`, background: usedShare >= 0.9 ? 'var(--danger)' : usedShare >= 0.75 ? 'var(--warning)' : 'var(--accent)' }" /></span>
 

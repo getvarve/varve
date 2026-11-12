@@ -254,6 +254,7 @@ onBeforeUnmount(() => {
           <h2
             :id="titleId"
             class="title"
+            :title="title"
           >
             {{ title }}
           </h2>
@@ -262,6 +263,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="icon-btn"
+            title="Close (Esc)"
             aria-label="Close"
             @click="emit('close')"
           >

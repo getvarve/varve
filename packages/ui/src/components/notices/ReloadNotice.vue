@@ -24,6 +24,7 @@ onMounted(() => notice.load());
     <button
       type="button"
       class="icon-btn"
+      title="Dismiss"
       aria-label="Dismiss"
       @click="notice.dismiss()"
     >

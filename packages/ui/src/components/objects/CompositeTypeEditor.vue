@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { PgCompositeType } from '../../api/ddl';
 import { buildPgComposite, compositeReordered, errorsOf, objectRef, pgCompositeFormFrom, pgCompositeSchema } from '../../lib/ddlPlan';
 import type { PgCompositeForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
 import DdlView from './DdlView.vue';
@@ -79,6 +80,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -151,6 +153,7 @@ onMounted(() => void editor.load());
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Remove this attribute"
                     :aria-label="`Remove attribute ${a.name || i + 1}`"
                     @click="form.attributes.splice(i, 1)"
                   >

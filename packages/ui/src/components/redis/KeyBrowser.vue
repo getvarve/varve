@@ -21,6 +21,7 @@ import { entryForKey, scanBatch } from '../../lib/redisKeys';
 import type { RedisErrorView } from '../../lib/redisErrors';
 import { initCommandProblem } from '../../lib/redisInit';
 import { requiredFields } from '../../lib/schemaRequired';
+import { keyTypeTip, READ_ONLY_TIP } from '../../lib/tips';
 import { formatCount } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
@@ -607,7 +608,7 @@ async function retryAfterError(): Promise<void> {
           type="button"
           class="btn ghost compact"
           :disabled="!sessionId || readOnly || createEdit.state.planning"
-          :title="readOnly ? 'This connection is read-only.' : undefined"
+          :title="readOnly ? READ_ONLY_TIP : undefined"
           @click="creating = true"
         >
           <Icon name="plus" />New key
@@ -616,7 +617,7 @@ async function retryAfterError(): Promise<void> {
           type="button"
           class="btn ghost compact"
           :disabled="!sessionId || readOnly || !tab.scanned"
-          :title="readOnly ? 'This connection is read-only.' : 'Set or remove the TTL of every key that matches the filter'"
+          :title="readOnly ? READ_ONLY_TIP : 'Set or remove the TTL of every key that matches the filter'"
           @click="bulkTtl = true"
         >
           Bulk TTL
@@ -641,6 +642,7 @@ async function retryAfterError(): Promise<void> {
             <span class="label">MATCH<span
               v-if="required.has('pattern')"
               class="required"
+              title="Required"
               aria-hidden="true"
             > *</span></span>
             <input
@@ -824,7 +826,7 @@ async function retryAfterError(): Promise<void> {
           :aria-expanded="row.node.kind === 'prefix' ? row.expanded : undefined"
           :aria-selected="row.node.kind === 'key' && row.node.item.id === tab.selected"
           :aria-disabled="row.node.kind === 'key' && !row.node.item.openable ? true : undefined"
-          :title="row.node.kind === 'key' && !row.node.item.openable ? 'This key name is too large to read, so the key cannot be opened here.' : undefined"
+          :title="row.node.kind === 'key' && !row.node.item.openable ? 'This key name is too large to read, so the key cannot be opened here' : undefined"
           :tabindex="tabStop === row.node.key ? 0 : -1"
           :style="{ top: `${index * rowHeight}px`, paddingLeft: `${8 + (row.level - 1) * 16}px` }"
           @focus="focused = row.node.key"
@@ -837,15 +839,24 @@ async function retryAfterError(): Promise<void> {
               :size="12"
               class="subtle"
             />
-            <span class="name mono">{{ row.node.label }}</span>
-            <span class="count mono">{{ formatCount(row.node.count) }}</span>
+            <span
+              class="name mono"
+              :title="row.node.label"
+            >{{ row.node.label }}</span>
+            <span
+              class="count mono"
+              :title="row.node.count === 1 ? 'One key found under this prefix' : `${formatCount(row.node.count)} keys found under this prefix`"
+            >{{ formatCount(row.node.count) }}</span>
           </template>
           <template v-else>
             <span
               class="type mono"
-              :title="row.node.item.entry.keyType === 'unknown' ? 'Type not read yet; it is read when you open the key.' : undefined"
+              :title="keyTypeTip(row.node.item.entry.keyType)"
             >{{ TYPE_LABELS[keyTypeName(row.node.item.entry.keyType)] ?? keyTypeName(row.node.item.entry.keyType) }}</span>
-            <span class="name mono">{{ row.node.label }}</span>
+            <span
+              class="name mono"
+              :title="row.node.item.openable ? row.node.label : undefined"
+            >{{ row.node.label }}</span>
           </template>
         </li>
       </ul>

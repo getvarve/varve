@@ -73,6 +73,14 @@ describe('Modal initial focus', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
     wrapper.unmount();
   });
+
+  it('gives the Close button a tooltip with its key, and the title its full text for when it is cut short', async () => {
+    const wrapper = mountModal('Move “a very long folder name that does not fit”', []);
+    await flushPromises();
+    expect(document.querySelector('button[aria-label="Close"]')?.getAttribute('title')).toBe('Close (Esc)');
+    expect(document.querySelector('h2.title')?.getAttribute('title')).toBe('Move “a very long folder name that does not fit”');
+    wrapper.unmount();
+  });
 });
 
 describe('Modal keys and focus', () => {

@@ -5,6 +5,7 @@ import type { MyTrigger } from '../../api/ddl';
 import { isMissing } from '../../lib/ddlApply';
 import { buildMyTrigger, errorsOf, myTriggerFormFrom, myTriggerSchema, objectRef } from '../../lib/ddlPlan';
 import type { MyTriggerForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -95,6 +96,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop

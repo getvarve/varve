@@ -94,6 +94,7 @@ function run(): void {
         type="button"
         class="btn danger"
         :disabled="!enabled"
+        :title="enabled ? undefined : 'Type the connection name first'"
         @click="run"
       >
         Run EXPLAIN ANALYZE

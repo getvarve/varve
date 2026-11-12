@@ -9,6 +9,7 @@ import { isMissing } from '../../lib/ddlApply';
 import { parseQualified } from '../../lib/ddlText';
 import { buildPgTrigger, errorsOf, objectRef, pgAtLeast, pgTriggerFormFrom, pgTriggerSchema } from '../../lib/ddlPlan';
 import type { PgTriggerForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -188,6 +189,7 @@ onMounted(async () => {
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -206,6 +208,7 @@ onMounted(async () => {
             <button
               type="button"
               class="icon-btn"
+              title="New trigger"
               aria-label="New trigger"
               @click="emit('createObject', 'trigger', { database, schema: tableSchema, parent: tableName })"
             >
@@ -320,6 +323,7 @@ onMounted(async () => {
                 class="chip"
               >{{ c }}<button
                 type="button"
+                title="Remove this column"
                 :aria-label="`Remove ${c}`"
                 @click="form.updateColumns.splice(i, 1)"
               ><Icon
@@ -411,6 +415,7 @@ onMounted(async () => {
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Remove this argument"
                     :aria-label="`Remove argument ${n}`"
                     @click="removeArgument(n - 1)"
                   >

@@ -17,6 +17,7 @@ import {
   pgSequenceSchema,
 } from '../../lib/ddlPlan';
 import type { PgSequenceForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatCount } from '../../lib/values';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
@@ -153,6 +154,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -409,6 +411,7 @@ onMounted(() => void editor.load());
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly || resetError !== null"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="planReset"
               >
                 Preview reset

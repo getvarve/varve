@@ -481,10 +481,14 @@ function kindText(kind: ObjectKind): string {
               class="cell name"
             >
               <ObjectIcon :kind="row.kind" />
-              <span class="text">{{ row.name }}</span>
+              <span
+                class="text"
+                :title="row.summary.detail ? `${row.name}\n${row.summary.detail}` : row.name"
+              >{{ row.name }}</span>
               <span
                 v-if="row.summary.flags.length > 0"
                 class="flag"
+                :title="row.summary.flags.length > 1 ? row.summary.flags.join(', ') : undefined"
               >{{ row.summary.flags[0] }}</span>
             </div>
             <div
@@ -508,6 +512,7 @@ function kindText(kind: ObjectKind): string {
             <div
               role="gridcell"
               class="cell comment"
+              :title="row.comment ?? undefined"
             >
               {{ row.comment ?? '' }}
             </div>

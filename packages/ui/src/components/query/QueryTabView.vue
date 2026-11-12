@@ -8,6 +8,7 @@ import { useToasts } from '../../composables/useToasts';
 import type { QueryTab } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { errorMark } from '../../lib/errorPosition';
+import { isMacPlatform, READ_ONLY_BADGE_TIP, withKeys } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
 import RedisDbSelect from '../redis/RedisDbSelect.vue';
 import Icon from '../common/Icon.vue';
@@ -87,6 +88,12 @@ function saveAs(): void {
   void querySave.saveQueryTab(props.tab.id, 'saveAs');
 }
 
+/** Tooltips of the toolbar; Cancel has its shortcut only in the macOS menu bar. */
+const runTip = withKeys('Run', 'CmdOrCtrl+Enter');
+const cancelTip = withKeys('Cancel the statement', isMacPlatform() ? 'CmdOrCtrl+.' : null);
+const saveAsTip = withKeys('Save as a new saved query', 'CmdOrCtrl+Shift+S');
+const saveTip = computed(() => (props.tab.savedQuery ? withKeys('Save', 'CmdOrCtrl+S') : withKeys('Save as a saved query', 'CmdOrCtrl+S')));
+
 function onKeydown(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();
@@ -165,7 +172,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         type="button"
         class="btn primary compact"
         :disabled="tab.status !== 'ready'"
-        title="Run (Cmd or Ctrl+Enter)"
+        :title="runTip"
         @click="run()"
       >
         <Icon
@@ -177,6 +184,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         v-else
         type="button"
         class="btn compact"
+        :title="cancelTip"
         @click="cancelRun"
       >
         <Icon
@@ -188,7 +196,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         type="button"
         class="btn compact"
         :disabled="saving || !profile"
-        :title="tab.savedQuery ? 'Save (Cmd or Ctrl+S)' : 'Save as a saved query (Cmd or Ctrl+S)'"
+        :title="saveTip"
         @click="save"
       >
         <Icon name="save" />{{ tab.savedQuery ? 'Save' : 'Save as…' }}
@@ -198,6 +206,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         type="button"
         class="btn compact"
         :disabled="saving || !profile"
+        :title="saveAsTip"
         @click="saveAs"
       >
         Save as…
@@ -228,6 +237,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
       <span
         v-if="tab.session?.readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon
         name="lock"
         :size="11"

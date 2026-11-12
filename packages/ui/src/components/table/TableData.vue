@@ -54,6 +54,7 @@ import type { FilterCondition, GridFilter, SortKey } from '../../lib/gridSql';
 import { cachedEditText, opensInDialog, previewText, tooltipText } from '../../lib/gridPreview';
 import { columnAccess, emptyMeansNull, keyRefusal, parseCellText, pendingCellText, tableReadOnlyReason } from '../../lib/gridValues';
 import { exportText } from '../../lib/exportResult';
+import { offReason } from '../../lib/tips';
 import { cellClass, formatCount, formatDuration } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { TypedHeader } from '../query/typedHeader';
@@ -1087,6 +1088,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn small"
+            title="Remove this condition"
             :aria-label="`Remove condition ${c.column} ${conditionText(c).op} ${c.value}`"
             @click="removeCondition(n)"
           >
@@ -1268,6 +1270,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact"
           :disabled="!focusedRow"
+          :title="focusedRow ? undefined : 'Select a cell first'"
           @click="toggleDeleteFocused"
         >
           {{ focusedRow?.deleted ? 'Undo delete' : focusedRow?.kind === 'insert' ? 'Remove new row' : 'Delete row' }}
@@ -1277,6 +1280,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow || !focusedColumn.nullable"
+          :title="offReason([!focusedColumn || !focusedRow, 'Select a cell first'], [focusedColumn?.nullable === false, `${focusedColumn?.name} does not allow NULL`])"
           @click="setSpecial('null')"
         >
           Set NULL
@@ -1285,6 +1289,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow"
+          :title="focusedColumn && focusedRow ? undefined : 'Select a cell first'"
           @click="setSpecial('default')"
         >
           Set DEFAULT
@@ -1293,6 +1298,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow"
+          :title="focusedColumn && focusedRow ? undefined : 'Select a cell first'"
           @click="focusedRow && focusedColumn && openEditor(focusedRow.id, focusedColumn.name)"
         >
           Edit value…
@@ -1301,6 +1307,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedRow || !focusedColumn || !(focusedColumn.name in (focusedRow?.pending ?? {}))"
+          :title="offReason([!focusedRow || !focusedColumn, 'Select a cell first'], [!(focusedColumn && focusedRow && focusedColumn.name in focusedRow.pending), 'This cell has no change'])"
           @click="revertFocused"
         >
           Revert cell
@@ -1349,6 +1356,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
       <button
         type="button"
         class="icon-btn"
+        title="Dismiss"
         aria-label="Dismiss"
         @click="problem = null; problemRow = null"
       >
@@ -1393,6 +1401,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn bordered"
+            title="Previous page"
             aria-label="Previous page"
             :disabled="offset === 0 || loading"
             @click="page(-1)"
@@ -1406,6 +1415,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn bordered"
+            title="Next page"
             aria-label="Next page"
             :disabled="!hasNext || loading"
             @click="page(1)"
@@ -1465,6 +1475,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Previous record"
             aria-label="Previous record"
             :disabled="focusedIndex <= 0"
             @click="moveRecord(-1)"
@@ -1477,6 +1488,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Next record"
             aria-label="Next record"
             :disabled="focusedIndex < 0 || focusedIndex >= viewRows.length - 1"
             @click="moveRecord(1)"
@@ -1486,6 +1498,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Close record view"
             aria-label="Close record view"
             @click="recordOpen = false"
           >

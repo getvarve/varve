@@ -2,6 +2,7 @@
 import { computed, ref, useId } from 'vue';
 import { PG_CORE_INDEX_METHODS, isIndexModified, newIndex, pgIdentText, pgNameText, pgReindex } from '../../lib/gridDesigner';
 import type { IndexDraft } from '../../lib/gridDesigner';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatBytes } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { useDesigner } from './designerContext';
@@ -103,6 +104,7 @@ const preview = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly"
+        :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
         @click="add"
       >
         <Icon name="plus" />Add index
@@ -112,6 +114,7 @@ const preview = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || current.origName === null || current.dropped"
+        :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
         @click="reindex"
       >
         {{ ctx.serverMajor >= 12 ? 'Reindex concurrently' : 'Reindex' }}
@@ -120,6 +123,7 @@ const preview = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || fixedReason(current) !== null"
+        :title="current ? (fixedReason(current) ?? undefined) : undefined"
         @click="toggleDrop"
       >
         <Icon name="close" />{{ current?.dropped ? 'Keep' : 'Drop' }}
@@ -187,10 +191,12 @@ const preview = computed(() => {
                 <span
                   v-if="i.primary"
                   class="tag tone-warning"
+                  title="Primary key index"
                 >PK</span>
                 <span
                   v-else-if="i.constraint"
                   class="tag tone-info"
+                  :title="`Enforces the constraint ${i.constraint}`"
                 >CONSTRAINT</span>
                 <span
                   v-if="state(i) === 'new'"
@@ -252,6 +258,7 @@ const preview = computed(() => {
             type="button"
             class="btn compact"
             :disabled="ctx.readOnly"
+            :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
             @click="current.changed = true"
           >
             Redefine
@@ -431,6 +438,7 @@ const preview = computed(() => {
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Remove this part"
                     :aria-label="`Remove part ${n + 1}`"
                     :disabled="!editable"
                     @click="current.parts.splice(n, 1)"
@@ -472,6 +480,7 @@ const preview = computed(() => {
               >{{ name }}<button
                 type="button"
                 class="icon-btn small"
+                title="Remove from INCLUDE"
                 :aria-label="`Remove ${name} from INCLUDE`"
                 :disabled="!editable"
                 @click="current.include.splice(n, 1)"

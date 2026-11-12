@@ -21,6 +21,7 @@ import type { HistoryQuery, SystemTimeMode, VersioningForm } from '../../lib/ddl
 import { applyProblem, isMissing } from '../../lib/ddlApply';
 import type { ApplyProblem } from '../../lib/ddlApply';
 import { runWithConfirmation } from '../../lib/destructive';
+import { READ_ONLY_BADGE_TIP, READ_ONLY_TIP } from '../../lib/tips';
 import { cellText, formatCount, formatDuration } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import FormField from '../common/FormField.vue';
@@ -259,6 +260,7 @@ onMounted(load);
       <span
         v-if="session.readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon name="lock" />Read only</span>
       <span
         v-if="table?.rowEstimate !== null && table?.rowEstimate !== undefined"
@@ -543,6 +545,7 @@ onMounted(load);
                 type="button"
                 class="btn compact danger"
                 :disabled="session.readOnly || !beforeValid || deleting"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="deleteHistory"
               >
                 Delete history
@@ -589,6 +592,7 @@ onMounted(load);
               type="button"
               class="btn compact"
               :disabled="session.readOnly"
+              :title="session.readOnly ? READ_ONLY_TIP : undefined"
               @click="planDrop"
             >
               Preview drop
@@ -668,6 +672,7 @@ onMounted(load);
               type="button"
               class="btn compact"
               :disabled="session.readOnly || Object.keys(versioningErrors).length > 0"
+              :title="session.readOnly ? READ_ONLY_TIP : undefined"
               @click="planAdd"
             >
               Preview

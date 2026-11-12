@@ -5,6 +5,7 @@ import { computed, onMounted, ref, shallowRef, useId, watch } from 'vue';
 import { MAX_PAYLOAD_BYTES } from '../../api/notify';
 import { useToasts } from '../../composables/useToasts';
 import { useVisibleClock } from '../../composables/useVisibleClock';
+import { liveTip, READ_ONLY_TIP } from '../../lib/tips';
 import { formatCount } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import {
@@ -272,6 +273,7 @@ const pretty = ref(true);
             <button
               type="button"
               class="icon-btn"
+              title="Stop listening"
               :aria-label="`Stop listening to ${c}`"
               @click="unlisten(c)"
             >
@@ -376,7 +378,7 @@ const pretty = ref(true);
             type="submit"
             class="btn primary"
             :disabled="sending || readOnly"
-            :title="readOnly ? 'This connection is read-only.' : undefined"
+            :title="readOnly ? READ_ONLY_TIP : undefined"
           >
             Send
           </button>
@@ -400,11 +402,12 @@ const pretty = ref(true);
         <span
           v-if="status === 'connected'"
           class="pill tone-success"
-          :title="statusText(state)"
+          :title="`${statusText(state)}\n${liveTip(panel.paused, 'notifications')}`"
         ><span class="dot" />{{ panel.paused ? 'Paused' : 'Live' }} · {{ rate }}/s</span>
         <span
           v-else-if="status === 'reconnecting'"
           class="pill tone-warning"
+          :title="statusText(state)"
         >Reconnecting</span>
         <span
           v-else
@@ -495,6 +498,7 @@ const pretty = ref(true);
               <span
                 role="cell"
                 class="ellipsis"
+                :title="e.channel"
               >{{ e.channel }}</span>
               <span
                 role="cell"
@@ -541,6 +545,7 @@ const pretty = ref(true);
             type="button"
             class="btn ghost compact"
             :disabled="readOnly"
+            :title="readOnly ? READ_ONLY_TIP : undefined"
             @click="resend"
           >
             Send again

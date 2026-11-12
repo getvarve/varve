@@ -20,6 +20,7 @@ import {
   objectRef,
 } from '../../lib/ddlPlan';
 import type { ExtensionInstallForm } from '../../lib/ddlPlan';
+import { offReason, READ_ONLY_BADGE_TIP, READ_ONLY_TIP } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
@@ -298,11 +299,13 @@ onMounted(load);
       <span
         v-if="session.readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon name="lock" />Read only</span>
       <span class="grow" />
       <button
         type="button"
         class="icon-btn"
+        title="Reload the extension list"
         aria-label="Reload the extension list"
         :disabled="loading"
         @click="load"
@@ -406,6 +409,7 @@ onMounted(load);
                   type="button"
                   class="btn compact"
                   :disabled="session.readOnly || selected.availableUpdates.length === 0"
+                  :title="session.readOnly ? READ_ONLY_TIP : undefined"
                   @click="planAction('update')"
                 >
                   Update
@@ -428,6 +432,7 @@ onMounted(load);
                   type="button"
                   class="btn compact"
                   :disabled="session.readOnly || !selected.relocatable || moveSchema.trim() === '' || moveSchema.trim() === selected.schema"
+                  :title="session.readOnly ? READ_ONLY_TIP : undefined"
                   @click="planAction('schema')"
                 >
                   Move
@@ -529,6 +534,7 @@ onMounted(load);
                     <span
                       v-else-if="e.superuser && !e.trusted"
                       class="pill tone-warning"
+                      title="Only a superuser can install it"
                     >superuser</span>
                   </span>
                   <span
@@ -682,6 +688,7 @@ onMounted(load);
               type="button"
               class="btn compact"
               :disabled="!canInstall"
+              :title="offReason([session.readOnly, READ_ONLY_TIP], [picking && picked !== null && picked.installedVersion !== null, 'Already installed'])"
               @click="planAction('install')"
             >
               Preview install

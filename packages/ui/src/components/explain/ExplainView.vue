@@ -11,6 +11,7 @@ import { HIGHLIGHT_LABELS, PG_BLOCK_BYTES, explainLabel, findNode, flattenPlan, 
 import type { HighlightMode } from '../../lib/explainPlan';
 import { presentExplainError, runExplain } from '../../lib/explainRun';
 import type { ExplainConfirmation } from '../../lib/explainRun';
+import { offReason } from '../../lib/tips';
 import { formatBytes, prettyJson } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
@@ -271,6 +272,7 @@ defineExpose({
         type="button"
         class="btn compact"
         :disabled="!canRun"
+        :title="statement.trim() === '' ? 'Write a statement first' : undefined"
         @click="run(false)"
       >
         Explain
@@ -280,7 +282,7 @@ defineExpose({
           type="button"
           class="btn compact primary"
           :disabled="!canRun || (caps !== null && !caps.analyze)"
-          :title="caps && !caps.analyze ? 'This server version has no EXPLAIN ANALYZE' : ''"
+          :title="offReason([caps !== null && !caps.analyze, 'This server version has no EXPLAIN ANALYZE'], [statement.trim() === '', 'Write a statement first'])"
           @click="run(true)"
         >
           <Icon name="play" />Explain analyze
@@ -289,6 +291,7 @@ defineExpose({
           type="button"
           class="btn compact more"
           :aria-expanded="showOptions"
+          :title="`Explain options (${optionSummary})`"
           :aria-label="`Explain options: ${optionSummary}`"
           @click="showOptions = !showOptions"
         >

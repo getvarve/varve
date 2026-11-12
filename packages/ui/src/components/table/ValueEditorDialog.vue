@@ -110,6 +110,7 @@ function save(): void {
           role="radio"
           :aria-checked="mode === 'null'"
           :disabled="!writable || !column.nullable"
+          :title="writable && !column.nullable ? `${column.name} does not allow NULL` : undefined"
           @click="mode = 'null'"
         >
           NULL

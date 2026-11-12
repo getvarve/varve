@@ -3,7 +3,11 @@ import { computed } from 'vue';
 import type { Engine } from '../../api/records';
 import { ENGINE_INFO } from '../../lib/display';
 
-const props = defineProps<{ engine: Engine }>();
+const props = defineProps<{
+  engine: Engine;
+  /** The engine's name shows beside the tile, so the tile's tooltip would only repeat it. */
+  named?: boolean;
+}>();
 const info = computed(() => ENGINE_INFO[props.engine]);
 </script>
 
@@ -11,7 +15,7 @@ const info = computed(() => ENGINE_INFO[props.engine]);
   <span
     class="tile"
     :style="{ background: info.color }"
-    :title="info.name"
+    :title="named ? undefined : info.name"
   >{{ info.code }}</span>
 </template>
 

@@ -5,6 +5,7 @@ import type { MyTable, ObjectRef, PgTable } from '../../api/ddl';
 import { presentError, toCmdError } from '../../api/errors';
 import { buildPartitionAction, objectRef, partitionActions } from '../../lib/ddlPlan';
 import type { PartitionAction } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatBytes, formatCount } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import FormField from '../common/FormField.vue';
@@ -124,6 +125,7 @@ onMounted(load);
       <button
         type="button"
         class="icon-btn"
+        title="Reload partitions"
         aria-label="Reload partitions"
         :disabled="loading"
         @click="load"
@@ -200,6 +202,7 @@ onMounted(load);
                 <span
                   v-if="p.detachPending"
                   class="pill tone-warning"
+                  title="A concurrent detach did not finish: it needs DETACH PARTITION ... FINALIZE"
                 >detach pending</span>
               </td>
             </tr>
@@ -292,6 +295,7 @@ onMounted(load);
               type="button"
               class="btn compact"
               :disabled="session.readOnly || selected.length === 0"
+              :title="session.readOnly ? READ_ONLY_TIP : undefined"
               @click="planAction({ op: 'truncate', names: [...selected] })"
             >
               Truncate selected
@@ -301,6 +305,7 @@ onMounted(load);
               type="button"
               class="btn compact"
               :disabled="session.readOnly || selected.length === 0"
+              :title="session.readOnly ? READ_ONLY_TIP : undefined"
               @click="planAction({ op: 'drop', names: [...selected] })"
             >
               Drop selected
@@ -324,6 +329,7 @@ onMounted(load);
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly || countValue === null"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="countValue !== null && planAction({ op: 'addCount', count: countValue })"
               >
                 Add partitions
@@ -332,6 +338,7 @@ onMounted(load);
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly || countValue === null"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="countValue !== null && planAction({ op: 'coalesce', count: countValue })"
               >
                 Coalesce
@@ -342,6 +349,7 @@ onMounted(load);
             type="button"
             class="btn compact"
             :disabled="session.readOnly"
+            :title="session.readOnly ? READ_ONLY_TIP : undefined"
             @click="planAction({ op: 'remove' })"
           >
             Remove partitioning

@@ -51,6 +51,7 @@ const OUTCOME_TONE = { success: 'tone-success', failure: 'tone-danger', cancelle
       <button
         type="button"
         class="icon-btn"
+        title="Refresh history"
         aria-label="Refresh history"
         :disabled="loading"
         @click="load"
@@ -60,6 +61,7 @@ const OUTCOME_TONE = { success: 'tone-success', failure: 'tone-danger', cancelle
       <button
         type="button"
         class="icon-btn"
+        title="Close history"
         aria-label="Close history"
         @click="emit('close')"
       >

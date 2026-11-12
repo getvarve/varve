@@ -22,6 +22,7 @@ withDefaults(
       {{ label }}<span
         v-if="required"
         class="required"
+        title="Required"
         aria-hidden="true"
       > *</span><span
         v-if="required"

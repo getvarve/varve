@@ -25,6 +25,7 @@ import {
   reasonParts,
 } from '../../lib/redisPubSub';
 import type { ReceivedMessage, ViewEntry } from '../../lib/redisPubSub';
+import { liveTip, offReason, READ_ONLY_TIP } from '../../lib/tips';
 import { cellText, formatBytes, formatCount } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { namesOf, usePubSub } from './usePubSub';
@@ -385,6 +386,7 @@ watch(panel, (p) => {
             <button
               type="button"
               class="icon-btn"
+              title="Unsubscribe"
               :aria-label="`Unsubscribe from ${n.name}`"
               :disabled="panel.busy"
               @click="unsubscribe(n)"
@@ -485,7 +487,7 @@ watch(panel, (p) => {
             type="submit"
             class="btn primary"
             :disabled="publishing || readOnly"
-            :title="readOnly ? 'This connection is read-only.' : undefined"
+            :title="readOnly ? READ_ONLY_TIP : undefined"
           >
             Publish
           </button>
@@ -567,6 +569,7 @@ watch(panel, (p) => {
         <span
           v-else-if="live"
           class="pill tone-success"
+          :title="liveTip(panel.paused, 'messages')"
         ><span class="dot" />{{ panel.paused ? 'Paused' : 'Live' }} · {{ rate }} msg/s</span>
         <span
           v-else
@@ -666,6 +669,7 @@ watch(panel, (p) => {
               <span
                 role="cell"
                 class="ellipsis"
+                :title="m.channel"
               >{{ m.channel }}</span>
               <span
                 role="cell"
@@ -718,6 +722,7 @@ watch(panel, (p) => {
             type="button"
             class="btn ghost compact"
             :disabled="selected.truncated || selected.payload.t !== 'text'"
+            :title="offReason([selected.truncated, 'The payload was shortened, so it cannot be sent again'], [selected.payload.t !== 'text', 'Only text payloads can be sent again'])"
             @click="republish"
           >
             Republish

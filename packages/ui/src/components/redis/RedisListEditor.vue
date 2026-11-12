@@ -136,7 +136,7 @@ function push(end: 'head' | 'tail', allowEmpty = false): void {
                 class="btn ghost compact"
                 :aria-label="`Edit index ${item.index}`"
                 :disabled="!editableText(item.value)"
-                :title="editableText(item.value) ? undefined : 'Binary and very large values cannot be edited here.'"
+                :title="editableText(item.value) ? undefined : 'Binary and very large values cannot be edited here'"
                 @click="startEdit(item)"
               >
                 Edit
@@ -146,6 +146,7 @@ function push(end: 'head' | 'tail', allowEmpty = false): void {
                 class="btn ghost compact"
                 :aria-label="`Remove index ${item.index}`"
                 :disabled="!canReference(item.value)"
+                :title="canReference(item.value) ? undefined : 'This value is too large to read, so it cannot be changed here'"
                 @click="draft.stage({ op: 'listRemove', index: item.index, original: item.value })"
               >
                 Remove

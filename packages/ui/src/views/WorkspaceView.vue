@@ -14,6 +14,7 @@ import { showsView, TAB_VISIBLE_KEY, useTabs } from '../composables/useTabs';
 import type { TabKind, WorkspaceTab } from '../composables/useTabs';
 import { useWorkspace } from '../composables/useWorkspace';
 import { ENVIRONMENT_INFO } from '../lib/display';
+import { isMacPlatform, tabTip, withKeys } from '../lib/tips';
 import HomeView from './HomeView.vue';
 
 // AppShell keeps this view alive (`<KeepAlive include="WorkspaceView">`) while Activity or Settings is shown.
@@ -182,6 +183,15 @@ function envColor(tab: WorkspaceTab): string {
   return profile ? ENVIRONMENT_INFO[profile.environment].color : 'var(--border)';
 }
 
+/** The tab's full title and its connection's environment (the colour of its top edge). */
+function tipOf(tab: WorkspaceTab): string {
+  const profile = workspace.connection(tab.connectionId);
+  return tabTip(tab.title, profile ? { name: profile.name, environment: ENVIRONMENT_INFO[profile.environment].label } : null);
+}
+
+/** Close Tab has its shortcut in the macOS menu bar; the other systems have no menu bar. */
+const closeTip = withKeys('Close tab', isMacPlatform() ? 'CmdOrCtrl+W' : null);
+
 function dirty(tab: WorkspaceTab): boolean {
   return tab.kind === 'query' ? querySave.hasUnsavedEdits(tab) : tab.unsaved;
 }
@@ -290,6 +300,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
           class="tab"
           :class="{ active: tab.id === tabs.activeId.value }"
           :style="{ boxShadow: `inset 0 2px 0 ${envColor(tab)}` }"
+          :title="tipOf(tab)"
           @auxclick="onAuxClick($event, tab.id)"
         >
           <button
@@ -312,6 +323,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
               v-if="dirty(tab)"
               class="dirty"
               role="img"
+              title="Unsaved changes"
               aria-label="Unsaved changes"
             />
             <span
@@ -323,6 +335,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
             type="button"
             class="close"
             tabindex="-1"
+            :title="closeTip"
             :aria-label="`Close ${tab.title}`"
             @click="querySave.closeWithCheck(tab.id)"
           >

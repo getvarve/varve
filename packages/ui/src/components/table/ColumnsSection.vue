@@ -2,6 +2,7 @@
 import { computed, ref, useId } from 'vue';
 import { isColumnModified, moveColumn, newColumn } from '../../lib/gridDesigner';
 import type { ColumnDraft, DefaultKind } from '../../lib/gridDesigner';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import { useDesigner } from './designerContext';
 
@@ -47,6 +48,16 @@ function state(c: ColumnDraft): 'new' | 'dropped' | 'modified' | '' {
 function gutter(c: ColumnDraft): string {
   return { new: '+', dropped: '−', modified: '~', '': '' }[state(c)];
 }
+
+/** What the gutter's sign means. */
+const GUTTER_TIPS: Record<ReturnType<typeof state>, string | undefined> = {
+  new: 'New column',
+  dropped: 'Removed when you save',
+  modified: 'Changed',
+  '': undefined,
+};
+
+const KEY_TAG_TIPS: Record<string, string> = { PK: 'Part of the primary key', FK: 'Part of a foreign key' };
 
 function keyTag(c: ColumnDraft): string {
   const name = c.origName ?? c.name;
@@ -123,6 +134,7 @@ function disabled(c: ColumnDraft): boolean {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly"
+        :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
         @click="add"
       >
         <Icon name="plus" />Add column
@@ -131,6 +143,7 @@ function disabled(c: ColumnDraft): boolean {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || current.dropped"
+        :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
         @click="duplicate"
       >
         Duplicate
@@ -139,6 +152,7 @@ function disabled(c: ColumnDraft): boolean {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || current.locked !== null"
+        :title="current?.locked ?? undefined"
         @click="remove"
       >
         <Icon name="close" />{{ current?.dropped ? 'Keep' : 'Remove' }}
@@ -147,6 +161,7 @@ function disabled(c: ColumnDraft): boolean {
       <button
         type="button"
         class="icon-btn"
+        :title="fixedOrder ? 'PostgreSQL cannot reorder the columns of an existing table' : 'Move column up'"
         aria-label="Move column up"
         :disabled="ctx.readOnly || fixedOrder || atTop"
         @click="move(-1)"
@@ -159,6 +174,7 @@ function disabled(c: ColumnDraft): boolean {
       <button
         type="button"
         class="icon-btn"
+        :title="fixedOrder ? 'PostgreSQL cannot reorder the columns of an existing table' : 'Move column down'"
         aria-label="Move column down"
         :disabled="ctx.readOnly || fixedOrder || atBottom"
         @click="move(1)"
@@ -240,7 +256,10 @@ function disabled(c: ColumnDraft): boolean {
             @click="selected = c.id"
             @focusin="selected = c.id"
           >
-            <td class="gutter mono">
+            <td
+              class="gutter mono"
+              :title="GUTTER_TIPS[state(c)]"
+            >
               {{ gutter(c) }}
             </td>
             <td class="name">
@@ -255,6 +274,7 @@ function disabled(c: ColumnDraft): boolean {
                 v-if="keyTag(c)"
                 class="tag"
                 :class="keyTag(c) === 'PK' ? 'tone-warning' : 'tone-info'"
+                :title="KEY_TAG_TIPS[keyTag(c)]"
               >{{ keyTag(c) }}</span>
               <span
                 v-if="state(c) === 'new'"
@@ -381,7 +401,7 @@ function disabled(c: ColumnDraft): boolean {
                 v-model="c.invisible"
                 type="checkbox"
                 :aria-label="`${c.name} invisible`"
-                title="INVISIBLE: SELECT * leaves the column out; name it to read it."
+                title="INVISIBLE: SELECT * leaves the column out; name it to read it"
                 :disabled="disabled(c)"
               >
             </td>

@@ -302,6 +302,7 @@ function mark(key: keyof TablePropsDraft): string {
               <button
                 type="button"
                 class="icon-btn"
+                title="Remove this parent"
                 :aria-label="`Remove parent ${p.inherits[n] || n + 1}`"
                 :disabled="disabled"
                 @click="p.inherits.splice(n, 1)"
@@ -369,6 +370,7 @@ function mark(key: keyof TablePropsDraft): string {
                 <button
                   type="button"
                   class="icon-btn"
+                  title="Remove this parameter"
                   :aria-label="`Remove parameter ${param.name || n + 1}`"
                   :disabled="disabled"
                   @click="p.storageParams.splice(n, 1)"

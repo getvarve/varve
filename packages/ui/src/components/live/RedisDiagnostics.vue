@@ -17,6 +17,7 @@ import { useToasts } from '../../composables/useToasts';
 import { formatEntryTime, formatTime } from '../../lib/display';
 import { clientType, filterClients, formatSeconds } from '../../lib/live';
 import type { ClientType } from '../../lib/live';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { cellText, formatBytes, formatCount } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import LiveConfirm from './LiveConfirm.vue';
@@ -271,7 +272,7 @@ function seconds(n: number | null): string {
               type="button"
               class="btn compact"
               :disabled="readOnly || !slowlog || slowlog.length === 0"
-              :title="readOnly ? 'Read-only connection' : ''"
+              :title="readOnly ? READ_ONLY_TIP : ''"
               @click="resetSlowlog"
             >
               Reset log
@@ -350,6 +351,7 @@ function seconds(n: number | null): string {
               type="button"
               class="btn compact"
               :disabled="readOnly || !latency || latency.events.length === 0"
+              :title="readOnly ? READ_ONLY_TIP : undefined"
               @click="resetLatency"
             >
               Reset
@@ -560,6 +562,7 @@ function seconds(n: number | null): string {
                     type="button"
                     class="btn compact"
                     :disabled="readOnly"
+                    :title="readOnly ? READ_ONLY_TIP : undefined"
                     :aria-label="`Kill client ${c.id}`"
                     @click="killClient(c)"
                   >

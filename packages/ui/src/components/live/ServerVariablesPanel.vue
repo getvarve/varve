@@ -10,6 +10,7 @@ import { useDialogs } from '../../composables/useDialogs';
 import { useToasts } from '../../composables/useToasts';
 import { runWithConfirmation } from '../../lib/destructive';
 import { changeKind, checkVariableValue, filterVariables, isChanged, scopeLabel, scopedValue, variableCategory } from '../../lib/live';
+import { CHANGE_KIND_TIPS } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
 import GaleraSummary from './GaleraSummary.vue';
@@ -370,6 +371,7 @@ function inputId(name: string): string {
                   {{ shown(v) }}<span
                     v-if="v.pendingRestart"
                     class="pill tone-warning tiny"
+                    title="Changed: the new value takes effect after a server restart"
                   >restart pending</span>
                 </td>
                 <td class="mono wrap subtle">
@@ -379,6 +381,7 @@ function inputId(name: string): string {
                   <span
                     class="pill tiny"
                     :class="changeKind(v) === 'Dynamic' ? 'tone-success' : changeKind(v) === 'Read only' || changeKind(v) === 'Not settable' ? 'tone-neutral' : 'tone-warning'"
+                    :title="CHANGE_KIND_TIPS[changeKind(v)]"
                   >{{ changeKind(v) }}</span>
                 </td>
                 <td class="num">

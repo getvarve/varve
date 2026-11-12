@@ -2,6 +2,7 @@
 import { computed, ref, useId } from 'vue';
 import { isConstraintModified, newConstraint, pgValidateConstraint } from '../../lib/gridDesigner';
 import type { ConstraintDraft, ConstraintType, RefAction } from '../../lib/gridDesigner';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import { useDesigner } from './designerContext';
 
@@ -144,6 +145,7 @@ const canRedefine = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || (addType === 'primaryKey' && hasPrimary)"
+        :title="addType === 'primaryKey' && hasPrimary ? 'The table already has a primary key' : undefined"
         @click="add"
       >
         <Icon name="plus" />Add constraint
@@ -153,6 +155,7 @@ const canRedefine = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || current.origName === null || current.validated || current.dropped"
+        :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
         @click="validate"
       >
         Validate
@@ -161,6 +164,7 @@ const canRedefine = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || !current || current.locked !== null"
+        :title="current?.locked ?? undefined"
         @click="toggleDrop"
       >
         <Icon name="close" />{{ current?.dropped ? 'Keep' : 'Drop' }}
@@ -431,6 +435,7 @@ const canRedefine = computed(() => {
             <button
               type="button"
               class="icon-btn"
+              title="Remove this element"
               :aria-label="`Remove element ${n + 1}`"
               :disabled="!editable"
               @click="current.exclusion.splice(n, 1)"

@@ -13,6 +13,7 @@ import { applyProblem, planKept } from '../../lib/ddlApply';
 import type { ApplyProblem } from '../../lib/ddlApply';
 import { headerCollationDatabase, outline, sessionHeader, withoutComments } from '../../lib/ddlText';
 import { runWithConfirmation } from '../../lib/destructive';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatDuration } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { useNotices } from '../notices/useNotices';
@@ -242,6 +243,7 @@ async function act(): Promise<void> {
       <button
         type="button"
         class="icon-btn"
+        title="Reload the DDL"
         aria-label="Reload the DDL"
         :disabled="loading || running"
         @click="reload"
@@ -254,7 +256,7 @@ async function act(): Promise<void> {
           type="button"
           class="btn compact"
           :disabled="loading || !!loadError || session.readOnly"
-          :title="session.readOnly ? 'The connection is read only' : undefined"
+          :title="session.readOnly ? READ_ONLY_TIP : undefined"
           @click="startEditing"
         >
           Edit and run

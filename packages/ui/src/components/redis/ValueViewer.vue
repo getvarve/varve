@@ -597,7 +597,10 @@ const TYPE_TONE: Record<string, string> = {
         class="pill"
         :class="TYPE_TONE[keyTypeName(info?.keyType ?? entry.keyType)] ?? 'tone-neutral'"
       >{{ typeLabel }}</span>
-      <h2 class="mono key">
+      <h2
+        class="mono key"
+        :title="entry.display"
+      >
         {{ entry.display }}
       </h2>
       <template v-if="editable">
@@ -644,6 +647,7 @@ const TYPE_TONE: Record<string, string> = {
       <button
         type="button"
         class="icon-btn"
+        title="Reload key"
         aria-label="Reload key"
         :disabled="loading"
         @click="reloadAsked"
@@ -727,6 +731,7 @@ const TYPE_TONE: Record<string, string> = {
         <button
           type="button"
           class="icon-btn"
+          title="Dismiss"
           aria-label="Dismiss"
           @click="outcome = null"
         >
@@ -947,6 +952,7 @@ const TYPE_TONE: Record<string, string> = {
           {{ describeEdit(e) }}<button
             type="button"
             class="icon-btn small"
+            title="Undo this edit"
             :aria-label="`Undo: ${describeEdit(e)}`"
             @click="draft.removeAt(i)"
           >

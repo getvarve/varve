@@ -165,6 +165,24 @@ describe('workspace tabs', () => {
     wrapper.unmount();
   });
 
+  it('says in tooltips what a tab and its marks stand for', async () => {
+    const tabs = useTabs();
+    const a = tabs.openTableDataTab(profile, orders);
+    const { wrapper } = mountShell();
+    await flushPromises();
+    const tab = wrapper.get(`#wtab-${a.id}`).element.parentElement as HTMLElement;
+    // The full title (the strip cuts long ones short), then the connection and the environment of the coloured edge.
+    expect(tab.getAttribute('title')).toBe(`${a.title}\nOrders · Development environment`);
+    // Close Tab has a shortcut only in the macOS menu bar; the test document is not macOS.
+    expect(tab.querySelector('.close')?.getAttribute('title')).toBe('Close tab');
+    expect(tab.querySelector('.dirty')).toBeNull();
+
+    tabs.setUnsaved(a.id, true);
+    await flushPromises();
+    expect(tab.querySelector('.dirty')?.getAttribute('title')).toBe('Unsaved changes');
+    wrapper.unmount();
+  });
+
   it('keeps the tabs while another page is shown and mounts tabs opened meanwhile on return', async () => {
     const tabs = useTabs();
     const a = tabs.openTableDataTab(profile, orders);

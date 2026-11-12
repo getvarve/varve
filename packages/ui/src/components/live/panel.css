@@ -27,9 +27,12 @@
 }
 
 .source {
+  min-width: 0;
   color: var(--text-subtle);
   font-family: var(--font-mono);
   font-size: 12px;
+  /* A long version or command name wraps inside the header instead of running past its edge. */
+  overflow-wrap: anywhere;
 }
 
 .grow {

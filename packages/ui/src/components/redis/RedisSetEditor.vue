@@ -91,6 +91,7 @@ function add(allowEmpty = false): void {
               class="btn ghost compact"
               :aria-label="`Remove ${cellText(m)}`"
               :disabled="!canReference(m)"
+              :title="canReference(m) ? undefined : 'This value is too large to read, so it cannot be changed here'"
               @click="draft.stage({ op: 'setRemove', member: m })"
             >
               Remove
