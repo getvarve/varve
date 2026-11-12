@@ -1,0 +1,35 @@
+security:
+    password_hashers:
+        Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: 'auto'
+
+    providers:
+        # There are no accounts yet, so no request can sign in: everything under /api/ except server-info is refused.
+        no_users:
+            memory:
+                users: []
+
+    firewalls:
+        dev:
+            pattern: ^/(_profiler|_wdt|assets|build)/
+            security: false
+        health:
+            pattern: ^/health$
+            security: false
+        api:
+            pattern: ^/api/
+            stateless: true
+            provider: no_users
+
+    access_control:
+        # What this server is: open before sign-in.
+        - { path: ^/api/v1/server-info$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/, roles: IS_AUTHENTICATED_FULLY }
+
+when@test:
+    security:
+        password_hashers:
+            Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface:
+                algorithm: auto
+                cost: 4
+                time_cost: 3
+                memory_cost: 10

@@ -1,0 +1,4 @@
+# Each resource sets its own routePrefix (/api/v1 for clients).
+api_platform:
+    resource: .
+    type: api_platform

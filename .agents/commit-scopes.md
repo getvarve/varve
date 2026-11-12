@@ -17,6 +17,7 @@ Every commit uses Conventional Commits with one of these scopes: `<type>(<scope>
 | `secrets` | `crates/secrets`: OS keychain |
 | `tunnel` | `crates/tunnel`: SSH tunnels |
 | `app` | `app/src-tauri`: Tauri commands, events, extension loading |
+| `server` | `apps/api`, `docker/api`, `compose*.yaml`: the Varve server |
 | `ui` | `app/src`: Vue UI and extension slots |
 | `docs` | `docs/`, README, contributing |
 | `ci` | GitHub workflows |
