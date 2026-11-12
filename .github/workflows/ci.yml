@@ -509,12 +509,92 @@ jobs:
       - name: Upgrade and check
         run: scripts/ci/migration-linux.sh old/varve-linux-x64.deb migration/varve-new.deb
 
+  # The Varve server (apps/api): the whole PHPUnit suite and PHPStan against PostgreSQL 18, as the dev stack runs it.
+  server:
+    name: Server (PHPUnit, PHPStan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DATABASE_URL: postgresql://app:app@localhost:5432/app?serverVersion=18&charset=utf8
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start PostgreSQL 18
+        working-directory: .
+        timeout-minutes: 10
+        # retry.sh: Docker Hub answers "toomanyrequests" now and then.
+        run: |
+          scripts/ci/retry.sh 4 docker pull --quiet postgres:18-alpine
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_DB=app -e POSTGRES_USER=app -e POSTGRES_PASSWORD=app \
+            --health-cmd 'pg_isready -U app -d app' --health-interval 2s --health-timeout 5s --health-retries 30 \
+            postgres:18-alpine
+          for _ in $(seq 1 60); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' postgres)"
+            [ "$status" = healthy ] && break
+            sleep 2
+          done
+          echo "PostgreSQL is ${status}"
+          [ "$status" = healthy ]
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_pgsql, intl, sodium, zip, apcu
+          tools: composer:v2
+          coverage: none
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Prepare test database
+        env:
+          APP_ENV: test
+        run: |
+          php bin/console doctrine:database:create --if-not-exists
+          php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
+          php bin/console doctrine:schema:validate
+      - name: PHPUnit
+        run: php bin/phpunit
+      - name: PHPStan
+        run: |
+          php bin/console cache:warmup --env=test
+          php -d memory_limit=1G vendor/bin/phpstan analyse --no-progress
+      - name: PostgreSQL logs
+        if: failure()
+        working-directory: .
+        run: docker logs --tail 200 postgres
+
+  # The production image (docker/api/Dockerfile) as the release publishes it, started with compose.prod.yaml: it must
+  # refuse missing and development settings, and serve /health and /api/v1/server-info over HTTPS with good ones
+  # (scripts/ci/server-image-check.sh). Only amd64 here; the release builds arm64 too.
+  server-image:
+    name: Server image (build, settings check, start)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Pull the images
+        timeout-minutes: 10
+        # retry.sh: Docker Hub answers "toomanyrequests" now and then. The build and compose.prod.yaml then find
+        # every image here.
+        run: |
+          for image in docker/dockerfile:1 dunglas/frankenphp:1.13-php8.5 composer:2 postgres:18-alpine caddy:2.10-alpine; do
+            scripts/ci/retry.sh 4 docker pull --quiet "$image"
+          done
+      - name: Build the production image
+        run: docker build --target prod --file docker/api/Dockerfile --tag ghcr.io/getvarve/varve-server:ci .
+      - name: Settings check and start with compose.prod.yaml
+        timeout-minutes: 10
+        run: scripts/ci/server-image-check.sh ci
+
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, rust, integration, tunnel, frontend, build, migration-windows, migration-linux]
+    needs: [version, rust, integration, tunnel, frontend, build, migration-windows, migration-linux, server, server-image]
     permissions:
       contents: write
+      # The server image goes to the GitHub container registry (release.yml, server-image).
+      packages: write
     uses: ./.github/workflows/release.yml
     # The updater signing keys (release.yml).
     secrets: inherit

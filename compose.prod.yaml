@@ -1,0 +1,84 @@
+# The Varve server on your own machine: this file and a .env next to it (start from .env.prod.example), nothing else
+# from the repository. The image is the one every release publishes; Varve Cloud runs the same one.
+#
+#   docker compose -f compose.prod.yaml --env-file .env up -d
+#
+# The proxy gets an HTTPS certificate for VARVE_API_URL by itself (ports 80 and 443 must reach it). The whole guide is
+# docs/hosting.md.
+
+# Its own project name, so it never takes over the development stack's containers or volumes (compose.yaml, project
+# varve-server) on the same machine.
+name: varve
+
+services:
+  proxy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: proxy
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - proxy_data:/data
+      - proxy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    image: ghcr.io/getvarve/varve-server:${VARVE_VERSION:-latest}
+    environment:
+      APP_ENV: prod
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+      DEFAULT_URI: ${VARVE_API_URL:?set VARVE_API_URL}
+      API_PUBLIC_URL: ${VARVE_API_URL}
+      # The origins that may call the API from a browser: the desktop app's own (WebKit and WebView2).
+      CORS_ALLOW_ORIGIN: tauri://localhost http://tauri.localhost
+      # Only the proxy in front talks to the API; it tells the API the client's address and scheme.
+      SYMFONY_TRUSTED_PROXIES: private_ranges
+      DATABASE_URL: postgresql://varve:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/varve?serverVersion=18&charset=utf8
+      # Only Varve Cloud bills; a self-hosted server never bills, never blocks anyone and never contacts Stripe.
+      VARVE_BILLING: "0"
+      # This container migrates the database on start, before it serves anything.
+      RUN_MIGRATIONS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: varve
+      POSTGRES_USER: varve
+      # Read only when the volume is new: changing it later does not change the database's password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "varve", "-U", "varve"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+configs:
+  proxy:
+    content: |
+      ${VARVE_API_URL} {
+      	encode zstd gzip
+      	reverse_proxy api:80
+      }
+
+volumes:
+  proxy_data:
+  proxy_config:
+  postgres_data:
