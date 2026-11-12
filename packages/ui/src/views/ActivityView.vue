@@ -23,9 +23,12 @@ import {
   DEFAULT_SORT,
   effectiveSort,
   groupEvents,
+  hiddenSortTitle,
   nextSort,
   OUTCOME_LABELS,
   outcomeFilterTitle,
+  popoverTab,
+  sortHiddenWhenNarrow,
   sortTitle,
 } from '../lib/activityColumns';
 import type { ActivitySort, ActivitySortKey } from '../lib/activityColumns';
@@ -186,6 +189,11 @@ function sortBy(key: ActivitySortKey | null): void {
   requestedSort.value = nextSort(sort.value, key);
 }
 
+/** Back to the order the list loads in (the mark a narrow list shows for a sort on a column it hides). */
+function sortByDefault(): void {
+  requestedSort.value = DEFAULT_SORT;
+}
+
 function ariaSort(key: ActivitySortKey): 'ascending' | 'descending' | undefined {
   return sort.value.key === key ? sort.value.direction : undefined;
 }
@@ -279,8 +287,35 @@ async function toggleFilter(column: FilterColumn | null, event: MouseEvent): Pro
     left: clamp(rect.left, 4, window.innerWidth - el.offsetWidth - 4),
     top: fitsBelow ? below : clamp(rect.top - 4 - el.offsetHeight, 4, window.innerHeight - el.offsetHeight - 4),
   };
+  focusPopover();
+}
+
+/** Puts focus on the popover's first choice (the checked one of a radio group), or on the popover itself. */
+function focusPopover(): void {
+  const el = popover.value;
+  if (!el) return;
   const first = el.querySelector<HTMLElement>('input:checked') ?? el.querySelector<HTMLElement>('input, button:not(:disabled)');
-  first?.focus();
+  (first ?? el).focus();
+}
+
+/**
+ * "Show all categories" and "Any action" turn themselves off by their own
+ * click, and a button that is off cannot keep focus: move it to the first
+ * choice, so the keyboard stays in the popover.
+ */
+async function clearFilter(column: 'category' | 'action'): Promise<void> {
+  if (column === 'category') filters.categories = [];
+  else filterForm.setFieldValue('actions', '');
+  await nextTick();
+  focusPopover();
+}
+
+/** A press on the popover's padding or a legend would move focus to the page: keep it in the popover. */
+function onPopoverMouseDown(event: MouseEvent): void {
+  const el = popover.value;
+  if (!el || !(event.target instanceof Element) || event.target.closest('input, label, button:not(:disabled)')) return;
+  event.preventDefault();
+  if (!el.contains(document.activeElement)) el.focus();
 }
 
 function closeFilter(returnFocus: boolean): void {
@@ -295,20 +330,32 @@ function tabStops(): HTMLElement[] {
   return all.filter((el) => !(el instanceof HTMLInputElement && el.type === 'radio') || el.checked);
 }
 
-/** Escape closes; Tab past either end closes too and goes back to the funnel, as menus do. */
-function onPopoverKeydown(event: KeyboardEvent): void {
+/**
+ * The popover's keys, heard on the document while it is open: focus can be
+ * outside it (a click on a button that is off, or one that turned itself
+ * off, drops focus to the page in some engines) and the keys must still
+ * work. Escape closes; Tab past either end closes too and goes back to the
+ * funnel, as menus do; Tab with focus lost brings it back into the popover.
+ */
+function onDocumentKeydown(event: KeyboardEvent): void {
+  const el = popover.value;
+  if (!openFilter.value || !el) return;
   if (event.key === 'Escape') {
     event.preventDefault();
+    // The popover is what Escape closes now, not what lies under it.
+    event.stopPropagation();
     closeFilter(true);
     return;
   }
   if (event.key !== 'Tab') return;
   const list = tabStops();
-  const at = list.indexOf(document.activeElement as HTMLElement);
-  if ((event.shiftKey && at <= 0) || (!event.shiftKey && at === list.length - 1)) {
-    event.preventDefault();
-    closeFilter(true);
-  }
+  const active = document.activeElement;
+  const at = active && el.contains(active) ? list.indexOf(active as HTMLElement) : null;
+  const move = popoverTab(list.length, at, event.shiftKey);
+  if (move === 'browser') return;
+  event.preventDefault();
+  if (move === 'close') closeFilter(true);
+  else list[move.focus]?.focus();
 }
 
 function onDocumentPointerDown(event: PointerEvent): void {
@@ -325,10 +372,12 @@ function onWindowResize(): void {
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocumentPointerDown, true);
+  document.addEventListener('keydown', onDocumentKeydown, true);
   window.addEventListener('resize', onWindowResize);
 });
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+  document.removeEventListener('keydown', onDocumentKeydown, true);
   window.removeEventListener('resize', onWindowResize);
   clearTimeout(debounce);
 });
@@ -483,7 +532,7 @@ async function clearLog(): Promise<void> {
       <button
         type="button"
         class="btn ghost compact"
-        title="Clears the search, the time range and every column filter"
+        title="Clears the search and every column filter, and sets the range back to 7 days"
         @click="resetFilters"
       >
         Reset filters
@@ -536,7 +585,7 @@ async function clearLog(): Promise<void> {
                 :title="sortTitle(c.sort, sort, allLoaded)"
                 @click="sortBy(c.sort)"
               >
-                {{ c.label }}<Icon
+                <span class="sort-label">{{ c.label }}</span><Icon
                   v-if="sort.key === c.sort"
                   :name="sort.direction === 'ascending' ? 'chevronUp' : 'chevronDown'"
                   :size="10"
@@ -576,6 +625,20 @@ async function clearLog(): Promise<void> {
               >
                 <Icon
                   name="plug"
+                  :size="12"
+                />
+              </button>
+              <!-- A narrow list hides the connection and duration columns: a sort on one of them shows here. -->
+              <button
+                v-if="c.cls === 'what' && sortHiddenWhenNarrow(sort)"
+                type="button"
+                class="icon-btn funnel on narrow-only"
+                aria-label="Sort by time again"
+                :title="hiddenSortTitle(sort)"
+                @click="sortByDefault"
+              >
+                <Icon
+                  :name="sort.direction === 'ascending' ? 'chevronUp' : 'chevronDown'"
                   :size="12"
                 />
               </button>
@@ -770,7 +833,8 @@ async function clearLog(): Promise<void> {
         role="dialog"
         :aria-label="`${FILTER_TITLES[openFilter]} filter`"
         :style="{ left: `${popoverPos.left}px`, top: `${popoverPos.top}px` }"
-        @keydown="onPopoverKeydown"
+        tabindex="-1"
+        @mousedown="onPopoverMouseDown"
       >
         <fieldset v-if="openFilter === 'outcome'">
           <legend>Outcome</legend>
@@ -842,7 +906,7 @@ async function clearLog(): Promise<void> {
               type="button"
               class="btn ghost compact"
               :disabled="filters.categories.length === 0"
-              @click="filters.categories = []"
+              @click="clearFilter('category')"
             >
               Show all categories
             </button>
@@ -887,7 +951,7 @@ async function clearLog(): Promise<void> {
               type="button"
               class="btn ghost compact"
               :disabled="!filterActive.action"
-              @click="filterForm.setFieldValue('actions', '')"
+              @click="clearFilter('action')"
             >
               Any action
             </button>
@@ -1041,6 +1105,18 @@ h1 {
   cursor: pointer;
 }
 
+/* A long header in a narrow column is cut with an ellipsis; its tooltip names the column. */
+.sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sort .icon,
+.sort svg {
+  flex: none;
+}
+
 .sort.sorted,
 .sort:hover:not([aria-disabled='true']) {
   color: var(--text);
@@ -1052,6 +1128,7 @@ h1 {
 }
 
 .icon-btn.funnel {
+  flex: none;
   width: 22px;
   height: 22px;
 }
@@ -1285,6 +1362,11 @@ h1 {
   font-size: 13px;
   -webkit-backdrop-filter: var(--overlay-blur);
   backdrop-filter: var(--overlay-blur);
+}
+
+/* The popover itself only holds focus when none of its controls can (a press on its padding). */
+.filter-pop:focus {
+  outline: none;
 }
 
 .filter-pop fieldset {

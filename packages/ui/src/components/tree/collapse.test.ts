@@ -1,5 +1,6 @@
-import type { TreeNode } from '../../lib/tree';
-import { anythingOpen, collapseAllPlan, collapsePlan } from './collapse';
+import { sidebarRows } from '../../lib/tree';
+import type { ObjectSource, SidebarRow, TreeNode } from '../../lib/tree';
+import { collapseAllPlan, collapsePlan, visiblyOpen } from './collapse';
 
 function folder(id: string, children: TreeNode[]): TreeNode {
   return { kind: 'folder', key: `folder:${id}`, id, name: id, parentId: null, children } as unknown as TreeNode;
@@ -61,10 +62,41 @@ describe('Collapse all', () => {
     expect(plan.objects).toHaveLength(5);
   });
 
-  it('has nothing to do when only keys of rows that are gone are open', () => {
-    expect(anythingOpen(roots, expanded, objectExpanded)).toBe(true);
-    expect(anythingOpen(roots, new Set(['folder:gone']), new Set(['objects:gone/db%3Ax']))).toBe(false);
-    expect(anythingOpen(roots, new Set(), new Set(['objects:old/db%3Amain']))).toBe(true);
-    expect(anythingOpen([], new Set(), new Set())).toBe(false);
+  it('also closes what is stored as open but not on screen', () => {
+    const plan = collapseAllPlan(roots, new Set(['connection:old']), new Set(['objects:old/db%3Amain']));
+    expect(plan).toEqual({ workspace: ['connection:old'], objects: ['objects:old/db%3Amain'] });
+  });
+});
+
+describe('visiblyOpen (whether Collapse all is on)', () => {
+  // No connection is browsed: an open connection shows its status row.
+  const source: ObjectSource = { root: () => undefined, children: () => undefined } as unknown as ObjectSource;
+  const rowsFor = (open: string[], objects: string[] = [], filter = ''): SidebarRow[] =>
+    sidebarRows(roots, { expanded: new Set(open), objectExpanded: new Set(objects), filter }, source);
+
+  it('is on when a row is shown open', () => {
+    expect(visiblyOpen(rowsFor(['folder:legacy']), false, new Set())).toBe(true);
+    expect(visiblyOpen(rowsFor(['folder:legacy', 'connection:old']), false, new Set())).toBe(true);
+  });
+
+  it('is off when nothing is shown open, whatever is stored as open out of sight', () => {
+    expect(visiblyOpen(rowsFor([]), false, new Set())).toBe(false);
+    // Keys of rows that are gone.
+    expect(visiblyOpen(rowsFor(['folder:gone'], ['objects:gone/db%3Ax']), false, new Set(['objects:gone/db%3Ax']))).toBe(false);
+    // Object nodes under a closed connection, and a connection and a folder inside closed folders. The old rule
+    // turned the button on for these, and a click then seemed to do nothing.
+    const hidden = ['objects:old/db%3Amain'];
+    expect(visiblyOpen(rowsFor([], hidden), false, new Set(hidden))).toBe(false);
+    expect(visiblyOpen(rowsFor(['connection:old', 'folder:inner']), false, new Set())).toBe(false);
+    expect(visiblyOpen([], false, new Set())).toBe(false);
+  });
+
+  it('counts only opened object nodes while filtering, when folders and connections are shown open anyway', () => {
+    const filtered = rowsFor([], [], 'old');
+    expect(filtered.some((row) => row.expanded)).toBe(true);
+    expect(visiblyOpen(filtered, true, new Set())).toBe(false);
+    const object = { key: 'objects:old/db%3Amain', expanded: true, item: { type: 'object' } } as unknown as SidebarRow;
+    expect(visiblyOpen([...filtered, object], true, new Set(['objects:old/db%3Amain']))).toBe(true);
+    expect(visiblyOpen([...filtered, object], true, new Set())).toBe(false);
   });
 });

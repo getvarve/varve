@@ -17,6 +17,9 @@ export interface Toast {
   action: ToastAction | null;
 }
 
+/** How many toasts show at once. */
+const MAX_TOASTS = 4;
+
 const state = reactive<{ toasts: Toast[] }>({ toasts: [] });
 let nextId = 1;
 
@@ -30,7 +33,12 @@ function push(tone: ToastTone, title: string, message = '', timeoutMs = 6000, ac
   const id = nextId;
   nextId += 1;
   state.toasts.push({ id, tone, title, message, action });
-  if (state.toasts.length > 4) state.toasts.shift();
+  if (state.toasts.length > MAX_TOASTS) {
+    // The oldest one makes room, but not one with a button (Undo) while a plain one can go: its button is the
+    // only way to that action, for as long as the toast was promised to show.
+    const plain = state.toasts.findIndex((t) => t.action === null && t.id !== id);
+    state.toasts.splice(Math.max(plain, 0), 1);
+  }
   if (timeoutMs > 0) setTimeout(() => dismiss(id), timeoutMs);
   return id;
 }

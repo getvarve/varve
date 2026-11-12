@@ -1,7 +1,6 @@
-import { computed } from 'vue';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { findNode, objectRootKey } from '../../lib/tree';
-import type { TreeNode } from '../../lib/tree';
+import type { SidebarRow, TreeNode } from '../../lib/tree';
 import { useObjectBrowser } from './objectBrowser';
 
 /** Open keys to close: folders and connections (workspace) and object nodes. */
@@ -53,12 +52,22 @@ export function collapseAllPlan(roots: readonly TreeNode[], expanded: ReadonlySe
 }
 
 /**
- * Whether Collapse all has anything to close. Keys of folders and
- * connections that no longer exist do not count: they show nothing.
+ * Whether Collapse all has anything to close that the user can see: a row
+ * of the sidebar that is shown open. What is stored as open but not on
+ * screen (object nodes under a closed connection, a folder inside a closed
+ * folder, keys of rows that are gone) does not turn the button on; Collapse
+ * all still closes it along with the rest.
+ *
+ * While filtering, folders and connections are shown open whatever is
+ * stored and Collapse all cannot close them, so only object nodes the user
+ * opened count.
  */
-export function anythingOpen(roots: readonly TreeNode[], expanded: ReadonlySet<string>, objectExpanded: ReadonlySet<string>): boolean {
-  const plan = collapseAllPlan(roots, expanded, objectExpanded);
-  return plan.workspace.length > 0 || plan.objects.length > 0;
+export function visiblyOpen(rows: readonly SidebarRow[], filtering: boolean, objectExpanded: ReadonlySet<string>): boolean {
+  return rows.some((row) => {
+    if (!row.expanded || row.item.type === 'status') return false;
+    if (!filtering) return true;
+    return row.item.type === 'object' && objectExpanded.has(row.key);
+  });
 }
 
 /** Collapsing rows of the sidebar tree, shared by its rows, keys and Collapse all button. */
@@ -75,6 +84,5 @@ export function useCollapse() {
     /** Collapses a row and everything under it. */
     collapse: (key: string): void => apply(collapsePlan(workspace.tree.value, key, workspace.expanded, objects.objectExpanded)),
     collapseAll: (): void => apply(collapseAllPlan(workspace.tree.value, workspace.expanded, objects.objectExpanded)),
-    canCollapseAll: computed(() => anythingOpen(workspace.tree.value, workspace.expanded, objects.objectExpanded)),
   };
 }

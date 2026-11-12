@@ -25,7 +25,7 @@ import VarveMark from '../VarveMark.vue';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
 import { closeConnection } from '../tree/closeConnection';
-import { useCollapse } from '../tree/collapse';
+import { useCollapse, visiblyOpen } from '../tree/collapse';
 import {
   closeTitle,
   engineTitle,
@@ -87,6 +87,8 @@ const rows = computed<SidebarRow[]>(() =>
   ),
 );
 const indexByKey = computed(() => new Map(rows.value.map((r, i) => [r.key, i])));
+/** Collapse all is on when a row is shown open: the button follows what the user sees, not what is stored. */
+const canCollapseAll = computed(() => visiblyOpen(rows.value, filtering.value, objects.objectExpanded));
 const tabStop = computed(() => {
   const key = focusedKey.value;
   return key !== null && indexByKey.value.has(key) ? key : (rows.value[0]?.key ?? null);
@@ -836,7 +838,7 @@ function objectTitle(node: ObjNode): string | undefined {
           class="icon-btn small"
           aria-label="Collapse all"
           title="Collapse all"
-          :disabled="!collapser.canCollapseAll.value"
+          :disabled="!canCollapseAll"
           @click="collapser.collapseAll()"
         >
           <Icon name="collapseAll" />

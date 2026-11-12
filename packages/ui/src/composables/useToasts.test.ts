@@ -32,4 +32,24 @@ describe('toast actions', () => {
     expect(toasts.toasts.find((t) => t.id === id)?.action).toBeNull();
     toasts.dismiss(id);
   });
+
+  it('keeps a toast with an action when newer toasts need its room', () => {
+    const toasts = useToasts();
+    for (const t of [...toasts.toasts]) toasts.dismiss(t.id);
+    const undo = toasts.push('success', 'Folder Scratch deleted', '', 0, { label: 'Undo', run: () => undefined });
+    const plain = [1, 2, 3, 4].map((n) => toasts.push('info', `Plain ${n}`, '', 0));
+    expect(toasts.toasts).toHaveLength(4);
+    expect(toasts.toasts.some((t) => t.id === undo)).toBe(true);
+    // The oldest plain toast went instead.
+    expect(toasts.toasts.some((t) => t.id === plain[0])).toBe(false);
+    for (const t of [...toasts.toasts]) toasts.dismiss(t.id);
+  });
+
+  it('still shows at most four when every toast has an action', () => {
+    const toasts = useToasts();
+    for (const t of [...toasts.toasts]) toasts.dismiss(t.id);
+    const ids = [1, 2, 3, 4, 5].map((n) => toasts.push('success', `Deleted ${n}`, '', 0, { label: 'Undo', run: () => undefined }));
+    expect(toasts.toasts.map((t) => t.id)).toEqual(ids.slice(1));
+    for (const t of [...toasts.toasts]) toasts.dismiss(t.id);
+  });
 });

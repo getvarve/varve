@@ -9,8 +9,11 @@ import {
   DEFAULT_SORT,
   effectiveSort,
   groupEvents,
+  hiddenSortTitle,
   nextSort,
   outcomeFilterTitle,
+  popoverTab,
+  sortHiddenWhenNarrow,
   sortTitle,
 } from './activityColumns';
 
@@ -175,5 +178,44 @@ describe('filter titles', () => {
     expect(categoryFilterTitle(['query'], 17)).toBe('Category: query only. Click to change.');
     expect(categoryFilterTitle(['query', 'tool'], 17)).toBe('Category: query and tool. Click to change.');
     expect(categoryFilterTitle(['query', 'tool', 'sync', 'app'], 17)).toBe('Category: 4 of 17. Click to change.');
+  });
+});
+
+describe('a sort on a column the narrow list hides', () => {
+  it('is known for connection and duration only', () => {
+    expect(sortHiddenWhenNarrow({ key: 'connection', direction: 'ascending' })).toBe(true);
+    expect(sortHiddenWhenNarrow({ key: 'duration', direction: 'descending' })).toBe(true);
+    expect(sortHiddenWhenNarrow(DEFAULT_SORT)).toBe(false);
+    expect(sortHiddenWhenNarrow({ key: 'action', direction: 'ascending' })).toBe(false);
+    expect(sortHiddenWhenNarrow({ key: 'outcome', direction: 'ascending' })).toBe(false);
+  });
+
+  it('says what the list is sorted by and how to get the usual order back', () => {
+    expect(hiddenSortTitle({ key: 'duration', direction: 'descending' })).toBe(
+      'Sorted by how long it took within each day, slowest first. That column is hidden while the list is this narrow. Click to sort by time, newest first.',
+    );
+    expect(hiddenSortTitle({ key: 'connection', direction: 'ascending' })).toContain('Sorted by connection within each day, A to Z.');
+  });
+});
+
+describe('popoverTab', () => {
+  it('lets the browser move focus between the stops', () => {
+    expect(popoverTab(3, 0, false)).toBe('browser');
+    expect(popoverTab(3, 1, true)).toBe('browser');
+    // From the popover itself (after a click on its padding) Tab goes to the first stop.
+    expect(popoverTab(3, -1, false)).toBe('browser');
+  });
+
+  it('closes past either end', () => {
+    expect(popoverTab(3, 2, false)).toBe('close');
+    expect(popoverTab(3, 0, true)).toBe('close');
+    expect(popoverTab(3, -1, true)).toBe('close');
+    expect(popoverTab(1, 0, false)).toBe('close');
+  });
+
+  it('brings lost focus back into the popover instead of walking the page behind it', () => {
+    expect(popoverTab(3, null, false)).toEqual({ focus: 0 });
+    expect(popoverTab(3, null, true)).toEqual({ focus: 2 });
+    expect(popoverTab(0, null, false)).toBe('close');
   });
 });

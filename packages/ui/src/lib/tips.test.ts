@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHANGE_KIND_TIPS, keysText, keyTypeTip, liveTip, offReason, READ_ONLY_TIP, tabTip, withKeys } from './tips';
+import { CHANGE_KIND_TIPS, isCut, keysText, keyTypeTip, liveTip, offReason, READ_ONLY_TIP, tabTip, withKeys } from './tips';
 
 describe('keysText', () => {
   it('writes macOS shortcuts as symbols in the system order', () => {
@@ -83,5 +83,13 @@ describe('keyTypeTip', () => {
 describe('CHANGE_KIND_TIPS', () => {
   it('explains every change kind a server variable can have', () => {
     for (const kind of ['Read only', 'Restart', 'Reload', 'Not settable', 'Dynamic']) expect(CHANGE_KIND_TIPS[kind]).toBeTruthy();
+  });
+});
+
+describe('isCut', () => {
+  it('is true only when the text is wider than its box', () => {
+    expect(isCut({ scrollWidth: 400, clientWidth: 300 })).toBe(true);
+    expect(isCut({ scrollWidth: 300, clientWidth: 300 })).toBe(false);
+    expect(isCut({ scrollWidth: 0, clientWidth: 0 })).toBe(false);
   });
 });

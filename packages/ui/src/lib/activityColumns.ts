@@ -104,6 +104,24 @@ export function sortTitle(key: ActivitySortKey, current: ActivitySort, allLoaded
   return `Sort by ${name}${withinDays}, ${DIRECTION_WORDS[key][FIRST_DIRECTION[key]]}`;
 }
 
+/** The columns a narrow list leaves out (ActivityView's container query): a sort on one of them has no header to show it. */
+const NARROW_HIDDEN: readonly ActivitySortKey[] = ['connection', 'duration'];
+
+/** Whether the list is sorted on a column that a narrow list does not show. */
+export function sortHiddenWhenNarrow(current: ActivitySort): boolean {
+  return NARROW_HIDDEN.includes(current.key);
+}
+
+/**
+ * The tooltip of the mark a narrow list shows next to the action header
+ * while it is sorted on a column it has no room for. Clicking the mark goes
+ * back to the default order.
+ */
+export function hiddenSortTitle(current: ActivitySort): string {
+  const sorted = `Sorted by ${COLUMN_NAMES[current.key]} within each day, ${DIRECTION_WORDS[current.key][current.direction]}.`;
+  return `${sorted} That column is hidden while the list is this narrow. Click to sort by time, newest first.`;
+}
+
 /** Problems first when ascending. */
 const OUTCOME_RANK: Record<Outcome, number> = { failure: 0, cancelled: 1, success: 2 };
 
@@ -213,4 +231,23 @@ export function connectionFilterTitle(name: string | null): string {
 /** Tooltip of the outcome filter; `''` is any outcome. */
 export function outcomeFilterTitle(outcome: Outcome | ''): string {
   return outcome === '' ? 'Outcome: any. Click to filter.' : `Outcome: ${OUTCOME_LABELS[outcome]} only. Click to change.`;
+}
+
+// The filter popover's keyboard
+
+/**
+ * What Tab does while a filter popover is open. `stops` is how many Tab
+ * stops the popover has; `at` is the focused one's place among them, `-1`
+ * when focus is in the popover but on none of them (the popover itself, or
+ * a button that just turned itself off), and `null` when focus is outside
+ * the popover (lost to the page behind it).
+ *
+ * Tab past either end closes the popover, as menus do. Lost focus comes
+ * back: to the first stop, or the last with Shift. In between the browser
+ * moves focus itself.
+ */
+export function popoverTab(stops: number, at: number | null, backwards: boolean): 'close' | 'browser' | { focus: number } {
+  if (at === null) return stops === 0 ? 'close' : { focus: backwards ? stops - 1 : 0 };
+  if ((backwards && at <= 0) || (!backwards && at === stops - 1)) return 'close';
+  return 'browser';
 }

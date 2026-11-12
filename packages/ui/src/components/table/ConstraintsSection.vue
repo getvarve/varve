@@ -2,7 +2,7 @@
 import { computed, ref, useId } from 'vue';
 import { isConstraintModified, newConstraint, pgValidateConstraint } from '../../lib/gridDesigner';
 import type { ConstraintDraft, ConstraintType, RefAction } from '../../lib/gridDesigner';
-import { READ_ONLY_TIP } from '../../lib/tips';
+import { offReason, READ_ONLY_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import { useDesigner } from './designerContext';
 
@@ -145,7 +145,7 @@ const canRedefine = computed(() => {
         type="button"
         class="btn compact"
         :disabled="ctx.readOnly || (addType === 'primaryKey' && hasPrimary)"
-        :title="addType === 'primaryKey' && hasPrimary ? 'The table already has a primary key' : undefined"
+        :title="offReason([ctx.readOnly, READ_ONLY_TIP], [addType === 'primaryKey' && hasPrimary, 'The table already has a primary key'])"
         @click="add"
       >
         <Icon name="plus" />Add constraint

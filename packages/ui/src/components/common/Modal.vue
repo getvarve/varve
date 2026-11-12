@@ -39,6 +39,7 @@ function unregister(modal: OpenModal): void {
 import { nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue';
 import { useTabVisible } from '../../composables/useTabs';
 import { leaveCopy } from '../../lib/motion';
+import { isCut } from '../../lib/tips';
 import Icon from './Icon.vue';
 
 /**
@@ -58,7 +59,7 @@ import Icon from './Icon.vue';
  * (`useTabVisible`): it keeps its state, but is not on screen over another
  * tab or page, holds no focus and takes no keys until its tab is shown again.
  */
-withDefaults(
+const props = withDefaults(
   defineProps<{ title: string; width?: number; role?: 'dialog' | 'alertdialog'; describedBy?: string }>(),
   { width: 560, role: 'dialog', describedBy: '' },
 );
@@ -69,6 +70,15 @@ const backdrop = ref<HTMLElement | null>(null);
 const panel = ref<HTMLElement | null>(null);
 /** False while the tab that owns this dialog is hidden; always true outside a tab's view. */
 const tabVisible = useTabVisible();
+
+const titleEl = ref<HTMLElement | null>(null);
+/** Whether the title is cut with an ellipsis: only then does it get its full text as a tooltip. */
+const titleCut = ref(false);
+let titleSize: ResizeObserver | null = null;
+
+function measureTitle(): void {
+  titleCut.value = titleEl.value !== null && isCut(titleEl.value);
+}
 
 /** Length of the closing fade, in ms. */
 const CLOSE_MS = 120;
@@ -196,9 +206,17 @@ defineExpose({ focusInitial });
 onMounted(async () => {
   previous = document.activeElement;
   register(entry);
+  measureTitle();
+  if (typeof ResizeObserver === 'function' && titleEl.value) {
+    titleSize = new ResizeObserver(measureTitle);
+    titleSize.observe(titleEl.value);
+  }
   await nextTick();
   focusInitial();
 });
+
+// After the new title is in the page.
+watch(() => props.title, measureTitle, { flush: 'post' });
 
 watch(
   tabVisible,
@@ -219,6 +237,8 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  titleSize?.disconnect();
+  titleSize = null;
   const wasTop = isTop();
   unregister(entry);
   // A dialog that closes while it is hidden, or under another dialog, leaves the screen and the focus alone.
@@ -253,8 +273,9 @@ onBeforeUnmount(() => {
           <slot name="lead" />
           <h2
             :id="titleId"
+            ref="titleEl"
             class="title"
-            :title="title"
+            :title="titleCut ? title : undefined"
           >
             {{ title }}
           </h2>

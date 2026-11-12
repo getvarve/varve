@@ -11,7 +11,7 @@ import { ExtensionRegistry } from './extensions';
 import type { UiExtension } from './extensions';
 import { APP_INFO_KEY, REGISTRY_KEY } from './keys';
 import { watchGlass } from './lib/glass';
-import { installTooltips } from './lib/tooltips';
+import { hideTooltip, installTooltips } from './lib/tooltips';
 import { installWebviewGuards } from './lib/webviewGuards';
 import './styles/base.css';
 import './styles/glass.css';
@@ -57,6 +57,8 @@ export function createVarveApp(options: VarveAppOptions = {}): App {
       ...registry.extensionRoutes(),
     ],
   });
+  // A tooltip belongs to the page it was shown on.
+  router.afterEach(() => hideTooltip());
 
   const info = ref<AppInfo | null>(null);
   fetchAppInfo()

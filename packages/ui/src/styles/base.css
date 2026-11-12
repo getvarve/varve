@@ -381,7 +381,10 @@
 .tip {
   position: fixed;
   z-index: 10000;
+  /* Its own width whatever its place, so it is measured as it will show; long words break instead of running out. */
+  width: max-content;
   max-width: 320px;
+  overflow-wrap: anywhere;
   padding: 4px 8px;
   border-radius: var(--radius-control);
   background: #14171C;

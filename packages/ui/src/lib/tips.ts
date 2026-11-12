@@ -50,6 +50,14 @@ export function offReason(...reasons: [boolean, string][]): string | undefined {
 }
 
 /**
+ * Whether an element's text is cut short (an ellipsis): only then is its full text worth a tooltip, which would
+ * otherwise repeat what is already readable.
+ */
+export function isCut(el: { scrollWidth: number; clientWidth: number }): boolean {
+  return el.scrollWidth > el.clientWidth;
+}
+
+/**
  * The tooltip of a tab in the tab strip: its full title (the strip cuts long ones short) and, on a second line, the
  * connection and its environment, which the coloured top edge of the tab stands for. The connection's name is left
  * out when the title already says it.

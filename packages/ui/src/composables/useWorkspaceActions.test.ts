@@ -11,7 +11,7 @@ function folder(id: string, sortOrder: number, parentId: string | null = null): 
 
 let records: WorkspaceRecords = { folders: [], connections: [], queries: [] };
 let contents: FolderContents = { folders: 0, connections: 0, queries: 0 };
-const deleteFolder = vi.fn(async (id: string) => {
+const deleteFolder = vi.fn(async (id: string, _mode: string) => {
   records = { ...records, folders: records.folders.filter((f) => f.id !== id) };
 });
 const createFolder = vi.fn(async (parentId: string | null, name: string, color: string | null) => {
@@ -19,15 +19,15 @@ const createFolder = vi.fn(async (parentId: string | null, name: string, color: 
   records = { ...records, folders: [...records.folders, created] };
   return created;
 });
-const reorder = vi.fn(async () => undefined);
+const reorder = vi.fn(async (_kind: string, _ids: string[]): Promise<void> => undefined);
 
 vi.mock('../api/records', async (original) => ({
   ...(await original<typeof RecordsModule>()),
   fetchTree: vi.fn(async () => records),
   folderContents: vi.fn(async () => contents),
-  deleteFolder: (id: string) => deleteFolder(id),
+  deleteFolder: (id: string, mode: string) => deleteFolder(id, mode),
   createFolder: (parentId: string | null, name: string, color: string | null) => createFolder(parentId, name, color),
-  reorder: (...args: unknown[]) => reorder(...(args as [])),
+  reorder: (kind: string, ids: string[]) => reorder(kind, ids),
 }));
 
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
@@ -61,7 +61,9 @@ describe('deleting a folder', () => {
     useWorkspace().setExpanded('folder:Scratch', true);
     await useWorkspaceActions().removeFolder(folder('Scratch', 1));
     expect(useDialogs().dialogs).toHaveLength(0);
-    expect(deleteFolder).toHaveBeenCalledWith('Scratch');
+    // Moving, not deleting, the contents is what makes a delete without a question safe: anything added to the
+    // folder since it was read as empty goes to the parent.
+    expect(deleteFolder).toHaveBeenCalledWith('Scratch', 'move_contents_to_parent');
     expect(useWorkspace().expanded.has('folder:Scratch')).toBe(false);
     const toast = useToasts().toasts.at(-1);
     expect(toast?.title).toBe('Folder Scratch deleted');
@@ -73,6 +75,29 @@ describe('deleting a folder', () => {
     expect(createFolder).toHaveBeenCalledWith(null, 'Scratch', null);
     expect(reorder).toHaveBeenCalledWith('folders', ['Alpha', 'new-Scratch', 'Zulu']);
     expect(useWorkspace().records.value.folders.map((f) => f.name)).toContain('Scratch');
+  });
+
+  it('says the folder is back at the end of the list when only putting it in its place fails', async () => {
+    await useWorkspaceActions().removeFolder(folder('Scratch', 1));
+    const toast = useToasts().toasts.at(-1);
+    reorder.mockRejectedValueOnce(new Error('a folder in the list is gone'));
+    useToasts().act(toast?.id ?? -1);
+    for (let i = 0; i < 4; i += 1) await tick();
+    expect(createFolder).toHaveBeenCalledWith(null, 'Scratch', null);
+    const titles = useToasts().toasts.map((t) => t.title);
+    expect(titles).toContain('Folder Scratch restored at the end of the list');
+    expect(titles).not.toContain('Could not restore the folder');
+    expect(useWorkspace().records.value.folders.map((f) => f.name)).toContain('Scratch');
+  });
+
+  it('reports a folder that could not be made again', async () => {
+    await useWorkspaceActions().removeFolder(folder('Scratch', 1));
+    const toast = useToasts().toasts.at(-1);
+    createFolder.mockRejectedValueOnce(new Error('the parent folder is gone'));
+    useToasts().act(toast?.id ?? -1);
+    for (let i = 0; i < 4; i += 1) await tick();
+    expect(useToasts().toasts.map((t) => t.title)).toContain('Could not restore the folder');
+    expect(reorder).not.toHaveBeenCalled();
   });
 
   it('opens the Delete folder dialog for a folder that holds anything', async () => {

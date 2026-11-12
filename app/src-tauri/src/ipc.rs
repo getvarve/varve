@@ -297,6 +297,13 @@ async fn reload_report(svc: Svc<'_>) -> R<crate::sessions::ReloadReport> {
     Ok(svc.reload_report().await)
 }
 
+/// Ids of a profile's user sessions that are working now (asked before the
+/// connection is closed).
+#[tauri::command]
+fn busy_sessions(svc: Svc<'_>, connection_id: String) -> Vec<String> {
+    svc.busy_sessions(&connection_id)
+}
+
 /// Profiles of user sessions with an open transaction (asked before a reload).
 #[tauri::command]
 async fn open_transactions(svc: Svc<'_>) -> R<Vec<String>> {
@@ -1272,6 +1279,7 @@ pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         sessions,
         reload_report,
         open_transactions,
+        busy_sessions,
         activity,
         query_history,
         clear_activity,
