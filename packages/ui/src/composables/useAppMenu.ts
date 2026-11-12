@@ -1,11 +1,15 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { watch } from 'vue';
 import type { Router } from 'vue-router';
 import type { ConnectionProfile } from '../api/records';
+import { setMenuEnabled } from '../backend';
+import { openConnectionOverview } from '../components/tree/openConnection';
 import { showWorkspace } from '../components/tree/showWorkspace';
 import type { LivePanel } from '../lib/tree';
 import { useDialogs } from './useDialogs';
 import { useSidebar } from './useSidebar';
+import { tabCommands } from './useTabCommands';
 import { useTabs } from './useTabs';
 import { useToasts } from './useToasts';
 import { useWorkspace } from './useWorkspace';
@@ -28,6 +32,15 @@ export const MENU_ACTIONS = [
   'live:status',
   'live:processes',
   'live:variables',
+  'query-run',
+  'query-cancel',
+  'query-save',
+  'query-save-as',
+  'query-history',
+  'connection-overview',
+  'connection-edit',
+  'connection-duplicate',
+  'tab-reconnect',
 ] as const;
 
 export type MenuAction = (typeof MENU_ACTIONS)[number];
@@ -54,6 +67,46 @@ async function connectionFor(title: string): Promise<ConnectionProfile | null> {
     return null;
   }
   return useDialogs().pickConnection({ title });
+}
+
+/** What decides which menu items can be used now. */
+export interface MenuState {
+  /** The workspace page is on screen (the tabs are). */
+  onWorkspace: boolean;
+  /** How many connections exist. */
+  connections: number;
+  /** The tab in front, if any. */
+  tab: { kind: string; running: boolean; hasCommands: boolean } | null;
+}
+
+/** Which menu bar actions can be carried out in this state. Every action is listed. */
+export function menuEnabled(state: MenuState): Record<MenuAction, boolean> {
+  const tab = state.onWorkspace ? state.tab : null;
+  const query = tab !== null && tab.kind === 'query' && tab.hasCommands;
+  const anyConnection = state.connections > 0;
+  return {
+    'new-connection': true,
+    'new-folder': true,
+    'new-query': anyConnection,
+    'close-tab': tab !== null,
+    'show-workspace': true,
+    'show-activity': true,
+    'show-settings': true,
+    'toggle-sidebar': true,
+    'fit-sidebar': true,
+    'live:status': anyConnection,
+    'live:processes': anyConnection,
+    'live:variables': anyConnection,
+    'query-run': query && !tab.running,
+    'query-cancel': query && tab.running,
+    'query-save': query,
+    'query-save-as': query,
+    'query-history': query,
+    'connection-overview': anyConnection,
+    'connection-edit': anyConnection,
+    'connection-duplicate': anyConnection,
+    'tab-reconnect': tab !== null,
+  };
 }
 
 /** Carries out one menu bar action. */
@@ -94,6 +147,43 @@ export async function runMenuAction(action: MenuAction, router: Router): Promise
     case 'fit-sidebar':
       useSidebar().requestFit();
       break;
+    case 'query-run':
+    case 'query-cancel':
+    case 'query-save':
+    case 'query-save-as':
+    case 'query-history': {
+      const tab = tabs.active.value;
+      const commands = tab && router.currentRoute.value.name === 'home' ? tabCommands(tab.id) : null;
+      if (!commands) return;
+      if (action === 'query-run') commands.run();
+      else if (action === 'query-cancel') commands.cancel();
+      else if (action === 'query-save') commands.save();
+      else if (action === 'query-save-as') commands.saveAs();
+      else commands.toggleHistory();
+      break;
+    }
+    case 'connection-overview': {
+      const profile = await connectionFor('Open the overview of');
+      if (!profile) return;
+      openConnectionOverview(profile);
+      showWorkspace(router);
+      break;
+    }
+    case 'connection-edit': {
+      const profile = await connectionFor('Edit');
+      if (profile) await useWorkspaceActions().editConnection(profile);
+      break;
+    }
+    case 'connection-duplicate': {
+      const profile = await connectionFor('Duplicate');
+      if (profile) await useWorkspaceActions().duplicate(profile);
+      break;
+    }
+    case 'tab-reconnect': {
+      const tab = tabs.active.value;
+      if (tab && router.currentRoute.value.name === 'home') await tabs.reconnect(tab.id);
+      break;
+    }
     case 'live:status':
     case 'live:processes':
     case 'live:variables': {
@@ -112,10 +202,34 @@ export async function runMenuAction(action: MenuAction, router: Router): Promise
  */
 export async function installAppMenu(router: Router): Promise<() => void> {
   if (!isTauri()) return () => undefined;
-  return listen<string>(MENU_ACTION, (event) => {
+  const stopListening = await listen<string>(MENU_ACTION, (event) => {
     if (!isMenuAction(event.payload)) return;
     runMenuAction(event.payload, router).catch((error: unknown) => {
       useToasts().pushError(error, 'Could not carry out the menu action');
     });
   });
+  // Items that cannot work now are greyed out, and follow the tab in front, the page and the connections.
+  const stopWatching = watch(
+    () => {
+      const tab = useTabs().active.value;
+      return menuEnabled({
+        onWorkspace: router.currentRoute.value.name === 'home',
+        connections: useWorkspace().records.value.connections.length,
+        tab: tab ? { kind: tab.kind, running: tab.kind === 'query' && tab.running, hasCommands: tabCommands(tab.id) !== null } : null,
+      });
+    },
+    (enabled, before) => {
+      // Only what changed: the first time, everything.
+      const changed = Object.fromEntries(Object.entries(enabled).filter(([action, on]) => before?.[action as MenuAction] !== on));
+      if (Object.keys(changed).length === 0) return;
+      setMenuEnabled(changed).catch((error: unknown) => {
+        console.error('Could not update the menu bar', error);
+      });
+    },
+    { immediate: true },
+  );
+  return () => {
+    stopListening();
+    stopWatching();
+  };
 }

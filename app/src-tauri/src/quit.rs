@@ -194,6 +194,11 @@ pub fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
             request_quit(app);
         }
         RunEvent::MenuEvent(event) if event.id() == QUIT_MENU_ID => request_quit(app),
+        RunEvent::MenuEvent(event) if crate::menu::help_address(event.id().as_ref()).is_some() => {
+            if let Some(address) = crate::menu::help_address(event.id().as_ref()) {
+                crate::menu::open_in_browser(address);
+            }
+        }
         RunEvent::MenuEvent(event) if crate::menu::ui_action(event.id().as_ref()).is_some() => {
             if let Some(action) = crate::menu::ui_action(event.id().as_ref())
                 && !crate::menu::send_ui_action(app, action)
@@ -308,8 +313,11 @@ pub fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Me
             &crate::menu::file(app)?,
             &edit,
             &crate::menu::view(app)?,
+            &crate::menu::query(app)?,
+            &crate::menu::connection(app)?,
             &crate::menu::tools(app)?,
             &window,
+            &crate::menu::help(app)?,
         ],
     )
 }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Router } from 'vue-router';
-import { isMenuAction, livePanelFor, MENU_ACTIONS, runMenuAction } from './useAppMenu';
+import { isMenuAction, livePanelFor, MENU_ACTIONS, menuEnabled, runMenuAction } from './useAppMenu';
+import { registerTabCommands, tabCommands } from './useTabCommands';
 import { useSidebar } from './useSidebar';
 
 const calls: string[] = [];
@@ -12,6 +13,7 @@ vi.mock('./useTabs', () => ({
     openQueryTab: (p: { id: string }) => calls.push(`query:${p.id}`),
     openLiveTab: (p: { id: string }, panel: string) => calls.push(`live:${p.id}:${panel}`),
     closeTab: (id: string) => { calls.push(`close:${id}`); return Promise.resolve(); },
+    reconnect: (id: string) => { calls.push(`reconnect:${id}`); return Promise.resolve(); },
   }),
 }));
 vi.mock('./useWorkspace', () => ({
@@ -24,11 +26,15 @@ vi.mock('./useWorkspaceActions', () => ({
   useWorkspaceActions: () => ({
     newConnection: () => { calls.push('new-connection'); return Promise.resolve(null); },
     newFolder: (parent: string | null) => { calls.push(`new-folder:${String(parent)}`); return Promise.resolve(null); },
+    editConnection: (p: { id: string }) => { calls.push(`edit:${p.id}`); return Promise.resolve(); },
+    duplicate: (p: { id: string }) => { calls.push(`duplicate:${p.id}`); return Promise.resolve(); },
   }),
 }));
 vi.mock('./useDialogs', () => ({
   useDialogs: () => ({ pickConnection: () => { calls.push('pick'); return Promise.resolve({ id: 'rd', engine: 'redis' }); } }),
 }));
+vi.mock('../components/tree/openConnection', () => ({ openConnectionOverview: (p: { id: string }) => calls.push(`overview:${p.id}`) }));
+vi.mock('../backend', () => ({ setMenuEnabled: () => Promise.resolve(true) }));
 vi.mock('./useToasts', () => ({ useToasts: () => ({ push: (_: string, title: string) => calls.push(`toast:${title}`), pushError: vi.fn() }) }));
 
 function router(name = 'home') {
@@ -104,5 +110,66 @@ describe('menu bar actions', () => {
     // A hidden sidebar is shown first: there is nothing to fit otherwise.
     expect(useSidebar().state.collapsed).toBe(false);
     expect(useSidebar().fitRequests.value).toBe(before + 1);
+  });
+
+  it('runs the query tab\'s own actions, only on the workspace page', async () => {
+    state.activeTab = { id: 't1', connectionId: 'pg' };
+    const done: string[] = [];
+    const remove = registerTabCommands('t1', {
+      run: () => done.push('run'),
+      cancel: () => done.push('cancel'),
+      save: () => done.push('save'),
+      saveAs: () => done.push('saveAs'),
+      toggleHistory: () => done.push('history'),
+    });
+    for (const action of ['query-run', 'query-cancel', 'query-save', 'query-save-as', 'query-history'] as const) {
+      await runMenuAction(action, router().router);
+    }
+    expect(done).toEqual(['run', 'cancel', 'save', 'saveAs', 'history']);
+    await runMenuAction('query-run', router('activity').router);
+    expect(done).toHaveLength(5);
+    remove();
+    expect(tabCommands('t1')).toBeNull();
+    await runMenuAction('query-run', router().router);
+    expect(done).toHaveLength(5);
+  });
+
+  it('acts on the connection of the tab in front', async () => {
+    state.activeTab = { id: 't1', connectionId: 'pg' };
+    const r = router();
+    await runMenuAction('connection-overview', r.router);
+    await runMenuAction('connection-edit', r.router);
+    await runMenuAction('connection-duplicate', r.router);
+    await runMenuAction('tab-reconnect', r.router);
+    expect(calls).toEqual(['overview:pg', 'edit:pg', 'duplicate:pg', 'reconnect:t1']);
+  });
+
+  it('greys out what cannot be done now', () => {
+    const nothing = menuEnabled({ onWorkspace: true, connections: 0, tab: null });
+    expect(Object.keys(nothing).sort()).toEqual([...MENU_ACTIONS].sort());
+    expect(nothing['new-connection']).toBe(true);
+    expect(nothing['new-query']).toBe(false);
+    expect(nothing['close-tab']).toBe(false);
+    expect(nothing['query-run']).toBe(false);
+    expect(nothing['live:status']).toBe(false);
+
+    const query = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: false, hasCommands: true } });
+    expect(query['query-run']).toBe(true);
+    expect(query['query-cancel']).toBe(false);
+    expect(query['query-save']).toBe(true);
+    expect(query['close-tab']).toBe(true);
+
+    const running = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: true, hasCommands: true } });
+    expect(running['query-run']).toBe(false);
+    expect(running['query-cancel']).toBe(true);
+
+    // A table tab has no query actions; on another page no tab is in front.
+    const table = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'tableData', running: false, hasCommands: false } });
+    expect(table['query-save']).toBe(false);
+    expect(table['tab-reconnect']).toBe(true);
+    const away = menuEnabled({ onWorkspace: false, connections: 2, tab: { kind: 'query', running: false, hasCommands: true } });
+    expect(away['query-run']).toBe(false);
+    expect(away['close-tab']).toBe(false);
+    expect(away['new-query']).toBe(true);
   });
 });

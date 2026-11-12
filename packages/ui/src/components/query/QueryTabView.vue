@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { isDriverError, presentError } from '../../api/errors';
 import { useQuerySave } from '../../composables/useQuerySave';
+import { registerTabCommands } from '../../composables/useTabCommands';
 import { useTabs } from '../../composables/useTabs';
 import { useToasts } from '../../composables/useToasts';
 import type { QueryTab } from '../../composables/useTabs';
@@ -93,6 +94,19 @@ function onKeydown(event: KeyboardEvent): void {
     else save();
   }
 }
+
+// The Query menu of the menu bar runs these same functions.
+onBeforeUnmount(
+  registerTabCommands(props.tab.id, {
+    run: () => run(),
+    cancel: () => void cancelRun(),
+    save,
+    saveAs,
+    toggleHistory: () => {
+      showHistory.value = !showHistory.value;
+    },
+  }),
+);
 
 function loadFromHistory(text: string): void {
   tabs.loadText(props.tab.id, text);

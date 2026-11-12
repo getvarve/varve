@@ -62,6 +62,83 @@ const VIEW: &[Option<UiItem>] = &[
     Some(item("fit-sidebar", "Fit Sidebar to Its Text", None)),
 ];
 
+/// Query: the actions of the query tab in front.
+const QUERY: &[Option<UiItem>] = &[
+    Some(item("query-run", "Run", Some("CmdOrCtrl+Enter"))),
+    Some(item(
+        "query-cancel",
+        "Cancel Statement",
+        Some("CmdOrCtrl+."),
+    )),
+    None,
+    Some(item("query-save", "Save", Some("CmdOrCtrl+S"))),
+    Some(item("query-save-as", "Save As…", Some("CmdOrCtrl+Shift+S"))),
+    None,
+    Some(item("query-history", "Show or Hide History", None)),
+];
+
+/// Connection: the connection of the tab in front, or one the UI asks for.
+const CONNECTION: &[Option<UiItem>] = &[
+    Some(item("connection-overview", "Open Overview", None)),
+    Some(item("connection-edit", "Edit Connection…", None)),
+    Some(item("connection-duplicate", "Duplicate Connection", None)),
+    None,
+    Some(item(
+        "tab-reconnect",
+        "Connect Tab Again",
+        Some("CmdOrCtrl+Shift+R"),
+    )),
+];
+
+/// Help: pages on the web. `(key, title, address)`; the backend opens them in the browser.
+const HELP: &[(&str, &str, &str)] = &[
+    ("website", "Varve Website", "https://getvarve.com"),
+    (
+        "docs",
+        "Documentation",
+        "https://github.com/getvarve/varve#readme",
+    ),
+    (
+        "releases",
+        "Release Notes",
+        "https://github.com/getvarve/varve/releases",
+    ),
+    (
+        "issue",
+        "Report a Problem…",
+        "https://github.com/getvarve/varve/issues/new",
+    ),
+];
+
+/// Start of the id of a Help item that opens a web page.
+pub const OPEN_PREFIX: &str = "varve-open:";
+
+/// The web address a Help item id stands for.
+#[must_use]
+pub fn help_address(id: &str) -> Option<&'static str> {
+    let key = id.strip_prefix(OPEN_PREFIX)?;
+    HELP.iter()
+        .find(|(name, _, _)| *name == key)
+        .map(|(_, _, address)| *address)
+}
+
+/// Opens a web address in the user's browser. Only the menu bar calls this, and macOS is the
+/// only system with a menu bar, so it uses the system's own `open`.
+pub fn open_in_browser(address: &str) {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = std::process::Command::new("/usr/bin/open")
+        .arg(address)
+        .spawn()
+    {
+        tracing::warn!(%error, address, "could not open the page");
+    }
+    #[cfg(not(target_os = "macos"))]
+    tracing::debug!(
+        address,
+        "no menu bar on this system, so nothing asks to open a page"
+    );
+}
+
 /// Tools: what there is to look at on a server. The UI asks which connection
 /// when no tab is in front.
 const TOOLS: &[Option<UiItem>] = &[
@@ -89,21 +166,89 @@ pub fn send_ui_action<R: Runtime>(app: &AppHandle<R>, action: &str) -> bool {
         .is_some_and(|window| window.emit(UI_ACTION_EVENT, action).is_ok())
 }
 
+/// Turns menu items on or off as the window says: `enabled` holds, per action, whether it
+/// can be carried out now. An action that is not listed keeps its state. The UI calls this
+/// whenever the tab in front, the page or the connections change.
+#[tauri::command]
+pub(crate) fn set_menu_enabled(
+    app: AppHandle,
+    enabled: std::collections::HashMap<String, bool>,
+) -> bool {
+    bar::set_enabled(&app, &enabled)
+}
+
+#[cfg(not(target_os = "macos"))]
+mod bar {
+    /// No menu bar on this system.
+    pub(super) fn set_enabled(
+        _app: &tauri::AppHandle,
+        _enabled: &std::collections::HashMap<String, bool>,
+    ) -> bool {
+        false
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod bar {
-    use tauri::menu::{IsMenuItem, MenuItem, PredefinedMenuItem, Submenu};
-    use tauri::{AppHandle, Runtime};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
 
-    use super::{FILE, SETTINGS, TOOLS, UI_ACTION_PREFIX, UiItem, VIEW};
+    use tauri::menu::{IsMenuItem, MenuItem, PredefinedMenuItem, Submenu};
+    use tauri::{AppHandle, Manager, Runtime};
+
+    use super::{
+        CONNECTION, FILE, HELP, OPEN_PREFIX, QUERY, SETTINGS, TOOLS, UI_ACTION_PREFIX, UiItem, VIEW,
+    };
+
+    /// The menu items the UI carries out, by action, so they can be turned on and off. An
+    /// action can sit in two menus (Activity is in View and in Tools).
+    pub struct Items<R: Runtime>(Mutex<HashMap<&'static str, Vec<MenuItem<R>>>>);
+
+    impl<R: Runtime> Default for Items<R> {
+        fn default() -> Self {
+            Self(Mutex::new(HashMap::new()))
+        }
+    }
+
+    pub(super) fn set_enabled(app: &AppHandle, enabled: &HashMap<String, bool>) -> bool {
+        let Some(items) = app.try_state::<Items<tauri::Wry>>() else {
+            return false;
+        };
+        let items = items
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for (action, on) in enabled {
+            for item in items.get(action.as_str()).into_iter().flatten() {
+                if let Err(error) = item.set_enabled(*on) {
+                    tracing::warn!(%error, action, "could not change a menu item");
+                }
+            }
+        }
+        true
+    }
 
     fn menu_item<R: Runtime>(app: &AppHandle<R>, item: &UiItem) -> tauri::Result<MenuItem<R>> {
-        MenuItem::with_id(
+        let made = MenuItem::with_id(
             app,
             format!("{UI_ACTION_PREFIX}{}", item.action),
             item.title,
             true,
             item.shortcut,
-        )
+        )?;
+        if app.try_state::<Items<R>>().is_none() {
+            app.manage(Items::<R>::default());
+        }
+        if let Some(items) = app.try_state::<Items<R>>() {
+            items
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(item.action)
+                .or_default()
+                .push(made.clone());
+        }
+        Ok(made)
     }
 
     /// A submenu of UI actions; `None` in the list is a separator. `last`
@@ -154,19 +299,47 @@ mod bar {
     pub fn tools<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         submenu(app, "Tools", TOOLS, &[])
     }
+
+    /// The Query menu.
+    pub fn query<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+        submenu(app, "Query", QUERY, &[])
+    }
+
+    /// The Connection menu.
+    pub fn connection<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+        submenu(app, "Connection", CONNECTION, &[])
+    }
+
+    /// The Help menu: pages on the web.
+    pub fn help<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
+        let menu = Submenu::new(app, "Help", true)?;
+        for (key, title, _) in HELP {
+            menu.append(&MenuItem::with_id(
+                app,
+                format!("{OPEN_PREFIX}{key}"),
+                *title,
+                true,
+                None::<&str>,
+            )?)?;
+        }
+        Ok(menu)
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub use bar::{file, settings, tools, view};
+pub use bar::{connection, file, help, query, settings, tools, view};
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
-    use super::{FILE, SETTINGS, TOOLS, UI_ACTION_PREFIX, UiItem, VIEW, ui_action};
+    use super::{
+        CONNECTION, FILE, HELP, QUERY, SETTINGS, TOOLS, UI_ACTION_PREFIX, UiItem, VIEW,
+        help_address, ui_action,
+    };
 
     fn all() -> Vec<&'static UiItem> {
-        [FILE, VIEW, TOOLS]
+        [FILE, VIEW, QUERY, CONNECTION, TOOLS]
             .into_iter()
             .flatten()
             .flatten()
@@ -182,6 +355,16 @@ mod tests {
         assert_eq!(ui_action("varve-quit"), None);
         assert_eq!(ui_action("new-query"), None);
         assert!(UI_ACTION_PREFIX.ends_with(':'));
+    }
+
+    #[test]
+    fn help_items_open_their_own_https_pages() {
+        for (key, _, address) in HELP {
+            assert!(address.starts_with("https://"), "{address}");
+            assert_eq!(help_address(&format!("varve-open:{key}")), Some(*address));
+        }
+        assert_eq!(help_address("varve-open:elsewhere"), None);
+        assert_eq!(help_address("varve-do:website"), None);
     }
 
     #[test]

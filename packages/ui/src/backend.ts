@@ -55,6 +55,14 @@ export function setGlassShapes(shapes: GlassShape[]): Promise<boolean> {
   return invoke<boolean>('set_glass_shapes', { shapes });
 }
 
+/**
+ * Tells the menu bar which of its actions can be carried out now (macOS; elsewhere there is no menu bar and the
+ * answer is false). Actions that are not listed keep their state.
+ */
+export function setMenuEnabled(enabled: Record<string, boolean>): Promise<boolean> {
+  return invoke<boolean>('set_menu_enabled', { enabled });
+}
+
 /** Calls an extension command by its full name, for example `acme.test.ping`. */
 export function extInvoke<T = unknown>(command: string, payload?: unknown): Promise<T> {
   return invoke<T>('ext_invoke', { command, payload: payload ?? null });
