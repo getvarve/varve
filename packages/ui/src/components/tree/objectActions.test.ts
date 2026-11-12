@@ -4,7 +4,7 @@ import type { MenuItem } from '../../lib/menu';
 import { databaseChildren, schemaChildren } from '../../lib/tree';
 import type { ObjNode } from '../../lib/tree';
 import { designerIntent, pendingFocus } from '../table/designerIntent';
-import { defaultAction, isObjectAction, objectMenuItems, runObjectAction } from './objectActions';
+import { defaultAction, doubleClickExpands, isObjectAction, objectMenuItems, runObjectAction } from './objectActions';
 
 const opened: { fn: string; args: unknown[] }[] = [];
 const record =
@@ -401,5 +401,25 @@ describe('creating the first object of a kind', () => {
     expect(isObjectAction('new-kind:nonsense')).toBe(false);
     runObjectAction('new-kind:view', objectNode('table', 'orders'), profile);
     expect(opened).toHaveLength(0);
+  });
+});
+
+describe('doubleClickExpands', () => {
+  it('opens a row that can open, such as a folder, a connection, a database or a group', () => {
+    expect(doubleClickExpands(true, null)).toBe(true);
+    const group = { type: 'group' } as ObjNode;
+    const database = { type: 'database' } as ObjNode;
+    expect(doubleClickExpands(true, group)).toBe(true);
+    expect(doubleClickExpands(true, database)).toBe(true);
+  });
+
+  it('runs the action of a table or another real object, also when it has columns under it', () => {
+    expect(doubleClickExpands(true, objectNode('table', 'orders', true))).toBe(false);
+    expect(doubleClickExpands(true, objectNode('view', 'v', true))).toBe(false);
+  });
+
+  it('runs the action of a row that cannot open', () => {
+    expect(doubleClickExpands(false, null)).toBe(false);
+    expect(doubleClickExpands(false, { type: 'database' } as ObjNode)).toBe(false);
   });
 });

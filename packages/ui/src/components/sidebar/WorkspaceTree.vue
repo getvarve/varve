@@ -24,7 +24,7 @@ import ContextMenu from '../common/ContextMenu.vue';
 import VarveMark from '../VarveMark.vue';
 import EngineTile from '../common/EngineTile.vue';
 import Icon from '../common/Icon.vue';
-import { defaultAction, isObjectAction, objectMenuItems, runObjectAction } from '../tree/objectActions';
+import { defaultAction, doubleClickExpands, isObjectAction, objectMenuItems, runObjectAction } from '../tree/objectActions';
 import type { ObjectActionId } from '../tree/objectActions';
 import { useObjectBrowser } from '../tree/objectBrowser';
 import ObjectIcon from '../tree/ObjectIcon.vue';
@@ -289,6 +289,12 @@ function activate(row: SidebarRow): void {
   } else {
     void openSavedQuery(node.query);
   }
+}
+
+/** A double click opens a row that can open, and runs the action of the others (a table opens its data). */
+function onDoubleClick(row: SidebarRow): void {
+  if (doubleClickExpands(row.expandable, row.item.type === 'object' ? row.item.node : null)) toggle(row);
+  else activate(row);
 }
 
 // Rename
@@ -820,7 +826,7 @@ function objectTitle(node: ObjNode): string | undefined {
         :title="row.item.type === 'object' ? objectTitle(row.item.node) : undefined"
         @focus="focusedKey = row.key"
         @click="focusRow(row.key)"
-        @dblclick="activate(row)"
+        @dblclick="onDoubleClick(row)"
         @keydown="onKeydown($event, row)"
         @contextmenu.prevent.stop="openMenu($event, row)"
         @dragstart="onDragStart($event, row)"

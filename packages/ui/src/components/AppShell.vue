@@ -383,23 +383,39 @@ onBeforeUnmount(() => {
   grid-row: 3;
 }
 
-/* The edge of the sidebar column: drag it, or use the arrow keys, to change the width. It sits in the gap between
-   the card and the content. */
+/* The edge of the sidebar: drag it, double click it, or use the arrow keys, to change the width. The grip lies over
+   the card's edge itself and reaches into the gap beside it, so it is found where the edge is seen. */
 .divider {
   position: absolute;
-  top: 18px;
-  right: -9px;
-  bottom: 18px;
-  z-index: 1;
-  width: 8px;
+  top: 12px;
+  right: -8px;
+  bottom: 12px;
+  z-index: 5;
+  width: 14px;
   cursor: col-resize;
   touch-action: none;
 }
 
-.divider:hover,
+/* A line on the card's edge while the grip is under the pointer or has focus. */
+.divider::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.divider:hover::after,
+.divider:focus-visible::after {
+  background: var(--accent);
+}
+
 .divider:focus-visible {
   outline: none;
-  background: linear-gradient(to right, transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px);
 }
 
 .brand {
