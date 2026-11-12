@@ -17,14 +17,17 @@ pub const UI_ACTION_EVENT: &str = "menu://action";
 /// Start of the id of every menu item the UI carries out.
 pub const UI_ACTION_PREFIX: &str = "varve-do:";
 
+// Only the menu bar (macOS) and the tests use the tables below.
 /// One menu item the UI carries out: the action's name, the title in the
 /// menu and the shortcut, if it has one.
+#[cfg(any(target_os = "macos", test))]
 struct UiItem {
     action: &'static str,
     title: &'static str,
     shortcut: Option<&'static str>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 const fn item(action: &'static str, title: &'static str, shortcut: Option<&'static str>) -> UiItem {
     UiItem {
         action,
@@ -34,9 +37,11 @@ const fn item(action: &'static str, title: &'static str, shortcut: Option<&'stat
 }
 
 /// Settings sits in the app menu, where macOS users look for it.
+#[cfg(any(target_os = "macos", test))]
 const SETTINGS: UiItem = item("show-settings", "Settings…", Some("CmdOrCtrl+,"));
 
 /// File: making things, and closing the tab in front.
+#[cfg(any(target_os = "macos", test))]
 const FILE: &[Option<UiItem>] = &[
     Some(item(
         "new-connection",
@@ -50,6 +55,7 @@ const FILE: &[Option<UiItem>] = &[
 ];
 
 /// View: the three pages and the sidebar.
+#[cfg(any(target_os = "macos", test))]
 const VIEW: &[Option<UiItem>] = &[
     Some(item("show-workspace", "Workspace", Some("CmdOrCtrl+1"))),
     Some(item("show-activity", "Activity", Some("CmdOrCtrl+2"))),
@@ -63,6 +69,7 @@ const VIEW: &[Option<UiItem>] = &[
 ];
 
 /// Query: the actions of the query tab in front.
+#[cfg(any(target_os = "macos", test))]
 const QUERY: &[Option<UiItem>] = &[
     Some(item("query-run", "Run", Some("CmdOrCtrl+Enter"))),
     Some(item(
@@ -78,6 +85,7 @@ const QUERY: &[Option<UiItem>] = &[
 ];
 
 /// Connection: the connection of the tab in front, or one the UI asks for.
+#[cfg(any(target_os = "macos", test))]
 const CONNECTION: &[Option<UiItem>] = &[
     Some(item("connection-overview", "Open Overview", None)),
     Some(item("connection-edit", "Edit Connection…", None)),
@@ -141,6 +149,7 @@ pub fn open_in_browser(address: &str) {
 
 /// Tools: what there is to look at on a server. The UI asks which connection
 /// when no tab is in front.
+#[cfg(any(target_os = "macos", test))]
 const TOOLS: &[Option<UiItem>] = &[
     Some(item("live:status", "Server Status", None)),
     Some(item("live:processes", "Process List", None)),
@@ -355,6 +364,30 @@ mod tests {
         assert_eq!(ui_action("varve-quit"), None);
         assert_eq!(ui_action("new-query"), None);
         assert!(UI_ACTION_PREFIX.ends_with(':'));
+    }
+
+    #[test]
+    fn every_item_has_a_title_and_a_dialog_ends_in_an_ellipsis() {
+        for item in all() {
+            assert!(
+                !item.title.trim().is_empty(),
+                "{} has no title",
+                item.action
+            );
+        }
+        // These open a dialog before anything happens.
+        for action in [
+            "new-connection",
+            "connection-edit",
+            "query-save-as",
+            "show-settings",
+        ] {
+            let item = all().into_iter().find(|item| item.action == action);
+            assert!(
+                item.is_some_and(|item| item.title.ends_with('…')),
+                "{action}"
+            );
+        }
     }
 
     #[test]

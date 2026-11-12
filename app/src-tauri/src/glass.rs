@@ -16,6 +16,7 @@
 //! instead of showing the desktop through.
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "macos")]
 use tauri::Manager;
 
 /// The glass behind the main window, as the UI reads it from `app_info`.
@@ -56,6 +57,8 @@ pub fn apply(window: &tauri::WebviewWindow, transparent: bool) -> Glass {
 /// of the page.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// Only macOS has glass to place, so only there are the numbers read.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct GlassShape {
     id: String,
     x: f64,
@@ -78,9 +81,16 @@ pub(crate) fn set_glass_shapes(
     if window_glass.0 != Glass::LiquidGlass || window.label() != "main" {
         return false;
     }
-    let shapes: Vec<varve_glass_shape::Shape> = shapes
+    place_shapes(&window, shapes)
+}
+
+/// Hands the shapes to `varve-glass` on the main thread, where the views
+/// live; a command runs on a worker.
+#[cfg(target_os = "macos")]
+fn place_shapes(window: &tauri::WebviewWindow, shapes: Vec<GlassShape>) -> bool {
+    let shapes: Vec<varve_glass::Shape> = shapes
         .into_iter()
-        .map(|shape| varve_glass_shape::Shape {
+        .map(|shape| varve_glass::Shape {
             id: shape.id,
             x: shape.x,
             y: shape.y,
@@ -90,34 +100,18 @@ pub(crate) fn set_glass_shapes(
         })
         .collect();
     let target = window.clone();
-    // The views live on the main thread; a command runs on a worker.
     window
         .app_handle()
         .run_on_main_thread(move || {
-            varve_glass_shape::show(&target, &shapes);
+            varve_glass::show(&target, &shapes);
         })
         .is_ok()
 }
 
-/// `varve-glass` on macOS; elsewhere the same names doing nothing, so the
-/// command above is one piece of code for every platform.
-#[cfg(target_os = "macos")]
-use varve_glass as varve_glass_shape;
-
+/// No Liquid Glass outside macOS, so nothing to place.
 #[cfg(not(target_os = "macos"))]
-mod varve_glass_shape {
-    pub(super) struct Shape {
-        pub id: String,
-        pub x: f64,
-        pub y: f64,
-        pub width: f64,
-        pub height: f64,
-        pub radius: f64,
-    }
-
-    pub(super) fn show(_window: &tauri::WebviewWindow, _shapes: &[Shape]) -> bool {
-        false
-    }
+fn place_shapes(_window: &tauri::WebviewWindow, _shapes: Vec<GlassShape>) -> bool {
+    false
 }
 
 #[cfg(target_os = "macos")]
