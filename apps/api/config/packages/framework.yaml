@@ -1,0 +1,65 @@
+# see https://symfony.com/doc/current/reference/configuration/framework.html
+framework:
+    secret: '%env(APP_SECRET)%'
+
+    # The browser session of the account pages (firewall `main`: /login, /oauth/authorize, signing up, confirming the
+    # address, resetting the password), the only place a session is started. It ends two hours after the last request
+    # or when the browser closes; "Keep me signed in" (the remember-me cookie in security.yaml) signs the browser in
+    # again for 30 days after that.
+    session:
+        cookie_lifetime: 0
+        cookie_secure: auto
+        cookie_httponly: true
+        cookie_samesite: lax
+        gc_maxlifetime: 7200
+
+    #esi: true
+    #fragments: true
+
+when@prod:
+    framework:
+        session:
+            # Kept in Redis, so every API instance sees the same session and a deploy signs nobody out.
+            handler_id: app.session_handler
+            # A production server is reached over https only (API_PUBLIC_URL), so its cookie never depends on the
+            # proxy telling the API so (SYMFONY_TRUSTED_PROXIES): with `auto` a wrong proxy setting would hand out a
+            # session cookie that also travels over plain http.
+            cookie_secure: true
+
+    services:
+        # The Redis connection of a worker: the sessions here, the limits (rate_limiter.yaml) and the refresh token
+        # grace (cache.yaml) all use this one. FrankenPHP keeps a worker and its services alive between requests, and
+        # a connection that failed once (Redis restarted, the network dropped) refuses every later command instead of
+        # connecting again, so sign-in would stay broken until the API itself restarts. That is why the connection is
+        # let go after every request (kernel.reset) and made again by the first use in the next one.
+        app.redis:
+            class: Redis
+            factory: ['Symfony\Component\Cache\Adapter\RedisAdapter', 'createConnection']
+            arguments: ['%env(REDIS_URL)%', { lazy: true }]
+            tags:
+                - { name: kernel.reset, method: resetLazyObject }
+        # What /health pings (App\Controller\HealthController): a connection of its own that gives up after a second,
+        # so a Redis that does not answer fails the check fast instead of holding it for the default 30 seconds.
+        app.health_redis:
+            class: Redis
+            factory: ['Symfony\Component\Cache\Adapter\RedisAdapter', 'createConnection']
+            arguments: ['%env(REDIS_URL)%', { lazy: true, timeout: 1, read_timeout: 1 }]
+            tags:
+                - { name: kernel.reset, method: resetLazyObject }
+        # Redis expires a session two hours after its last request (the ttl), so no garbage collection is needed.
+        app.session_handler:
+            class: Symfony\Component\HttpFoundation\Session\Storage\Handler\RedisSessionHandler
+            arguments: ['@app.redis', { prefix: 'session:', ttl: 7200 }]
+
+when@dev:
+    framework:
+        session:
+            # One API instance in development: files in var/sessions, which a restart keeps.
+            handler_id: session.handler.native_file
+            save_path: '%kernel.project_dir%/var/sessions/%kernel.environment%'
+
+when@test:
+    framework:
+        test: true
+        session:
+            storage_factory_id: session.storage.factory.mock_file

@@ -1,0 +1,26 @@
+# The build context of the server images (docker/api/Dockerfile, built from the repository root). Everything is left
+# out except what an image needs, so the Rust target folder, node_modules, .git and the rest of the app never go to
+# the builder. A new image adds its own folders below. The desktop app's builds (Tauri) do not use Docker and are not
+# affected.
+*
+!docker/api/
+!apps/api/
+
+# Installed or generated on this machine: the image installs and warms its own.
+apps/api/vendor/
+apps/api/var/
+apps/api/public/bundles/
+apps/api/.phpunit.cache/
+**/node_modules/
+
+# Local settings and keys stay on this machine: an image must never carry them.
+apps/api/.env.local
+apps/api/.env.local.php
+apps/api/.env.*.local
+apps/api/config/jwt/
+apps/api/phpunit.xml
+apps/api/phpstan.neon
+
+# Development only.
+apps/api/tests/
+**/.DS_Store

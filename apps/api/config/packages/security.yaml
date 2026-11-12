@@ -1,0 +1,86 @@
+security:
+    password_hashers:
+        Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: 'auto'
+
+    providers:
+        app_user_provider:
+            # Without a property: App\Repository\UserRepository loads the user, however the address is capitalized.
+            entity:
+                class: App\Entity\User
+
+    firewalls:
+        dev:
+            pattern: ^/(_profiler|_wdt|assets|build)/
+            security: false
+        health:
+            pattern: ^/health$
+            security: false
+        # The token endpoint and token revocation (RFC 7009): clients identify themselves in the request.
+        oauth_token:
+            pattern: ^/oauth/(token|revoke)$
+            security: false
+        # Authorization server and protected resource metadata (RFC 8414, RFC 9728): public documents.
+        oauth_metadata:
+            pattern: ^/\.well-known/oauth-
+            security: false
+        # Bearer tokens issued by our own OAuth2 server to our own apps. Every one belongs to a device
+        # (App\Device\DeviceGuard): a signed-out device's tokens no longer work.
+        api:
+            pattern: ^/api/
+            stateless: true
+            provider: app_user_provider
+            oauth2: true
+        # Browser session used only for the account pages: signing in on the way to /oauth/authorize, signing up,
+        # confirming the address and resetting a forgotten password.
+        main:
+            lazy: true
+            provider: app_user_provider
+            user_checker: App\Security\ConfirmedEmailChecker
+            form_login:
+                login_path: app_login
+                check_path: app_login
+                enable_csrf: true
+                # A sign-in normally goes back to the /oauth/authorize request that asked for it; one opened directly
+                # ends on a page that says so.
+                default_target_path: app_signed_in
+            # Wrong passwords lock the form for a while: per account and network address, per network address, and
+            # per account (App\Security\LoginLimiter, with the numbers in rate_limiter.yaml).
+            login_throttling:
+                limiter: App\Security\LoginLimiter
+            # "Keep me signed in" (on by default on the sign-in form): the browser signs in again from this cookie for
+            # 30 days after the session ended, as long as the refresh tokens of our apps. A new password ends it.
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000
+                secure: auto
+                httponly: true
+                samesite: lax
+                signature_properties: ['password']
+            # Only a POST from Varve gets here (App\Security\SignOutGuard); it ends the session and the cookie above.
+            logout:
+                path: app_logout
+
+    access_control:
+        - { path: ^/login$, roles: PUBLIC_ACCESS }
+        - { path: ^/(register|confirm-email|forgot-password|reset-password|signed-in|signed-out)(/|$), roles: PUBLIC_ACCESS }
+        - { path: ^/oauth/authorize, roles: ROLE_USER }
+        # What this server is: open before sign-in.
+        - { path: ^/api/v1/server-info$, roles: PUBLIC_ACCESS }
+        - { path: ^/api/, roles: IS_AUTHENTICATED_FULLY }
+
+when@prod:
+    security:
+        firewalls:
+            main:
+                remember_me:
+                    # Always, not `auto`: see the session cookie in framework.yaml.
+                    secure: true
+
+when@test:
+    security:
+        password_hashers:
+            Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface:
+                algorithm: auto
+                cost: 4
+                time_cost: 3
+                memory_cost: 10

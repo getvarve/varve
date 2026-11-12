@@ -1,0 +1,7 @@
+# Used only by scripts/ci/server-image-check.sh, on top of compose.prod.yaml: the proxy listens on one local port
+# instead of the machine's ports 80 and 443. Everything else stays as shipped; with VARVE_API_URL=https://localhost the
+# proxy takes its certificate from Caddy's own local authority instead of a public one.
+services:
+  proxy:
+    ports: !override
+      - "127.0.0.1:${VARVE_CHECK_PORT:-18443}:443"

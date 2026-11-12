@@ -1,0 +1,273 @@
+/* The API's own pages (sign in, sign up, password reset), in the tones of the apps and the system's own type. */
+:root {
+  --ground: #f3f4f6;
+  --surface: #ffffff;
+  --line: #e3e5e9;
+  --line-strong: #d5d8de;
+  --ink: #16181d;
+  --ink-2: #4a505c;
+  --ink-3: #6b7280;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --focus: #2341d6;
+  --raised: 0 1px 2px rgb(22 24 29 / 6%), 0 8px 24px rgb(22 24 29 / 10%);
+  --accent: #5b4be0;
+  --font-display: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-ui: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --radius-control: 6px;
+  --radius-panel: 14px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0f1115;
+    --surface: #171a20;
+    --line: #2a2f38;
+    --line-strong: #3a3f4a;
+    --ink: #eceef2;
+    --ink-2: #b5bbc6;
+    --ink-3: #8a92a0;
+    --danger: #f97066;
+    --danger-soft: #3a1d1b;
+    --focus: #8fa2ff;
+    --accent: #8b7cff;
+    --raised: 0 1px 2px rgb(0 0 0 / 30%), 0 8px 24px rgb(0 0 0 / 40%);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 14px/20px var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 32px 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  font: 700 22px/28px var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.card {
+  width: min(400px, 100%);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--raised);
+  animation: card-in 200ms var(--ease-out);
+}
+
+.card h1 {
+  margin: 0 0 4px;
+  font: 700 26px/32px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: var(--ink-2);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.field input {
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 15px var(--font-ui);
+  transition: border-color 120ms ease;
+}
+
+.field input:hover {
+  border-color: var(--ink-3);
+}
+
+.field input:focus-visible {
+  outline-offset: 0;
+  border-color: var(--focus);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--ink);
+  color: var(--surface);
+  font: 600 15px var(--font-ui);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    transform 120ms var(--ease-out);
+}
+
+.button:hover {
+  background: color-mix(in srgb, var(--ink) 86%, var(--surface));
+}
+
+.button:active {
+  transform: scale(0.98);
+}
+
+.error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.footnote {
+  margin: 0;
+  max-width: 400px;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-align: center;
+}
+
+.footnote a {
+  color: var(--ink-2);
+}
+
+.mark-ground {
+  fill: #14171c;
+}
+.mark-outer {
+  stroke: #8b7cff;
+}
+.mark-inner {
+  stroke: #e6e8ec;
+}
+.mark-dot {
+  fill: #a3a9b5;
+}
+
+.links {
+  margin: 16px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+
+.links a,
+.error a {
+  color: var(--accent);
+}
+
+.field-hint {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.field-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.field input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation-name: card-fade;
+  }
+  .button:active {
+    transform: none;
+  }
+}
+
+@keyframes card-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .card {
+    padding: 24px 20px;
+  }
+}
+
+.button-secondary {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.button-secondary:hover {
+  background: var(--ground);
+}

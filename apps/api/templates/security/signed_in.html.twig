@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Signed in{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="signed-in-title">
+        <h1 id="signed-in-title">You are signed in</h1>
+        <p class="lead">This browser is signed in to Varve as <strong>{{ app.user.userIdentifier }}</strong>. Go back to the Varve app and sign in there: it continues without asking for your password again.</p>
+        <p class="links"><a href="{{ path('app_logout') }}">Sign out of this browser</a></p>
+    </section>
+{% endblock %}

@@ -1,0 +1,179 @@
+# The Varve server on your own machine: this file and a .env next to it (start from .env.prod.example), nothing else
+# from the repository. The image is the one every release publishes; Varve Cloud runs the same one.
+#
+#   docker compose -f compose.prod.yaml --env-file .env up -d
+#
+# The proxy gets an HTTPS certificate for VARVE_API_URL by itself (ports 80 and 443 must reach it). The whole guide is
+# docs/hosting.md.
+
+# Its own project name, so it never takes over the development stack's containers or volumes (compose.yaml, project
+# varve-server) on the same machine.
+name: varve
+
+# Docker keeps every line a container prints, without end, unless told otherwise: at most five files of 10 MB each.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-api-env: &api-env
+  APP_ENV: prod
+  APP_SECRET: ${APP_SECRET:?set APP_SECRET}
+  DEFAULT_URI: ${VARVE_API_URL:?set VARVE_API_URL}
+  API_PUBLIC_URL: ${VARVE_API_URL}
+  # Optional: the web client's address, once it has a deployment. Its sign-in returns to <address>/auth/callback.
+  # Empty: this server has no web client, and only the desktop app signs in.
+  WEB_APP_URL: ${VARVE_WEB_URL:-}
+  # The origins that may call the API from a browser: the web client (when set) and the desktop app's own (WebKit and
+  # WebView2).
+  CORS_ALLOW_ORIGIN: ${VARVE_WEB_URL:-} tauri://localhost http://tauri.localhost
+  # Only the proxy in front talks to the API (the API publishes no port), and it tells the API the client's address
+  # and scheme. Docker gives the containers addresses in private ranges; nothing outside this stack can reach the API
+  # to claim another address. The sign-in, sign-up and account mail limits count per client address, so they rely on
+  # this: without it every visitor would count as the proxy's one address. The API refuses to start without it, and
+  # with a value that trusts every address.
+  SYMFONY_TRUSTED_PROXIES: private_ranges
+  # The OAuth2 signing key (made on the first start, in the oauth_keys volume) is encrypted with OAUTH_PASSPHRASE;
+  # refresh tokens and authorization codes are encrypted with OAUTH_ENCRYPTION_KEY.
+  OAUTH_PASSPHRASE: ${OAUTH_PASSPHRASE:?set OAUTH_PASSPHRASE}
+  OAUTH_ENCRYPTION_KEY: ${OAUTH_ENCRYPTION_KEY:?set OAUTH_ENCRYPTION_KEY}
+  DATABASE_URL: postgresql://varve:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/varve?serverVersion=18&charset=utf8
+  # Sign-in sessions, sign-up and mail limits and the refresh token grace, shared by every API instance.
+  REDIS_URL: redis://redis:6379
+  # Account mail: address confirmation and password reset links.
+  MAILER_DSN: ${MAILER_DSN:?set MAILER_DSN}
+  VARVE_MAIL_FROM: ${VARVE_MAIL_FROM:?set VARVE_MAIL_FROM}
+  # Only Varve Cloud bills; a self-hosted server never bills, never blocks anyone and never contacts Stripe.
+  VARVE_BILLING: "0"
+  # Whether anyone who reaches the server may make an account (1), or only you, with
+  # `docker compose -f compose.prod.yaml exec api php bin/console app:users:create <email> "<name>"` (0).
+  VARVE_SIGN_UP: ${VARVE_SIGN_UP:-1}
+  # How much one organization, one user and one saved query may store. The defaults are generous; set any of these
+  # in .env to change it. The guide lists what each one counts.
+  VARVE_SYNC_MAX_RECORDS: ${VARVE_SYNC_MAX_RECORDS:-50000}
+  VARVE_SYNC_MAX_USER_RECORDS: ${VARVE_SYNC_MAX_USER_RECORDS:-10000}
+  VARVE_SYNC_MAX_BYTES: ${VARVE_SYNC_MAX_BYTES:-536870912}
+  VARVE_SYNC_MAX_USER_BYTES: ${VARVE_SYNC_MAX_USER_BYTES:-67108864}
+  VARVE_SYNC_MAX_REVISIONS: ${VARVE_SYNC_MAX_REVISIONS:-50}
+  VARVE_SYNC_MAX_REVISION_BYTES: ${VARVE_SYNC_MAX_REVISION_BYTES:-8388608}
+
+services:
+  proxy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: proxy
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - proxy_data:/data
+      - proxy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+    logging: *logging
+
+  api:
+    # Set VARVE_VERSION in .env to the release you run. Left out, `pull` takes whatever release is newest, and the API
+    # migrates the database to it on its next start.
+    image: ghcr.io/getvarve/varve-server:${VARVE_VERSION:-latest}
+    environment:
+      <<: *api-env
+      # This container makes the OAuth2 signing keys (once), migrates the database and creates the apps' OAuth2
+      # clients on start, before it serves anything.
+      RUN_MIGRATIONS: "1"
+    volumes:
+      - oauth_keys:/app/config/jwt
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+    logging: *logging
+
+  # The nightly purges (abandoned sign-ups, expired tokens, sync tombstones older than 90 days) of the schedule
+  # scheduler_default. The API image with another command; it starts once the API has migrated the database.
+  maintenance:
+    image: ghcr.io/getvarve/varve-server:${VARVE_VERSION:-latest}
+    command: ["php", "bin/console", "messenger:consume", "scheduler_default", "--time-limit=3600", "--memory-limit=256M"]
+    environment: *api-env
+    volumes:
+      - oauth_keys:/app/config/jwt:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    # The image's own check asks the web server, which only the API container runs. The worker is healthy while its
+    # consumer is the container's main process; it exits after an hour or at its memory limit, and restart brings it
+    # back. Without a check of its own, `up --wait` fails on some Compose versions.
+    healthcheck:
+      test: ["CMD-SHELL", "tr '\\0' ' ' < /proc/1/cmdline | grep -q 'messenger:consume'"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s
+    restart: unless-stopped
+    logging: *logging
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: varve
+      POSTGRES_USER: varve
+      # Read only when the volume is new: changing it later does not change the database's password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "varve", "-U", "varve"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:8.8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+configs:
+  proxy:
+    content: |
+      ${VARVE_API_URL} {
+      	encode zstd gzip
+      	# Browsers keep to https for a year once they have seen this, so a later visit over a hostile network never
+      	# starts with plain http.
+      	header Strict-Transport-Security "max-age=31536000"
+      	# A ? only fills in what the API did not send itself: its account pages and its API answers set their own.
+      	# One line each, on purpose: in one block Caddy fills in none of them as soon as the API sent any one.
+      	header ?X-Content-Type-Options nosniff
+      	header ?X-Frame-Options DENY
+      	header ?Referrer-Policy same-origin
+      	reverse_proxy api:8080
+      }
+
+volumes:
+  proxy_data:
+  proxy_config:
+  postgres_data:
+  redis_data:
+  # The OAuth2 signing keys. Losing them signs every app out.
+  oauth_keys:

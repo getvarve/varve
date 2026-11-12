@@ -130,12 +130,16 @@ The server runs inside the app on `127.0.0.1`, needs a token only you can read, 
 
 Varve is one app, and all of it is free: every feature lives in this repository under AGPL-3.0. There is no paid edition and no license key.
 
-Cloud sync across devices and team workspaces are planned. They need a server: the self-hostable backend (planned) lives in this repository, under the same license.
+Cloud sync across devices and team workspaces are planned. They need a server: the self-hostable backend, the Varve server, lives in this repository (`apps/api`), under the same license.
 
 - **Self-hosted:** run the backend on your own servers, for free.
 - **Varve Cloud:** let getvarve run it for you, as a paid service.
 
 The app works fully without a backend; you only need one for the cloud features. See [docs/hosting.md](docs/hosting.md).
+
+### 🏠 Your own server
+
+Every release publishes the server as the image `ghcr.io/getvarve/varve-server` (amd64 and arm64). To run it you need a machine with Docker, a DNS name pointing at it, a mail server to send account mail through, [`compose.prod.yaml`](compose.prod.yaml) and the settings in [`.env.prod.example`](.env.prod.example); the proxy gets its HTTPS certificate by itself. The steps, checks, updates and backups are in [Run your own server](docs/hosting.md#run-your-own-server). To work on the server itself, see [apps/api/README.md](apps/api/README.md).
 
 ## 🛠 Develop
 

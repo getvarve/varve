@@ -28,6 +28,7 @@ app/src-tauri/gen/schemas/
 .env
 .env.*
 !.env.example
+!/.env.prod.example
 *.pem
 *.key
 
@@ -41,3 +42,12 @@ __pycache__/
 # Sparkle release fetched by scripts/fetch-sparkle.mjs
 app/src-tauri/macos/sparkle/
 app/src-tauri/macos/.sparkle-*/
+
+# Varve server (apps/api): its .env files hold development defaults only and are committed, as Symfony expects.
+# Real secrets go in .env.local files, which stay ignored.
+!/apps/api/.env
+!/apps/api/.env.dev
+!/apps/api/.env.test
+/apps/api/vendor/
+/apps/api/var/
+/apps/api/.phpunit.cache/

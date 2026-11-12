@@ -1,0 +1,19 @@
+parameters:
+    # Without a queue the mail is sent by the process that handled the request, after its response went out
+    # (App\Account\AccountMailDelivery).
+    env(MESSENGER_TRANSPORT_DSN): 'sync://'
+
+framework:
+    messenger:
+        transports:
+            # Account mail (confirmation links, password reset links). With a queue as MESSENGER_TRANSPORT_DSN, a
+            # worker sends it (`bin/console messenger:consume mail`) and tries again when the mail server is down.
+            mail:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 5
+                    delay: 1000
+                    multiplier: 3
+
+        routing:
+            Symfony\Component\Mailer\Messenger\SendEmailMessage: mail
