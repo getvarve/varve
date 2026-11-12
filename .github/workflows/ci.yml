@@ -578,7 +578,8 @@ jobs:
 
   # The production image (docker/api/Dockerfile) as the release publishes it, started with compose.prod.yaml: it must
   # refuse missing and development settings, and with good ones make its OAuth2 keys once, create the apps' OAuth2
-  # clients, start the maintenance worker and serve health, server-info and the sign-in pages over HTTPS
+  # clients, start the maintenance worker, serve health, server-info and the sign-in pages over HTTPS with a Secure
+  # session cookie, and take a wrong password through the session and the sign-in limit in Redis
   # (scripts/ci/server-image-check.sh). Only amd64 here; the release builds arm64 too.
   server-image:
     name: Server image (build, settings check, start)
@@ -589,9 +590,14 @@ jobs:
       - name: Pull the images
         timeout-minutes: 10
         # retry.sh: Docker Hub answers "toomanyrequests" now and then. The build and compose.prod.yaml then find
-        # every image here.
+        # every image here. The two images the build starts from are pulled by the digest the Dockerfile pins.
         run: |
-          for image in docker/dockerfile:1 dunglas/frankenphp:1.13-php8.5 composer:2 postgres:18-alpine redis:8.8-alpine caddy:2.10-alpine; do
+          mapfile -t build_images < <(sed -n 's/^FROM \([^ ]*@sha256:[0-9a-f]*\) AS .*/\1/p' docker/api/Dockerfile)
+          if [ "${#build_images[@]}" -ne 2 ]; then
+            echo "docker/api/Dockerfile should start from two images pinned by digest, found ${#build_images[@]}" >&2
+            exit 1
+          fi
+          for image in docker/dockerfile:1 "${build_images[@]}" postgres:18-alpine redis:8.8-alpine caddy:2.10-alpine; do
             scripts/ci/retry.sh 4 docker pull --quiet "$image"
           done
       - name: Build the production image

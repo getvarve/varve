@@ -16,3 +16,5 @@ when@prod:
     api_platform:
         enable_docs: false
         enable_swagger_ui: false
+        # The entrypoint at / lists every resource; like the docs, it is for development.
+        enable_entrypoint: false

@@ -26,6 +26,14 @@ final readonly class CheckProductionSettingsCommand
 
     public function __invoke(SymfonyStyle $io): int
     {
+        // The image starts from .env.local.php and would run without .env, but then no setting could be told from a
+        // development value any more: every such comparison below would pass without comparing anything.
+        if (!is_file($this->projectDir.'/.env')) {
+            $io->error(\sprintf('%s/.env is missing, so a development value cannot be told from a real one.', $this->projectDir));
+
+            return Command::FAILURE;
+        }
+
         $settings = new ProductionSettings($this->environment(), $this->developmentValues());
         $problems = $settings->problems();
         if ([] !== $problems) {

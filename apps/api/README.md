@@ -56,10 +56,26 @@ docker compose exec api sh -c 'bin/console cache:warmup --env=test && vendor/bin
 
 `.env` holds development defaults only. In production set at least `APP_SECRET`, `DATABASE_URL`, `API_PUBLIC_URL`,
 `CORS_ALLOW_ORIGIN` (origins separated by spaces), `OAUTH_PASSPHRASE`, `OAUTH_ENCRYPTION_KEY`, `MAILER_DSN`,
-`VARVE_MAIL_FROM` and `REDIS_URL`; `WEB_APP_URL` once the server has a web client. `VARVE_BILLING` stays `0` on a
-self-hosted server. `VARVE_SYNC_MAX_RECORDS` (50000) and `VARVE_SYNC_MAX_USER_RECORDS` (10000) cap the live synced
-records of an organization and of a user; raise them if you need to. The production image runs
-`bin/console app:settings:check` first and does not start while one of them is missing or still a development value.
+`VARVE_MAIL_FROM`, `REDIS_URL` (never localhost) and `SYMFONY_TRUSTED_PROXIES` (the proxy in front of the API, or
+`private_ranges`; never a value that trusts every address); `WEB_APP_URL` once the server has a web client.
+`VARVE_BILLING` stays `0` on a self-hosted server, and `VARVE_SIGN_UP=0` closes sign-up. The production image runs
+`bin/console app:settings:check` first and does not start while one of them is missing or still a development value,
+while `APP_ENV` is not `prod`, or while `APP_DEBUG` is on.
+
+What sync may store is capped by six settings, each a whole number above 0 with the default in `.env`; raise them if
+you need to:
+
+| Setting | Default | Caps |
+|---|---|---|
+| `VARVE_SYNC_MAX_RECORDS` | 50000 | Live synced records of one organization |
+| `VARVE_SYNC_MAX_USER_RECORDS` | 10000 | Live per-user records of one user |
+| `VARVE_SYNC_MAX_BYTES` | 536870912 (512 MiB) | Bytes of an organization's live record payloads |
+| `VARVE_SYNC_MAX_USER_BYTES` | 67108864 (64 MiB) | Bytes of a user's live per-user record payloads |
+| `VARVE_SYNC_MAX_REVISIONS` | 50 | Earlier versions kept per saved query |
+| `VARVE_SYNC_MAX_REVISION_BYTES` | 8388608 (8 MiB) | Bytes of those earlier versions per saved query |
+
+In production the session and remember-me cookies are always `Secure`, and sessions, limits and the refresh token
+grace live in Redis; `/health` reports `redis` there next to `database`.
 
 ## Sync
 

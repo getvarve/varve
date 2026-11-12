@@ -38,10 +38,23 @@ final readonly class ProductionSettings
      * Switches, read as on or off. A spelling Symfony's bool: processor does not know would quietly read as off, so
      * only these are allowed (and empty, which is off).
      */
-    public const array SWITCHES = ['VARVE_BILLING'];
+    public const array SWITCHES = ['VARVE_BILLING', 'VARVE_SIGN_UP'];
 
-    /** Limits, read as a whole number above 0. The repository's .env gives each a default. */
-    public const array COUNTS = ['VARVE_SYNC_MAX_RECORDS', 'VARVE_SYNC_MAX_USER_RECORDS'];
+    /**
+     * Limits, read as a whole number above 0, with the most digits each may have: 9 for a number of things, 12 for the
+     * two totals in bytes (up to 999 GB). The repository's .env gives each a default.
+     */
+    public const array COUNTS = [
+        'VARVE_SYNC_MAX_RECORDS' => 9,
+        'VARVE_SYNC_MAX_USER_RECORDS' => 9,
+        'VARVE_SYNC_MAX_BYTES' => 12,
+        'VARVE_SYNC_MAX_USER_BYTES' => 12,
+        'VARVE_SYNC_MAX_REVISIONS' => 9,
+        'VARVE_SYNC_MAX_REVISION_BYTES' => 9,
+    ];
+
+    /** What SYMFONY_TRUSTED_PROXIES may name besides addresses: the private network ranges, in both of Symfony's spellings. */
+    private const array PRIVATE_RANGES = ['private_ranges', 'PRIVATE_SUBNETS'];
 
     /** Placeholder spellings the example settings use. */
     private const string PLACEHOLDER = '/change-?me/i';
@@ -65,7 +78,7 @@ final readonly class ProductionSettings
      */
     public function problems(): array
     {
-        $problems = [];
+        $problems = $this->environmentProblems();
         foreach (self::SECRETS as $name => $length) {
             $problem = $this->secretProblem($name, $length);
             if (null !== $problem) {
@@ -73,10 +86,13 @@ final readonly class ProductionSettings
             }
         }
 
-        $problems = [...$problems, ...$this->originProblems(), ...$this->switchProblems(), ...$this->countProblems(), ...$this->mailProblems()];
+        $problems = [...$problems, ...$this->originProblems(), ...$this->proxyProblems(), ...$this->switchProblems(), ...$this->countProblems(), ...$this->mailProblems()];
 
-        if (1 !== preg_match('{^rediss?://\S+$}', $this->value('REDIS_URL'))) {
+        $redis = $this->value('REDIS_URL');
+        if (1 !== preg_match('{^rediss?://\S+$}', $redis)) {
             $problems[] = 'REDIS_URL must be the redis:// or rediss:// address of your Redis, which holds sign-in sessions and limits.';
+        } elseif ($this->isDevelopmentValue('REDIS_URL', $redis) || self::isThisMachine($redis)) {
+            $problems[] = 'REDIS_URL is not set to your Redis: localhost is the API container itself, which runs none.';
         }
 
         $database = $this->value('DATABASE_URL');
@@ -88,6 +104,89 @@ final readonly class ProductionSettings
         }
 
         return $problems;
+    }
+
+    /**
+     * The check is for a production server: any other environment, or debug mode, answers an error with the code's
+     * paths, the stack and the failed statement.
+     *
+     * @return list<string>
+     */
+    private function environmentProblems(): array
+    {
+        $problems = [];
+        if ('prod' !== $this->value('APP_ENV')) {
+            $problems[] = 'APP_ENV must be prod: any other environment shows errors in full to every visitor.';
+        }
+        // Empty reads as off, like every spelling of off PHP knows; anything else is on or a typing mistake.
+        if (false !== filter_var($this->value('APP_DEBUG'), \FILTER_VALIDATE_BOOL, \FILTER_NULL_ON_FAILURE)) {
+            $problems[] = 'APP_DEBUG must be 0 or left out: with it on, an error shows the code, the stack and the failed statement to every visitor.';
+        }
+
+        return $problems;
+    }
+
+    /**
+     * The proxy in front of the API tells it each visitor's address and that the visitor came over https. The API
+     * believes that only from the addresses listed here, and the sign-in, sign-up and account mail limits count per
+     * visitor's address: without the setting every visitor is the proxy's one address, and with one that trusts
+     * everybody a visitor claims any address they like.
+     *
+     * @return list<string>
+     */
+    private function proxyProblems(): array
+    {
+        $value = $this->value('SYMFONY_TRUSTED_PROXIES');
+        if ('' === $value) {
+            return ['SYMFONY_TRUSTED_PROXIES is not set: list the addresses of the proxy in front of the API, or private_ranges when only that proxy reaches the API over a private network. Without it every visitor counts as the proxy\'s one address.'];
+        }
+
+        $problems = [];
+        foreach (explode(',', $value) as $proxy) {
+            $proxy = trim($proxy);
+            if (\in_array($proxy, self::PRIVATE_RANGES, true)) {
+                continue;
+            }
+            $prefix = self::rangePrefix($proxy);
+            if ('REMOTE_ADDR' === $proxy || 0 === $prefix) {
+                $problems[] = \sprintf('SYMFONY_TRUSTED_PROXIES lists "%s", which trusts every address: any visitor could then claim another visitor\'s address. List only your proxy.', $proxy);
+            } elseif (null === $prefix) {
+                $problems[] = \sprintf('SYMFONY_TRUSTED_PROXIES lists "%s", which is not an IP address, a range such as 10.0.0.0/8, or private_ranges.', $proxy);
+            }
+        }
+
+        return $problems;
+    }
+
+    /** How many leading bits of an address or range are fixed (32 or 128 for one address); null when it is neither. */
+    private static function rangePrefix(string $proxy): ?int
+    {
+        [$address, $prefix] = [...explode('/', $proxy, 2), null];
+        $bits = match (true) {
+            false !== filter_var($address, \FILTER_VALIDATE_IP, \FILTER_FLAG_IPV4) => 32,
+            false !== filter_var($address, \FILTER_VALIDATE_IP, \FILTER_FLAG_IPV6) => 128,
+            default => null,
+        };
+        if (null === $bits) {
+            return null;
+        }
+        if (null === $prefix) {
+            return $bits;
+        }
+
+        return 1 === preg_match('/^(0|[1-9][0-9]{0,2})$/', $prefix) && (int) $prefix <= $bits ? (int) $prefix : null;
+    }
+
+    /** Whether a Redis address names the machine (in a container: the container) the API itself runs on. */
+    private static function isThisMachine(string $url): bool
+    {
+        $host = parse_url($url, \PHP_URL_HOST);
+        if (!\is_string($host)) {
+            return false;
+        }
+        $host = strtolower(trim($host, '[]'));
+
+        return 'localhost' === $host || str_ends_with($host, '.localhost') || str_starts_with($host, '127.') || \in_array($host, ['::1', '0.0.0.0', '::'], true);
     }
 
     /**
@@ -169,8 +268,8 @@ final readonly class ProductionSettings
     private function countProblems(): array
     {
         $problems = [];
-        foreach (self::COUNTS as $name) {
-            if (1 !== preg_match('/^[1-9][0-9]{0,8}$/', $this->value($name))) {
+        foreach (self::COUNTS as $name => $digits) {
+            if (1 !== preg_match(\sprintf('/^[1-9][0-9]{0,%d}$/', $digits - 1), $this->value($name))) {
                 $problems[] = \sprintf('%s must be a whole number above 0.', $name);
             }
         }

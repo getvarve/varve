@@ -1,6 +1,8 @@
 # The Varve server for development: the API, its database and a mail catcher. Self-hosting uses compose.prod.yaml.
 # Redis is not here: only production keeps sessions and limits in it; development keeps them in files.
 # Host ports stay clear of Tresso's stack and of dev/docker-compose.yml (the databases the app is tested against).
+# Every port is published on 127.0.0.1 only: the database password and the mail catcher are public development
+# values, and nobody else on the network has to reach them.
 name: varve-server
 
 services:
@@ -21,7 +23,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     ports:
-      - "8090:80"
+      - "127.0.0.1:8090:80"
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,7 +41,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
     ports:
-      - "54330:5432"
+      - "127.0.0.1:54330:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     healthcheck:
@@ -51,8 +53,8 @@ services:
   mailpit:
     image: axllent/mailpit:v1.31
     ports:
-      - "8035:8025"
-      - "1035:1025"
+      - "127.0.0.1:8035:8025"
+      - "127.0.0.1:1035:1025"
 
 volumes:
   postgres_data:

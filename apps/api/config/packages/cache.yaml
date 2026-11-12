@@ -22,10 +22,11 @@ when@prod:
         cache:
             pools:
                 # What a refresh token rotation left behind for its short grace (App\Security\OAuth\RefreshTokenRotation);
-                # shared by every API instance.
+                # shared by every API instance. On the worker's one Redis connection (app.redis in framework.yaml),
+                # which is made again for every request; an address here would make a second one that is not.
                 cache.oauth_rotation:
                     adapter: cache.adapter.redis
-                    provider: '%env(REDIS_URL)%'
+                    provider: app.redis
 
 when@dev: &local_rotation
     framework:

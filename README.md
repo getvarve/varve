@@ -139,7 +139,7 @@ The app works fully without a backend; you only need one for the cloud features.
 
 ### 🏠 Your own server
 
-Every release publishes the server as the image `ghcr.io/getvarve/varve-server` (amd64 and arm64). To run it you need a machine with Docker, a DNS name pointing at it, [`compose.prod.yaml`](compose.prod.yaml) and three settings from [`.env.prod.example`](.env.prod.example); the proxy gets its HTTPS certificate by itself. The steps, checks, updates and backups are in [Run your own server](docs/hosting.md#run-your-own-server). To work on the server itself, see [apps/api/README.md](apps/api/README.md).
+Every release publishes the server as the image `ghcr.io/getvarve/varve-server` (amd64 and arm64). To run it you need a machine with Docker, a DNS name pointing at it, a mail server to send account mail through, [`compose.prod.yaml`](compose.prod.yaml) and the settings in [`.env.prod.example`](.env.prod.example); the proxy gets its HTTPS certificate by itself. The steps, checks, updates and backups are in [Run your own server](docs/hosting.md#run-your-own-server). To work on the server itself, see [apps/api/README.md](apps/api/README.md).
 
 ## 🛠 Develop
 
