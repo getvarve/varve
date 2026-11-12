@@ -11,7 +11,7 @@ import { useTabs } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { useWorkspaceActions } from '../../composables/useWorkspaceActions';
 import { useToasts } from '../../composables/useToasts';
-import { colorVar, ENVIRONMENT_INFO } from '../../lib/display';
+import { colorVar, ENGINE_INFO } from '../../lib/display';
 import { singleFlight } from '../../lib/async';
 import { domId } from '../../lib/domId';
 import { renameFormSchema } from '../../lib/forms';
@@ -22,8 +22,20 @@ import { findNode, neighbourDrop, objectExpandable, planDrop, sidebarRows } from
 import type { DropPosition, ObjNode, SidebarRow, TreeNode } from '../../lib/tree';
 import ContextMenu from '../common/ContextMenu.vue';
 import VarveMark from '../VarveMark.vue';
-import EngineTile from '../common/EngineTile.vue';
+import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
+import { closeConnection } from '../tree/closeConnection';
+import { useCollapse } from '../tree/collapse';
+import {
+  closeTitle,
+  engineTitle,
+  folderCountLabel,
+  folderCounts,
+  folderCountText,
+  NOT_CONNECTED,
+  useConnectionStates,
+} from '../tree/connectionState';
+import type { ConnectionState } from '../tree/connectionState';
 import { defaultAction, doubleClickExpands, isObjectAction, objectMenuItems, runObjectAction } from '../tree/objectActions';
 import type { ObjectActionId } from '../tree/objectActions';
 import { useObjectBrowser } from '../tree/objectBrowser';
@@ -52,6 +64,8 @@ const toasts = useToasts();
 const router = useRouter();
 const dialogs = useDialogs();
 const objects = useObjectBrowser();
+const connections = useConnectionStates();
+const collapser = useCollapse();
 
 // Inline rename is a one-field form with its own schema.
 const renameForm = useForm({ validationSchema: toTypedSchema(renameFormSchema), initialValues: { name: '' } });
@@ -216,17 +230,29 @@ function indexOf(key: string | null): number {
   return key === null ? -1 : (indexByKey.value.get(key) ?? -1);
 }
 
+/** Opens or closes a row. Closing a row closes everything under it too, so opening it again shows only its children. */
 function toggle(row: SidebarRow, open?: boolean): void {
   if (!row.expandable) return;
   const next = open ?? !row.expanded;
   if (row.item.type === 'node') {
     // While filtering, folders and connections are shown expanded.
     if (filtering.value) return;
-    workspace.setExpanded(row.key, next);
-    if (next && row.item.node.kind === 'connection' && !objects.browsing(row.item.node.id)) void objects.browse(row.item.node.id);
+    if (!next) collapser.collapse(row.key);
+    else {
+      workspace.setExpanded(row.key, true);
+      if (row.item.node.kind === 'connection' && !objects.browsing(row.item.node.id)) void objects.browse(row.item.node.id);
+    }
   } else if (row.item.type === 'object') {
-    objects.setExpanded(row.key, next);
+    if (next) objects.setExpanded(row.key, true);
+    else collapser.collapse(row.key);
   }
+}
+
+/** Shift with the left arrow: closes the row and everything under it, also what is open but not on screen. */
+function collapseSubtree(row: SidebarRow): void {
+  if (row.item.type === 'status') return;
+  // While filtering, folders and connections are shown expanded whatever is stored; their objects still close.
+  collapser.collapse(row.key);
 }
 
 function activateObject(row: SidebarRow, node: ObjNode): void {
@@ -283,7 +309,7 @@ function activate(row: SidebarRow): void {
   }
   const node = item.node;
   if (node.kind === 'folder') {
-    workspace.setExpanded(node.key, !workspace.expanded.has(node.key));
+    toggle(row);
   } else if (node.kind === 'connection') {
     openOverview(node.connection);
   } else {
@@ -400,6 +426,7 @@ function connectionMenu(node: Extract<TreeNode, { kind: 'connection' }>): MenuIt
     items.push({ id: 'objects-system', label: objects.includeSystem(node.id) ? 'Hide system objects' : 'Show system objects', disabled: !browsing });
   }
   if (browsing) items.push({ id: 'objects-disconnect', label: 'Close object browser' });
+  if (connections.state(node.id).connected) items.push({ id: 'close-connection', label: 'Close connection' });
   items.push(
     { id: 'activity', label: 'Activity' },
     { id: 'edit', label: 'Edit connection…', separatorBefore: true },
@@ -524,6 +551,9 @@ function onMenuSelect(id: string): void {
     case 'objects-disconnect':
       if (node?.kind === 'connection') objects.disconnect(node.id);
       break;
+    case 'close-connection':
+      if (node?.kind === 'connection') void closeConnection(node.connection);
+      break;
     case 'activity':
       if (node?.kind === 'connection') void router.push({ name: 'activity', query: { connection: node.id } });
       break;
@@ -581,7 +611,8 @@ function onKeydown(event: KeyboardEvent, row: SidebarRow): void {
       else void focusRow(rows.value[at + 1]?.key ?? null);
       break;
     case 'ArrowLeft':
-      if (row.expanded && !(filtering.value && row.item.type === 'node')) toggle(row, false);
+      if (event.shiftKey) collapseSubtree(row);
+      else if (row.expanded && !(filtering.value && row.item.type === 'node')) toggle(row, false);
       else void focusRow(row.parentKey);
       break;
     case 'Enter':
@@ -700,11 +731,35 @@ function nodeColor(row: SidebarRow): string | null {
   return null;
 }
 
+/** The live state of a connection row; `null` for every other row. */
+function connState(row: SidebarRow): ConnectionState | null {
+  return row.item.type === 'node' && row.item.node.kind === 'connection' ? connections.state(row.item.node.id) : null;
+}
+
+/** What a collapsed folder says about the connections in it ("3 · 2 connected"); `null` when open or without any. */
+function folderSummary(row: SidebarRow): { text: string; label: string } | null {
+  if (row.expanded || row.item.type !== 'node' || row.item.node.kind !== 'folder') return null;
+  const counts = folderCounts(row.item.node, (id) => connections.state(id).connected);
+  const text = folderCountText(counts);
+  const label = folderCountLabel(counts);
+  return text !== null && label !== null ? { text, label } : null;
+}
+
+/** The tooltip of the colour stripe of a folder or connection. */
+function colorTitle(row: SidebarRow): string | undefined {
+  if (row.item.type !== 'node') return undefined;
+  const node = row.item.node;
+  const color = node.kind === 'connection' ? node.connection.color : node.kind === 'folder' ? node.folder.color : null;
+  return color ? `Colour: ${color.charAt(0).toLocaleUpperCase()}${color.slice(1)}` : undefined;
+}
+
 function rowClasses(row: SidebarRow): (string | null | Record<string, boolean>)[] {
   const item = row.item;
   return [
     dropClass(row.key),
     {
+      'connection-row': connState(row) !== null,
+      connected: connState(row)?.connected === true,
       current:
         (item.type === 'node' && item.node.kind === 'connection' && item.node.id === activeConnectionId.value) ||
         (item.type === 'object' && isActiveObject(item.node)),
@@ -766,15 +821,38 @@ function objectTitle(node: ObjNode): string | undefined {
       @contextmenu.prevent="openMenu($event, null)"
     >
       <span class="label">Personal</span>
-      <button
-        type="button"
-        class="icon-btn small"
-        aria-label="New folder"
-        title="New folder"
-        @click="addFolder(null)"
-      >
-        <Icon name="folderPlus" />
-      </button>
+      <span class="section-actions">
+        <button
+          type="button"
+          class="icon-btn small"
+          aria-label="New folder"
+          title="New folder"
+          @click="addFolder(null)"
+        >
+          <Icon name="folderPlus" />
+        </button>
+        <button
+          type="button"
+          class="icon-btn small"
+          aria-label="Collapse all"
+          title="Collapse all"
+          :disabled="!collapser.canCollapseAll.value"
+          @click="collapser.collapseAll()"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          ><path d="M7 20l5-5 5 5M7 4l5 5 5-5" /></svg>
+        </button>
+      </span>
     </div>
 
     <div
@@ -838,6 +916,7 @@ function objectTitle(node: ObjNode): string | undefined {
           v-if="nodeColor(row)"
           class="color"
           :style="{ background: nodeColor(row) ?? undefined }"
+          :title="colorTitle(row)"
           aria-hidden="true"
         />
         <button
@@ -846,6 +925,7 @@ function objectTitle(node: ObjNode): string | undefined {
           class="chevron"
           tabindex="-1"
           :aria-label="row.expanded ? 'Collapse' : 'Expand'"
+          :title="row.expanded ? 'Collapse' : 'Expand'"
           @click.stop="toggle(row)"
         >
           <Icon
@@ -865,10 +945,16 @@ function objectTitle(node: ObjNode): string | undefined {
             name="folder"
             class="kind-icon"
           />
-          <EngineTile
+          <span
             v-else-if="row.item.node.kind === 'connection'"
-            :engine="row.item.node.connection.engine"
-          />
+            class="tile"
+            :class="{ live: connState(row)?.connected }"
+            :style="connState(row)?.connected ? { background: ENGINE_INFO[row.item.node.connection.engine].color } : undefined"
+            :title="engineTitle(row.item.node.connection.engine, connState(row) ?? NOT_CONNECTED)"
+          ><span aria-hidden="true">{{ ENGINE_INFO[row.item.node.connection.engine].code }}</span><span
+            v-if="connState(row)?.connected"
+            class="tile-mark"
+          /></span>
           <Icon
             v-else
             name="file"
@@ -900,16 +986,45 @@ function objectTitle(node: ObjNode): string | undefined {
           <span
             v-if="renamingKey !== row.key"
             class="name"
-          >{{ row.item.node.name }}</span>
+          >{{ row.item.node.name }}<span
+            v-if="connState(row)?.connected"
+            class="visually-hidden"
+          >, connected</span></span>
 
+          <template v-if="row.item.node.kind === 'connection'">
+            <EnvBadge
+              tag
+              :environment="row.item.node.connection.environment"
+            />
+            <button
+              v-if="connState(row)?.connected && renamingKey !== row.key"
+              type="button"
+              class="close-connection"
+              tabindex="-1"
+              :aria-label="`Close connection ${row.item.node.name}`"
+              :title="closeTitle(connState(row) ?? NOT_CONNECTED)"
+              @click.stop="closeConnection(row.item.node.connection)"
+              @dblclick.stop
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              ><path d="M9 2v4M15 2v6M6 8h12v4a6 6 0 0 1-9.5 4.9M12 18v4M3 3l18 18" /></svg>
+            </button>
+          </template>
           <span
-            v-if="row.item.node.kind === 'connection'"
-            class="env-dot"
-            :style="{ background: ENVIRONMENT_INFO[row.item.node.connection.environment].color }"
-            :title="ENVIRONMENT_INFO[row.item.node.connection.environment].label"
-          >
-            <span class="visually-hidden">{{ ENVIRONMENT_INFO[row.item.node.connection.environment].label }}</span>
-          </span>
+            v-else-if="folderSummary(row)"
+            class="meta"
+            :title="folderSummary(row)?.label"
+          ><span aria-hidden="true">{{ folderSummary(row)?.text }}</span><span class="visually-hidden">, {{ folderSummary(row)?.label }}</span></span>
           <span
             v-else-if="row.item.node.kind === 'query' && !row.item.node.attached"
             class="meta"
@@ -959,14 +1074,11 @@ function objectTitle(node: ObjNode): string | undefined {
             </template>
           </span>
 
-          <template v-if="row.item.node.type === 'database' && row.item.node.current">
-            <span
-              class="current-dot"
-              title="The database this connection opens"
-            >
-              <span class="visually-hidden">, connected database</span>
-            </span>
-          </template>
+          <span
+            v-if="row.item.node.type === 'database' && row.item.node.current"
+            class="opens-here"
+            title="The database this connection opens"
+          >opens here</span>
           <span
             v-if="row.item.node.type === 'object' && row.item.node.summary.flags.length > 0"
             class="flag"
@@ -1012,8 +1124,10 @@ function objectTitle(node: ObjNode): string | undefined {
       id="tree-keys-help"
       class="visually-hidden"
     >
-      Enter opens (a connection, database or schema opens its overview), F2 renames, F5 refreshes objects, Delete removes, Alt with the up or down arrow reorders, Command or
-      Control with Shift and M moves to another folder, Shift F10 opens the menu.
+      Enter opens (a connection, database or schema opens its overview), the left arrow collapses a row or moves to its parent,
+      Shift with the left arrow collapses a row and everything under it, F2 renames, F5 refreshes objects, Delete removes, Alt with
+      the up or down arrow reorders, Command or Control with Shift and M moves to another folder, Shift F10 opens the menu (with
+      Close connection on a connected connection).
     </p>
 
     <ContextMenu
@@ -1071,6 +1185,11 @@ function objectTitle(node: ObjNode): string | undefined {
   justify-content: space-between;
   height: var(--row-tree);
   padding: 0 8px 0 12px;
+}
+
+.section-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .icon-btn.small {
@@ -1140,7 +1259,13 @@ function objectTitle(node: ObjNode): string | undefined {
   user-select: none;
 }
 
+/* The connected mark's ring takes the colour of what is behind the row, so it reads as a cut-out of the tile. */
+.row {
+  --mark-ring: var(--chrome);
+}
+
 .row:hover {
+  --mark-ring: var(--surface-raised);
   background: var(--surface-raised);
 }
 
@@ -1152,6 +1277,7 @@ function objectTitle(node: ObjNode): string | undefined {
    navigation rows do: a tree row carries its own colours (environment, status, counts) that must stay readable. */
 .row:focus-visible,
 .row[aria-selected='true'] {
+  --mark-ring: var(--row-selected);
   background: var(--row-selected);
 }
 
@@ -1159,7 +1285,8 @@ function objectTitle(node: ObjNode): string | undefined {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-.row.current .name {
+.row.current .name,
+.row.connected .name {
   font-weight: 500;
 }
 
@@ -1213,12 +1340,80 @@ function objectTitle(node: ObjNode): string | undefined {
   color: var(--text-subtle);
 }
 
+/* The name takes what the marks after it leave; on a connection row it keeps a few letters before the environment
+   tag starts to shrink (it never wraps). */
 .name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.row.connection-row .name {
+  min-width: 24px;
+}
+
+/* The engine tile says whether the connection has a live session: coloured with a green mark, or outlined. */
+.tile {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.tile.live {
+  border-color: transparent;
+  color: var(--on-engine);
+}
+
+.tile-mark {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--mark-ring);
+  border-radius: 50%;
+  background: var(--success);
+}
+
+/* Shown only on a connected row under the pointer or with keyboard focus. */
+.close-connection {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.row:hover .close-connection,
+.row:focus-visible .close-connection {
+  display: inline-flex;
+}
+
+.close-connection:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .rename[aria-invalid='true'] {
@@ -1237,16 +1432,11 @@ function objectTitle(node: ObjNode): string | undefined {
   outline: none;
 }
 
-.env-dot {
-  flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
 .meta {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--text-subtle);
+  white-space: nowrap;
 }
 
 .row.group .name,
@@ -1285,12 +1475,14 @@ function objectTitle(node: ObjNode): string | undefined {
   color: var(--text-subtle);
 }
 
-.current-dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
+.opens-here {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-text {

@@ -74,6 +74,23 @@ function setExpanded(key: string, open: boolean): void {
   persistExpanded();
 }
 
+/** Closes several object nodes at once (a collapsed subtree, Collapse all), stored once. */
+function collapseKeys(keys: Iterable<string>): void {
+  let changed = false;
+  for (const key of keys) changed = objectExpanded.delete(key) || changed;
+  if (changed) persistExpanded();
+}
+
+/** The browse sessions a connection has open now (not those still opening). */
+function sessionsOf(connectionId: string): SessionInfo[] {
+  const browser = browsers.get(connectionId);
+  if (!browser) return [];
+  const out: SessionInfo[] = [];
+  if (browser.base.session) out.push(browser.base.session);
+  for (const slot of browser.databases.values()) if (slot.session) out.push(slot.session);
+  return out;
+}
+
 function profileOf(connectionId: string): ConnectionProfile | null {
   return useWorkspace().connection(connectionId);
 }
@@ -126,8 +143,9 @@ async function sessionFor(browser: ConnectionBrowser, database: string | null): 
     const existing = browser.databases.get(database);
     if (existing) slot = existing;
     else {
-      slot = { session: null, pending: null };
-      browser.databases.set(database, slot);
+      browser.databases.set(database, { session: null, pending: null });
+      // Read back through the reactive map, so the session set below reaches the views (the connected mark).
+      slot = browser.databases.get(database) ?? slot;
     }
   }
   if (slot.session) return slot.session;
@@ -459,6 +477,8 @@ export function useObjectBrowser() {
     source,
     objectExpanded,
     setExpanded,
+    collapseKeys,
+    sessions: sessionsOf,
     browse,
     disconnect,
     reconnect,

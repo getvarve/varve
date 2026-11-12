@@ -698,3 +698,56 @@ describe('tab registration', () => {
     expect(tabs.tabs.find((t) => t.id === tab.id)?.unsaved).toBe(true);
   });
 });
+
+describe('closing a connection', () => {
+  beforeAll(async () => {
+    await useWorkspace().refresh();
+  });
+
+  it('ends every tab session of the connection and keeps its tabs, not connected', async () => {
+    const tabs = useTabs();
+    await tabs.closeConnectionTabs('r1');
+    const keys = tabs.openKeysTab(redisProfile);
+    const query = tabs.openQueryTab(redisProfile) as QueryTab;
+    const other = tabs.openQueryTab(pgProfile);
+    await settle();
+    tabs.loadText(query.id, 'GET a');
+    const sessions = [keys.id, query.id].map((id) => tabs.tabs.find((t) => t.id === id)?.session?.id);
+    vi.mocked(closeSession).mockClear();
+
+    await tabs.disconnectConnection('r1');
+    for (const id of sessions) expect(closeSession).toHaveBeenCalledWith(id);
+    for (const id of [keys.id, query.id]) {
+      expect(tabs.tabs.find((t) => t.id === id)).toMatchObject({ status: 'cancelled', session: null, connectError: null, reconnectNeeded: null });
+    }
+    expect((tabs.tabs.find((t) => t.id === query.id) as QueryTab).sql).toBe('GET a');
+    // Tabs of other connections keep their sessions.
+    expect(tabs.tabs.find((t) => t.id === other.id)?.status).toBe('ready');
+
+    // Opening a tab again connects it again; Connect again does too.
+    tabs.openKeysTab(redisProfile);
+    await tabs.reconnect(query.id);
+    await settle();
+    expect(tabs.tabs.find((t) => t.id === keys.id)?.status).toBe('ready');
+    expect(tabs.tabs.find((t) => t.id === query.id)?.status).toBe('ready');
+    await tabs.closeConnectionTabs('r1');
+    await tabs.closeTab(other.id);
+  });
+
+  it('drops a connect that is still running and closes its session once it opens', async () => {
+    const tabs = useTabs();
+    let open: (info: SessionInfo) => void = () => undefined;
+    openSession.mockImplementationOnce(() => new Promise<SessionInfo>((resolve) => (open = resolve)));
+    const tab = tabs.openQueryTab(redisProfile);
+    await tick();
+    expect(tabs.tabs.find((t) => t.id === tab.id)?.status).toBe('connecting');
+    await tabs.disconnectConnection('r1');
+    expect(tabs.tabs.find((t) => t.id === tab.id)?.status).toBe('cancelled');
+    vi.mocked(closeSession).mockClear();
+    open({ ...(await openSession()), id: 'late' });
+    await settle();
+    expect(closeSession).toHaveBeenCalledWith('late');
+    expect(tabs.tabs.find((t) => t.id === tab.id)).toMatchObject({ status: 'cancelled', session: null });
+    await tabs.closeTab(tab.id);
+  });
+});

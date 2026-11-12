@@ -107,12 +107,75 @@ function connectionsInFolder(folderId: string): string[] {
   return out;
 }
 
+/** Ids of the folders in `parentId` (`null`: the top level), in the order the tree shows them. */
+function folderIdsIn(roots: readonly TreeNode[], parentId: string | null): string[] {
+  const parent = parentId === null ? null : findNode(roots, `folder:${parentId}`);
+  const list = parentId === null ? roots : (parent?.children ?? []);
+  return list.filter((n) => n.kind === 'folder').map((n) => n.id);
+}
+
+/**
+ * Where a restored folder goes among the folders next to it now: right after
+ * the nearest folder that stood before it when it was deleted and is still
+ * there, or first when none is. `before` is the order at deletion, with the
+ * deleted folder's id; `current` the folders there now, without the restored
+ * one; `restoredId` the restored folder's new id.
+ */
+export function restoredFolderOrder(before: readonly string[], deletedId: string, current: readonly string[], restoredId: string): string[] {
+  const at = before.indexOf(deletedId);
+  const ids = current.filter((id) => id !== restoredId);
+  let insert = 0;
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const found = ids.indexOf(before[i] ?? '');
+    if (found >= 0) {
+      insert = found + 1;
+      break;
+    }
+  }
+  ids.splice(insert, 0, restoredId);
+  return ids;
+}
+
+/** Makes a deleted empty folder again: same name, colour, parent and place among its sibling folders. */
+async function restoreFolder(folder: Folder, siblingsBefore: readonly string[]): Promise<void> {
+  const workspace = useWorkspace();
+  const restored = await mutate(async () => {
+    const created = await createFolder(folder.parentId, folder.name, folder.color);
+    const ids = restoredFolderOrder(siblingsBefore, folder.id, folderIdsIn(workspace.tree.value, folder.parentId), created.id);
+    // The new folder is created last among its siblings; put it back where it was.
+    if (ids.at(-1) !== created.id) await reorder('folders', ids);
+    return created;
+  }, 'Could not restore the folder');
+  if (restored) useToasts().push('success', `Folder ${restored.name} restored`, '', 2500);
+}
+
+/**
+ * Deletes a folder with nothing in it at once: there is nothing to decide
+ * about. The toast offers Undo for as long as it shows (6 seconds).
+ */
+async function removeEmptyFolder(folder: Folder): Promise<void> {
+  const workspace = useWorkspace();
+  const siblings = folderIdsIn(workspace.tree.value, folder.parentId);
+  // Something added since the check moves to the parent rather than being deleted.
+  const done = await mutate(() => deleteFolder(folder.id, 'move_contents_to_parent').then(() => true), 'Could not delete the folder');
+  if (!done) return;
+  workspace.collapseKeys([`folder:${folder.id}`]);
+  useToasts().push('success', `Folder ${folder.name} deleted`, '', 6000, {
+    label: 'Undo',
+    run: () => void restoreFolder(folder, siblings),
+  });
+}
+
 async function removeFolder(folder: Folder): Promise<void> {
   let contents: FolderContents;
   try {
     contents = await folderContents(folder.id);
   } catch (error: unknown) {
     useToasts().pushError(error, 'Could not read the folder');
+    return;
+  }
+  if (contents.folders === 0 && contents.connections === 0 && contents.queries === 0) {
+    await removeEmptyFolder(folder);
     return;
   }
   const mode = await useDialogs().askDeleteFolder({ folder, contents });

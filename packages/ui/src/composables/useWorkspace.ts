@@ -73,6 +73,13 @@ function setExpanded(key: string, open: boolean): void {
   persistExpanded();
 }
 
+/** Closes several folders and connections at once (a collapsed subtree, Collapse all), stored once. */
+function collapseKeys(keys: Iterable<string>): void {
+  let changed = false;
+  for (const key of keys) changed = expanded.delete(key) || changed;
+  if (changed) persistExpanded();
+}
+
 function connection(id: string | null): ConnectionProfile | null {
   return id === null ? null : (connectionsById.value.get(id) ?? null);
 }
@@ -83,5 +90,5 @@ function query(id: string): SavedQuery | null {
 
 /** Folders, connections and saved queries of the personal workspace, shared by every component. */
 export function useWorkspace() {
-  return { records, tree, status, expanded, isEmpty, refresh, setExpanded, connection, query };
+  return { records, tree, status, expanded, isEmpty, refresh, setExpanded, collapseKeys, connection, query };
 }

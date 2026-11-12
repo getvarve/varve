@@ -1,5 +1,5 @@
 import type { TlsMode } from '../api/records';
-import { encryptionStatus, formatEntryTime, hostPort } from './display';
+import { encryptionStatus, ENVIRONMENT_INFO, environmentTitle, formatEntryTime, hostPort } from './display';
 
 describe('hostPort', () => {
   it('puts IPv6 addresses in brackets', () => {
@@ -59,5 +59,15 @@ describe('formatEntryTime', () => {
   it('puts the date in front for an entry from another day', () => {
     expect(formatEntryTime(new Date(2026, 10, 8, 9, 4, 3).getTime(), now)).toBe('2026-11-08 09:04:03');
     expect(formatEntryTime(new Date(2026, 10, 10, 23, 59, 59).getTime(), now)).toBe('2026-11-10 23:59:59');
+  });
+});
+
+describe('environment tags', () => {
+  it('are short words that fit the narrowest sidebar', () => {
+    expect(Object.values(ENVIRONMENT_INFO).map((e) => e.tag)).toEqual(['PROD', 'STAGING', 'TEST', 'DEV']);
+  });
+
+  it('explain themselves in a tooltip', () => {
+    expect(environmentTitle('staging')).toBe("Environment: Staging\nSet in the connection's settings.");
   });
 });
