@@ -1,0 +1,12 @@
+{% autoescape false %}
+Hi {{ name }},
+
+Someone tried to create a Varve account with this address, which already has one. Nothing changed.
+
+Sign in: {{ sign_in }}
+Forgot your password? Set a new one: {{ reset }}
+
+If this was not you, ignore this mail.
+
+This mail was sent by the Varve server at {{ app_address }} because someone used this address there.
+{% endautoescape %}

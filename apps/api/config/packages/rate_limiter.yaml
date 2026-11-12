@@ -1,0 +1,131 @@
+framework:
+    rate_limiter:
+        # Sign-ups per IPv4 address or IPv6 /64 (App\Account\ClientAddress).
+        registration:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Wrong passwords on the sign-in form (App\Security\LoginLimiter): for one account from one IPv4 address or
+        # IPv6 /64, from one such network address whatever the account, and for one account whatever the address.
+        login_account_address:
+            policy: fixed_window
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+        login_address:
+            policy: fixed_window
+            limit: 25
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+        login_account:
+            policy: fixed_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Account mail (App\Account\AccountMailBudget), each counted per kind of mail (confirmation links, password
+        # reset links, the note to an address that has an account already).
+        # Requests per IPv4 address or IPv6 /64 that asks, whatever the address asked for.
+        account_mail_requester:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Mail to one address asked for from one network address.
+        account_mail_recipient_requester:
+            policy: sliding_window
+            limit: 5
+            interval: '1 day'
+            cache_pool: cache.rate_limiter_shared
+        # Mail to one address from all network addresses together. Generous: the page cannot say that it was reached.
+        account_mail_recipient:
+            policy: sliding_window
+            limit: 30
+            interval: '1 day'
+            cache_pool: cache.rate_limiter_shared
+        # Mail asked for by the owner of the account: from a signed-in browser, or with a link sent earlier.
+        account_mail_owner:
+            policy: sliding_window
+            limit: 10
+            interval: '1 day'
+            cache_pool: cache.rate_limiter_shared
+        # Checking the current password before a password change or an account deletion, per user: a stolen access
+        # token must not be a way to guess the password.
+        password_check:
+            policy: sliding_window
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+
+        # Sync (App\Sync\SyncLimits). A client pushes and pulls on start, after a local change (debounced), on a realtime
+        # notice and every few minutes; a first pull of a large organization takes a page per request. Per user over
+        # all their scopes, and per organization over all its members.
+        sync_push_user:
+            policy: sliding_window
+            limit: 300
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_push_organization:
+            policy: sliding_window
+            limit: 600
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_pull_user:
+            policy: sliding_window
+            limit: 600
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+        sync_pull_organization:
+            policy: sliding_window
+            limit: 1200
+            interval: '10 minutes'
+            cache_pool: cache.rate_limiter_shared
+
+when@prod:
+    framework:
+        cache:
+            pools:
+                # Shared by every API instance, so a limit holds across them. On the worker's one Redis connection
+                # (app.redis in framework.yaml), which is dropped after every request, so the limits work again as
+                # soon as Redis is back after an outage.
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.redis
+                    provider: app.redis
+
+when@dev:
+    framework:
+        cache:
+            pools:
+                # One API instance in development and tests. Kept across requests (unlike an array, which is reset after
+                # every request); tests reset the limits they use.
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.filesystem
+
+when@test:
+    framework:
+        rate_limiter:
+            # Low enough for a test to reach; the limit per organization below the one per user, so a test reaches each.
+            sync_push_user:
+                policy: sliding_window
+                limit: 30
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_push_organization:
+                policy: sliding_window
+                limit: 20
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_pull_user:
+                policy: sliding_window
+                limit: 30
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+            sync_pull_organization:
+                policy: sliding_window
+                limit: 20
+                interval: '10 minutes'
+                cache_pool: cache.rate_limiter_shared
+        cache:
+            pools:
+                cache.rate_limiter_shared:
+                    adapter: cache.adapter.filesystem

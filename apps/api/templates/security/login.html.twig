@@ -1,0 +1,45 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sign in{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="sign-in-title">
+        <h1 id="sign-in-title">Sign in</h1>
+        <p class="lead">Your connections, folders and saved queries, on every computer you work on.</p>
+
+        {% if notice is defined and notice %}
+            <p class="error" role="alert">{{ notice }}</p>
+        {% endif %}
+        {% if error %}
+            <p class="error" role="alert">
+                {{ error.messageKey|trans(error.messageData, 'security') }}
+                {% if unconfirmed %}<a href="{{ path('app_resend_confirmation', {email: last_username}) }}">Send a new link</a>{% endif %}
+            </p>
+        {% endif %}
+
+        <form class="form" method="post" action="{{ path('app_login') }}">
+            <label class="field" for="username">
+                Email
+                <input type="email" id="username" name="_username" value="{{ last_username }}" autocomplete="email" required autofocus>
+            </label>
+
+            <label class="field" for="password">
+                Password
+                <input type="password" id="password" name="_password" autocomplete="current-password" required>
+            </label>
+
+            <label class="check" for="remember-me">
+                <input type="checkbox" id="remember-me" name="_remember_me" value="on" checked>
+                Keep me signed in on this browser
+            </label>
+
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+
+            <button type="submit" class="button">Sign in</button>
+        </form>
+
+        <p class="links"><a href="{{ path('app_forgot_password') }}">Forgot your password?</a></p>
+    </section>
+
+    <p class="footnote">{% if sign_up %}No account yet? <a href="{{ path('app_register') }}">Create one</a>. {% endif %}After signing in you go back to the Varve app you came from.</p>
+{% endblock %}

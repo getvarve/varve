@@ -9,6 +9,10 @@ name: Release
 # updater on Windows and Linux, and appcast-arm64.xml and appcast-x64.xml for Sparkle on macOS.
 # The signing keys live in 1Password ("Tauri updater signing key (Varve)", "Sparkle update
 # signing key (Varve)"); CI gets them as secrets.
+#
+# The same tag publishes the server image ghcr.io/<owner>/varve-server for amd64 and arm64
+# (server-image, server-manifest, server-latest). Those jobs run beside the app release and
+# never hold it up or change its files; the caller's job grants them packages: write.
 
 on:
   workflow_call:
@@ -326,3 +330,154 @@ jobs:
           gh release upload "$TAG" dist/latest.json dist/appcast-arm64.xml dist/appcast-x64.xml --clobber
           # Now the release and its feeds go live together.
           gh release edit "$TAG" --draft=false --latest
+
+  # The server image, ghcr.io/<owner>/varve-server, for amd64 and arm64. Nothing of the app release needs these jobs and
+  # they touch none of its files: bundle and publish never wait for them, and their artifacts (server-digest-*) are
+  # not among the varve-* bundles publish downloads. Each architecture builds natively and is pushed by digest only;
+  # server-manifest names the two together.
+  server-image:
+    name: Server image (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            os: ubuntu-24.04
+          - arch: arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/varve-server
+          TAG: ${{ github.ref_name }}
+          SOURCE: https://github.com/${{ github.repository }}
+          REVISION: ${{ github.sha }}
+        # retry.sh: Docker Hub answers "toomanyrequests" now and then; pushing the same digest again is harmless.
+        run: |
+          set -euo pipefail
+          scripts/ci/retry.sh 3 docker buildx build \
+            --file docker/api/Dockerfile \
+            --target prod \
+            --platform "linux/${ARCH}" \
+            --label "org.opencontainers.image.source=${SOURCE}" \
+            --label "org.opencontainers.image.version=${TAG#v}" \
+            --label "org.opencontainers.image.revision=${REVISION}" \
+            --label "org.opencontainers.image.licenses=AGPL-3.0-only" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file metadata.json \
+            .
+          digest="$(jq -r '."containerimage.digest"' metadata.json)"
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "the build reported no image digest: ${digest}" >&2; exit 1 ;;
+          esac
+          echo "pushed ${IMAGE}@${digest}"
+          mkdir -p digests
+          touch "digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: server-digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  server-manifest:
+    name: Publish server image
+    needs: server-image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-digest-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Only the exact version here; the minor version and latest move once the app release is out (server-latest).
+      - name: Name the image for both architectures
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/varve-server
+          TAG: ${{ github.ref_name }}
+          SOURCE: https://github.com/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          sources=()
+          for digest in digests/*; do
+            sources+=("${IMAGE}@sha256:$(basename "$digest")")
+          done
+          if [ "${#sources[@]}" -ne 2 ]; then
+            echo "expected an amd64 and an arm64 image of ${IMAGE}, found ${#sources[@]}" >&2
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --annotation "index:org.opencontainers.image.source=${SOURCE}" \
+            --annotation "index:org.opencontainers.image.version=${version}" \
+            --annotation "index:org.opencontainers.image.licenses=AGPL-3.0-only" \
+            --annotation "index:org.opencontainers.image.description=Varve server" \
+            -t "${IMAGE}:${version}" "${sources[@]}"
+          docker buildx imagetools inspect "${IMAGE}:${version}"
+
+  # Moves 1.2 and latest to this version once both the image and the app release are out, so latest never names a
+  # server whose app is not released. Only forward: a fix for an older line (1.1.5 after 1.2.0) keeps 1.2 and latest
+  # where they are, and moves 1.1 only when it is the newest of that line.
+  server-latest:
+    name: Move the server image tags 1.2 and latest
+    needs: [server-manifest, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Move the tags
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/varve-server
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stable="$(git tag --list 'v*' | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+          minor="${version%.*}"
+          newest="$(printf '%s\n' "$stable" | tail -n 1)"
+          newest_of_minor="$(printf '%s\n' "$stable" | grep -E "^${minor//./\\.}\.[0-9]+$" | tail -n 1)"
+          tags=()
+          [ "$version" = "$newest_of_minor" ] && tags+=(-t "${IMAGE}:${minor}")
+          [ "$version" = "$newest" ] && tags+=(-t "${IMAGE}:latest")
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "${version} is not the newest release; the image keeps its tags."
+            exit 0
+          fi
+          docker buildx imagetools create "${tags[@]}" "${IMAGE}:${version}"
+          docker buildx imagetools inspect "${IMAGE}:${version}"

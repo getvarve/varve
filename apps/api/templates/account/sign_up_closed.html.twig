@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sign-up is closed{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="closed-title">
+        <h1 id="closed-title">Sign-up is closed on this server</h1>
+        <p class="lead">Nobody can create an account here by themselves. Ask whoever runs this server for one.</p>
+        <p class="links"><a href="{{ path('app_login') }}">Sign in</a></p>
+    </section>
+{% endblock %}

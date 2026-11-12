@@ -1,0 +1,13 @@
+{
+	{$CADDY_GLOBAL_OPTIONS}
+	frankenphp {
+		{$FRANKENPHP_CONFIG}
+	}
+}
+
+{$SERVER_NAME::80} {
+	root /app/public
+	encode zstd br gzip
+
+	php_server
+}

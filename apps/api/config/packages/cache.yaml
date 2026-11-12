@@ -1,0 +1,39 @@
+framework:
+    cache:
+        # Unique name of your app: used to compute stable namespaces for cache keys.
+        #prefix_seed: your_vendor_name/app_name
+
+        # The "app" cache stores to the filesystem by default.
+        # The data in this cache should persist between deploys.
+        # Other options include:
+
+        # Redis
+        #app: cache.adapter.redis
+        #default_redis_provider: redis://localhost
+
+        # APCu (not recommended with heavy random-write workloads as memory fragmentation can cause perf issues)
+        #app: cache.adapter.apcu
+
+        #pools:
+            #my.dedicated.cache: null
+
+when@prod:
+    framework:
+        cache:
+            pools:
+                # What a refresh token rotation left behind for its short grace (App\Security\OAuth\RefreshTokenRotation);
+                # shared by every API instance. On the worker's one Redis connection (app.redis in framework.yaml),
+                # which is made again for every request; an address here would make a second one that is not.
+                cache.oauth_rotation:
+                    adapter: cache.adapter.redis
+                    provider: app.redis
+
+when@dev: &local_rotation
+    framework:
+        cache:
+            pools:
+                # One API instance in development and tests.
+                cache.oauth_rotation:
+                    adapter: cache.adapter.filesystem
+
+when@test: *local_rotation

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Varve{% endblock %}</title>
+</head>
+<body style="margin: 0; padding: 0; background: #F3F4F6; color: #16181D; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif">
+<div style="max-width: 640px; margin: 0 auto; padding: 24px 16px">
+  <p style="margin: 0 0 12px; font-size: 15px; font-weight: 700; color: #16181D">Varve</p>
+  <div style="background: #FFFFFF; border-radius: 14px; padding: 24px">
+    {% block content %}{% endblock %}
+  </div>
+  <p style="margin: 12px 0 0; font-size: 12px; color: #6B7280">This mail was sent by the Varve server at {{ app_address }} because someone used this address there.</p>
+</div>
+</body>
+</html>

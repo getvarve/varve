@@ -1,0 +1,19 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sign out{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="sign-out-title">
+        <h1 id="sign-out-title">Sign out</h1>
+        <p class="lead">This browser stays signed in to Varve until you sign out here. After that, every app asks for your password again.</p>
+
+        {% if error %}
+            <p class="error" role="alert">{{ error }}</p>
+        {% endif %}
+
+        <form class="form" method="post" action="{{ action }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrf_token_id) }}">
+            <button type="submit" class="button">Sign out</button>
+        </form>
+    </section>
+{% endblock %}

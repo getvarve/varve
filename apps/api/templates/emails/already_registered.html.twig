@@ -1,0 +1,10 @@
+{% extends 'emails/_layout.html.twig' %}
+
+{% block title %}You already have a Varve account{% endblock %}
+
+{% block content %}
+    <h1 style="margin: 0 0 6px; font-size: 26px; line-height: 32px">You already have an account</h1>
+    <p style="margin: 0 0 18px; font-size: 14px; line-height: 20px; color: #4A505C">Hi {{ name }}, someone tried to create a Varve account with this address, which already has one. Nothing changed.</p>
+    <p style="margin: 0 0 24px"><a href="{{ sign_in }}" style="display: inline-block; padding: 10px 16px; border-radius: 6px; background: #16181D; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none">Sign in</a></p>
+    <p style="margin: 0; font-size: 13px; line-height: 18px; color: #4A505C">Forgot your password? <a href="{{ reset }}" style="color: #5B4BE0">Set a new one</a>. If this was not you, ignore this mail.</p>
+{% endblock %}
