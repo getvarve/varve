@@ -1,4 +1,5 @@
-import { checkExpression, countSql, quoteIdent, quoteString, selectPageSql, whereSql } from './gridSql';
+import { checkExpression, conditionComplete, countSql, quoteIdent, quoteString, selectPageSql, whereSql, withoutCondition } from './gridSql';
+import type { FilterCondition } from './gridSql';
 
 const pgTarget = { database: 'shop', schema: 'public', table: 'orders' };
 const myTarget = { database: 'shop', schema: null, table: 'orders' };
@@ -98,5 +99,30 @@ describe('page queries', () => {
     expect(() =>
       selectPageSql({ dialect: 'postgres', target: pgTarget, columns: ['id'], filter: { mode: 'raw', sql: '' }, sort: [], tiebreak: [], limit: 0, offset: 0 }),
     ).toThrow();
+  });
+});
+
+describe('removing and completing filter conditions', () => {
+  const a: FilterCondition = { column: 'id', op: '=', value: '5' };
+  const b: FilterCondition = { column: 'name', op: 'like', value: 'a%' };
+
+  it('takes an applied condition out of the applied filter', () => {
+    expect(withoutCondition({ mode: 'builder', conditions: [a, b] }, { ...a })).toEqual({ mode: 'builder', conditions: [b] });
+  });
+
+  it('removes only one of two equal conditions', () => {
+    expect(withoutCondition({ mode: 'builder', conditions: [a, a] }, a)).toEqual({ mode: 'builder', conditions: [a] });
+  });
+
+  it('answers null for a condition that was never applied, and for a raw filter', () => {
+    expect(withoutCondition({ mode: 'builder', conditions: [a] }, b)).toBeNull();
+    expect(withoutCondition({ mode: 'raw', sql: 'id = 5' }, a)).toBeNull();
+  });
+
+  it('knows when a typed condition is complete', () => {
+    expect(conditionComplete({ column: '', op: '=', value: '5' })).toBe(false);
+    expect(conditionComplete({ column: 'id', op: '=', value: '' })).toBe(false);
+    expect(conditionComplete({ column: 'id', op: '=', value: '5' })).toBe(true);
+    expect(conditionComplete({ column: 'id', op: 'isNull', value: '' })).toBe(true);
   });
 });
