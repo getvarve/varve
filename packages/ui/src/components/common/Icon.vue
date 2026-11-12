@@ -5,6 +5,7 @@ import { computed } from 'vue';
 const PATHS = {
   chevronDown: 'M6 9l6 6 6-6',
   chevronRight: 'M9 6l6 6-6 6',
+  chevronUp: 'M6 15l6-6 6 6',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   folderPlus: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 11v5M9.5 13.5h5',
   file: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5',
@@ -33,6 +34,20 @@ const PATHS = {
   database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   sidebar: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 4v16',
+  filter: 'M3 5h18l-7 8v6l-4-2v-4z',
+  // Activity categories (lib/activityColumns.ts).
+  plug: 'M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4',
+  brackets: 'M8 4H5v16h3M16 4h3v16h-3',
+  table: 'M3 5h18v14H3zM3 10h18M3 15h18M9 5v14',
+  schema: 'M4 4h6v6H4zM14 14h6v6h-6zM7 10v4a3 3 0 0 0 3 3h4',
+  transfer: 'M4 8h13l-3-3M20 16H7l3 3',
+  chart: 'M4 20h16M7 16v-5M12 16V6M17 16v-8',
+  monitor: 'M4 4h16v12H4zM8 20h8M12 16v4',
+  user: 'M12 12a4 4 0 1 0 0-8a4 4 0 1 0 0 8zM4 21a8 8 0 0 1 16 0',
+  userPlus: 'M10 12a4 4 0 1 0 0-8a4 4 0 1 0 0 8zM3 21a7 7 0 0 1 14 0M19 8v6M16 11h6',
+  cloud: 'M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19 10a4 4 0 0 1 0 8z',
+  layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5',
+  folderLock: 'M11 19H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2M15 16h6v5h-6zM16.5 16v-1.5a1.5 1.5 0 0 1 3 0V16',
 } as const;
 
 export type IconName = keyof typeof PATHS;
