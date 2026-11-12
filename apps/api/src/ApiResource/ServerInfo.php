@@ -11,7 +11,8 @@ use App\State\ServerInfoProvider;
 
 /**
  * What this server is, for an app to check before it signs in: always open. `billing` says whether this server bills
- * its organizations (Varve Cloud) or not (a self-hosted server).
+ * its organizations (Varve Cloud) or not (a self-hosted server); `signUp` whether anyone may create an account on it,
+ * or only its operator adds users.
  */
 #[ApiResource(
     shortName: 'ServerInfo',
@@ -33,6 +34,7 @@ final readonly class ServerInfo
         public bool $billing,
         /** Days of free trial a new organization gets on a billing server; 0 elsewhere. */
         public int $trialDays,
+        public bool $signUp,
     ) {
     }
 }

@@ -6,6 +6,11 @@ namespace App\Tests\Functional;
 
 use App\Security\OAuth\RefreshTokenRotation;
 use Doctrine\ORM\EntityManagerInterface;
+use League\Bundle\OAuth2ServerBundle\Manager\ClientManagerInterface;
+use League\Bundle\OAuth2ServerBundle\Model\Client;
+use League\Bundle\OAuth2ServerBundle\OAuth2Grants;
+use League\Bundle\OAuth2ServerBundle\ValueObject\Grant;
+use League\Bundle\OAuth2ServerBundle\ValueObject\RedirectUri;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 use Symfony\Component\DomCrawler\Field\ChoiceFormField;
 
@@ -67,7 +72,7 @@ final class SignInFlowTest extends DatabaseTestCase
         $this->client->followRedirect();
 
         $callback = (string) $this->client->getResponse()->headers->get('Location');
-        self::assertStringStartsWith('http://127.0.0.1:61234/auth/callback?', $callback, 'First-party clients are approved without consent.');
+        self::assertStringStartsWith('http://127.0.0.1:61234/auth/callback?', $callback, 'Signed in for this very request: it goes on without a question.');
         parse_str((string) parse_url($callback, \PHP_URL_QUERY), $query);
         self::assertSame('state-1', $query['state'] ?? null);
 
@@ -91,9 +96,9 @@ final class SignInFlowTest extends DatabaseTestCase
         $this->signIn();
         $verifier = bin2hex(random_bytes(32));
 
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier, ['redirect_uri' => 'varve://auth/callback']));
+        $callback = $this->authorizedCallback($this->desktopAuthorizeUrl($verifier, ['redirect_uri' => 'varve://auth/callback']));
 
-        self::assertStringStartsWith('varve://auth/callback?', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertStringStartsWith('varve://auth/callback?', $callback);
     }
 
     public function testARedirectUriTheAppDidNotRegisterIsRefused(): void
@@ -139,8 +144,7 @@ final class SignInFlowTest extends DatabaseTestCase
     public function testPkceVerifierMustMatch(): void
     {
         $this->signIn();
-        $this->client->request('GET', $this->desktopAuthorizeUrl('the-real-verifier-'.str_repeat('x', 30)));
-        $code = $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
+        $code = $this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl('the-real-verifier-'.str_repeat('x', 30))));
 
         $this->client->request('POST', '/oauth/token', $this->codeExchange($code, 'a-different-verifier-'.str_repeat('y', 30)));
 
@@ -178,8 +182,7 @@ final class SignInFlowTest extends DatabaseTestCase
     {
         $this->signIn();
         $verifier = bin2hex(random_bytes(32));
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier));
-        $code = $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
+        $code = $this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl($verifier)));
         $this->client->request('POST', '/oauth/token', $this->codeExchange($code, $verifier));
         self::assertResponseIsSuccessful();
 
@@ -376,8 +379,7 @@ final class SignInFlowTest extends DatabaseTestCase
     {
         $this->signIn();
         $verifier = bin2hex(random_bytes(32));
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier, ['scope' => 'sync']));
-        $this->client->request('POST', '/oauth/token', $this->codeExchange($this->codeFrom((string) $this->client->getResponse()->headers->get('Location')), $verifier));
+        $this->client->request('POST', '/oauth/token', $this->codeExchange($this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl($verifier, ['scope' => 'sync']))), $verifier));
         self::assertResponseIsSuccessful();
 
         $this->me(self::string($this->decodedResponse()['access_token'] ?? null));
@@ -389,9 +391,9 @@ final class SignInFlowTest extends DatabaseTestCase
     {
         $this->signIn();
 
-        $this->client->request('GET', $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)), ['scope' => 'account admin']));
+        $callback = $this->authorizedCallback($this->desktopAuthorizeUrl(bin2hex(random_bytes(32)), ['scope' => 'account admin']));
 
-        parse_str((string) parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_QUERY), $answer);
+        parse_str((string) parse_url($callback, \PHP_URL_QUERY), $answer);
         self::assertSame('invalid_scope', $answer['error'] ?? null);
     }
 
@@ -496,13 +498,193 @@ final class SignInFlowTest extends DatabaseTestCase
 
         self::mockTime('+'.(RefreshTokenRotation::GRACE_SECONDS + 1).' seconds');
 
+        $this->me($tokens['access_token']);
+        self::assertResponseStatusCodeSame(401, 'The old access token ended with the grace.');
+        $this->me(self::string($rotated['access_token'] ?? null));
+        self::assertResponseIsSuccessful('The new tokens are unaffected by the grace ending.');
+    }
+
+    public function testARefreshTokenUsedAgainAfterTheGraceSignsItsDeviceOut(): void
+    {
+        $tokens = $this->signInDevice(self::EMAIL);
+        $other = $this->signInDevice(self::EMAIL, 'Another computer');
         $this->refresh($tokens['refresh_token']);
+        $rotated = $this->decodedResponse();
+        self::mockTime('+'.(RefreshTokenRotation::GRACE_SECONDS + 1).' seconds');
+
+        $this->refresh($tokens['refresh_token']);
+
         self::assertResponseStatusCodeSame(400);
         self::assertSame('invalid_grant', $this->decodedResponse()['error'] ?? null);
-        $this->me($tokens['access_token']);
-        self::assertResponseStatusCodeSame(401);
+        $this->me(self::string($rotated['access_token'] ?? null));
+        self::assertResponseStatusCodeSame(401, 'Someone holds a copy of the token: what it rotated into ends too.');
         $this->refresh(self::string($rotated['refresh_token'] ?? null));
-        self::assertResponseIsSuccessful('The new token is unaffected.');
+        self::assertSame('invalid_grant', $this->decodedResponse()['error'] ?? null);
+        self::assertSame(1, $this->countRows('SELECT COUNT(*) FROM device'), 'Only that device is signed out.');
+        $this->me($other['access_token']);
+        self::assertResponseIsSuccessful();
+    }
+
+    public function testAnExpiredAccessTokenStillSignsOutADeviceThatDidNotRefresh(): void
+    {
+        $tokens = $this->signInDevice(self::EMAIL);
+        self::mockTime('+2 hours');
+
+        $this->revoke($tokens['access_token'], 'access_token');
+
+        $this->refresh($tokens['refresh_token']);
+        self::assertSame('invalid_grant', $this->decodedResponse()['error'] ?? null);
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM device'));
+    }
+
+    public function testAnExpiredAccessTokenLeftBehindByARefreshRevokesNothing(): void
+    {
+        $tokens = $this->signInDevice(self::EMAIL);
+        $this->refresh($tokens['refresh_token']);
+        $rotated = $this->decodedResponse();
+        self::mockTime('+2 hours');
+
+        $this->revoke($tokens['access_token'], 'access_token');
+
+        self::assertResponseStatusCodeSame(200, 'The answer says nothing about the token.');
+        self::assertSame(1, $this->countRows('SELECT COUNT(*) FROM device'));
+        $this->refresh(self::string($rotated['refresh_token'] ?? null));
+        self::assertResponseIsSuccessful('A token from a log does not end a sign-in that moved on.');
+    }
+
+    public function testTheDeviceCodeEndpointDoesNotExist(): void
+    {
+        $this->client->request('POST', '/oauth/device-code', ['client_id' => 'desktop']);
+
+        self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testABrowserThatIsSignedInAlreadyIsAskedBeforeTheDesktopAppSignsIn(): void
+    {
+        $this->signIn();
+        $request = $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)), ['state' => 'state-2']);
+
+        $crawler = $this->client->request('GET', $request);
+
+        self::assertResponseIsSuccessful();
+        self::assertFalse($this->client->getResponse()->headers->has('Location'), 'Nothing goes to the app by itself.');
+        self::assertSelectorTextContains('h1', 'Sign in to Varve on this computer?');
+        self::assertSelectorTextContains('.lead', self::EMAIL);
+        self::assertResponseHeaderSame('X-Frame-Options', 'DENY');
+        self::assertResponseHeaderSame('Referrer-Policy', 'no-referrer');
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM oauth2_authorization_code'));
+
+        $this->client->submit($crawler->selectButton('Cancel')->form());
+        $cancelled = (string) $this->client->getResponse()->headers->get('Location');
+        self::assertStringStartsWith(self::DESKTOP_REDIRECT_URI.'?', $cancelled);
+        parse_str((string) parse_url($cancelled, \PHP_URL_QUERY), $answer);
+        self::assertSame('access_denied', $answer['error'] ?? null);
+        self::assertSame('state-2', $answer['state'] ?? null);
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM oauth2_authorization_code'));
+
+        $crawler = $this->client->request('GET', $request);
+        $this->client->submit($crawler->selectButton('Continue')->form());
+        $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
+    }
+
+    public function testAnAnswerFromAnotherSiteSignsNothingIn(): void
+    {
+        $this->signIn();
+        $request = $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)));
+        $this->client->request('GET', $request);
+
+        foreach (['forged', ''] as $token) {
+            $this->client->request('POST', $request, ['decision' => 'continue', '_csrf_token' => $token]);
+
+            self::assertResponseStatusCodeSame(403);
+            self::assertSelectorTextContains('.error', 'came from another site');
+        }
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM oauth2_authorization_code'));
+    }
+
+    public function testASignInAnswersOnlyTheRequestItWasFor(): void
+    {
+        $first = $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)));
+        $other = $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)));
+        $this->client->request('GET', $first);
+        $crawler = $this->client->followRedirect();
+        $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => self::EMAIL, '_password' => self::PASSWORD]));
+
+        $this->client->request('GET', $other);
+        self::assertResponseIsSuccessful();
+        self::assertSelectorTextContains('h1', 'Sign in to Varve on this computer?', 'Another request, which another program may have made.');
+
+        $this->client->request('GET', $first);
+        self::assertStringStartsWith(self::DESKTOP_REDIRECT_URI.'?code=', (string) $this->client->getResponse()->headers->get('Location'));
+
+        $this->client->request('GET', $first);
+        self::assertResponseIsSuccessful();
+        self::assertSelectorTextContains('h1', 'Sign in to Varve on this computer?', 'The sign-in answered that request once.');
+    }
+
+    public function testARegisteredClientThatIsNotOursIsDenied(): void
+    {
+        $client = new Client('Someone else\'s app', 'someone-elses-app', null);
+        $client->setRedirectUris(new RedirectUri('http://localhost:9999/callback'));
+        $client->setGrants(new Grant(OAuth2Grants::AUTHORIZATION_CODE));
+        static::getContainer()->get(ClientManagerInterface::class)->save($client);
+        $this->signIn();
+
+        $this->client->request('GET', $this->desktopAuthorizeUrl(bin2hex(random_bytes(32)), ['client_id' => 'someone-elses-app', 'redirect_uri' => 'http://localhost:9999/callback']));
+
+        $callback = (string) $this->client->getResponse()->headers->get('Location');
+        self::assertStringStartsWith('http://localhost:9999/callback?', $callback);
+        parse_str((string) parse_url($callback, \PHP_URL_QUERY), $answer);
+        self::assertSame('access_denied', $answer['error'] ?? null);
+        self::assertSame(0, $this->countRows('SELECT COUNT(*) FROM oauth2_authorization_code'));
+    }
+
+    public function testTheAddressSignsInHoweverItIsCapitalized(): void
+    {
+        $crawler = $this->client->request('GET', '/login');
+        $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => 'Kim@Example.TEST', '_password' => self::PASSWORD]));
+
+        self::assertResponseRedirects('http://localhost/signed-in');
+        $this->client->followRedirect();
+        self::assertSelectorTextContains('.lead', self::EMAIL);
+    }
+
+    public function testWrongPasswordsCountForAWholeIpv6Network(): void
+    {
+        for ($attempt = 1; $attempt <= 5; ++$attempt) {
+            $this->client->setServerParameter('REMOTE_ADDR', '2001:db8:1:2::'.$attempt);
+            $this->signIn(password: 'wrong-'.$attempt);
+        }
+
+        $this->client->setServerParameter('REMOTE_ADDR', '2001:db8:1:2:ffff::9');
+        $this->signIn();
+        $this->client->followRedirect();
+        self::assertSelectorTextContains('.error', 'Too many failed login attempts', 'A new address of the same /64 is the same network.');
+
+        $this->client->setServerParameter('REMOTE_ADDR', '2001:db8:1:3::1');
+        $this->signIn();
+        self::assertResponseRedirects('http://localhost/signed-in', null, 'Another network is not locked.');
+    }
+
+    public function testWrongPasswordsForOneAccountCountWhateverTheNetwork(): void
+    {
+        for ($attempt = 1; $attempt <= 20; ++$attempt) {
+            $this->client->setServerParameter('REMOTE_ADDR', '203.0.113.'.$attempt);
+            $this->signIn(password: 'wrong-'.$attempt);
+            $this->client->followRedirect();
+            self::assertSelectorTextContains('.error', 'Invalid credentials', 'Attempt '.$attempt);
+        }
+
+        $this->client->setServerParameter('REMOTE_ADDR', '198.51.100.7');
+        $this->signIn();
+        $this->client->followRedirect();
+        self::assertSelectorTextContains('.error', 'Too many failed login attempts');
+
+        $this->createUser('lisa@example.test', 'Lisa Bakker');
+        $this->client->setServerParameter('REMOTE_ADDR', '198.51.100.8');
+        $crawler = $this->client->request('GET', '/login');
+        $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => 'lisa@example.test', '_password' => self::PASSWORD]));
+        self::assertResponseRedirects('http://localhost/signed-in', null, 'Another account is not locked.');
     }
 
     public function testRevokingTheOldTokenAlsoEndsWhatItJustRotatedInto(): void
@@ -544,12 +726,15 @@ final class SignInFlowTest extends DatabaseTestCase
         self::assertNull($this->client->getCookieJar()->get('MOCKSESSID'));
     }
 
-    /** Where /oauth/authorize sends the browser for the desktop app: the callback with a code, or the sign-in page. */
+    /**
+     * Where /oauth/authorize sends the browser for the desktop app: the sign-in page, or, for a browser that is signed
+     * in and answers Continue, the callback with a code.
+     */
     private function authorize(): string
     {
-        $this->client->request('GET', $this->desktopAuthorizeUrl(bin2hex(random_bytes(32))));
+        $location = $this->authorizedCallback($this->desktopAuthorizeUrl(bin2hex(random_bytes(32))));
         self::assertResponseRedirects();
 
-        return (string) $this->client->getResponse()->headers->get('Location');
+        return $location;
     }
 }

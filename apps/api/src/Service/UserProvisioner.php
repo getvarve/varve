@@ -8,7 +8,7 @@ use App\Entity\User;
 use App\Organization\PersonalOrganizations;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Clock\ClockInterface;
-use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
+use Symfony\Component\PasswordHasher\Hasher\PasswordHasherFactoryInterface;
 
 /**
  * Creates a user together with everything a new account needs: the personal organization it owns.
@@ -17,7 +17,7 @@ final readonly class UserProvisioner
 {
     public function __construct(
         private EntityManagerInterface $entityManager,
-        private UserPasswordHasherInterface $passwordHasher,
+        private PasswordHasherFactoryInterface $passwordHashers,
         private PersonalOrganizations $personalOrganizations,
         private ClockInterface $clock,
     ) {
@@ -28,9 +28,15 @@ final readonly class UserProvisioner
      */
     public function provision(string $email, string $displayName, #[\SensitiveParameter] string $plainPassword, bool $emailConfirmed): User
     {
+        return $this->provisionHashed($email, $displayName, $this->passwordHashers->getPasswordHasher(User::class)->hash($plainPassword), $emailConfirmed);
+    }
+
+    /** As {@see self::provision()}, for a caller that hashed the password already. */
+    public function provisionHashed(string $email, string $displayName, #[\SensitiveParameter] string $passwordHash, bool $emailConfirmed): User
+    {
         $now = $this->clock->now();
         $user = new User($email, $displayName, $now);
-        $user->setPassword($this->passwordHasher->hashPassword($user, $plainPassword));
+        $user->setPassword($passwordHash);
         if ($emailConfirmed) {
             $user->confirmEmail($now);
         }

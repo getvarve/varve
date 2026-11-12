@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Account\SignUpSettings;
 use App\Security\ConfirmedEmailChecker;
 use App\Security\PageHeaders;
 use App\Security\SignOutGuard;
@@ -19,7 +20,7 @@ use Symfony\Component\Security\Http\Authentication\AuthenticationUtils;
 final class SecurityController extends AbstractController
 {
     #[Route('/login', name: 'app_login', methods: ['GET', 'POST'])]
-    public function login(AuthenticationUtils $authenticationUtils): Response
+    public function login(AuthenticationUtils $authenticationUtils, SignUpSettings $signUp): Response
     {
         $error = $authenticationUtils->getLastAuthenticationError();
 
@@ -27,6 +28,7 @@ final class SecurityController extends AbstractController
             'last_username' => $authenticationUtils->getLastUsername(),
             'error' => $error,
             'unconfirmed' => $error instanceof CustomUserMessageAccountStatusException && ConfirmedEmailChecker::UNCONFIRMED === $error->getMessageKey(),
+            'sign_up' => $signUp->open,
         ]));
     }
 

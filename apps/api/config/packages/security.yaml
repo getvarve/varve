@@ -4,9 +4,9 @@ security:
 
     providers:
         app_user_provider:
+            # Without a property: App\Repository\UserRepository loads the user, however the address is capitalized.
             entity:
                 class: App\Entity\User
-                property: email
 
     firewalls:
         dev:
@@ -43,12 +43,10 @@ security:
                 # A sign-in normally goes back to the /oauth/authorize request that asked for it; one opened directly
                 # ends on a page that says so.
                 default_target_path: app_signed_in
-            # Five wrong passwords for one address from one network address, or 25 from one network address, lock the
-            # form for 15 minutes. In cache.rate_limiter_shared, so the limit holds across API instances.
+            # Wrong passwords lock the form for a while: per account and network address, per network address, and
+            # per account (App\Security\LoginLimiter, with the numbers in rate_limiter.yaml).
             login_throttling:
-                max_attempts: 5
-                interval: '15 minutes'
-                cache_pool: cache.rate_limiter_shared
+                limiter: App\Security\LoginLimiter
             # "Keep me signed in" (on by default on the sign-in form): the browser signs in again from this cookie for
             # 30 days after the session ended, as long as the refresh tokens of our apps. A new password ends it.
             remember_me:
@@ -69,6 +67,14 @@ security:
         # What this server is: open before sign-in.
         - { path: ^/api/v1/server-info$, roles: PUBLIC_ACCESS }
         - { path: ^/api/, roles: IS_AUTHENTICATED_FULLY }
+
+when@prod:
+    security:
+        firewalls:
+            main:
+                remember_me:
+                    # Always, not `auto`: see the session cookie in framework.yaml.
+                    secure: true
 
 when@test:
     security:

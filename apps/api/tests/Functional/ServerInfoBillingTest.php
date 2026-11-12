@@ -40,6 +40,6 @@ final class ServerInfoBillingTest extends DatabaseTestCase
         $this->client->request('GET', '/api/v1/server-info');
 
         self::assertResponseIsSuccessful();
-        self::assertSame(['product' => 'varve', 'apiVersion' => 1, 'billing' => true, 'trialDays' => 14], $this->decodedResponse());
+        self::assertSame(['product' => 'varve', 'apiVersion' => 1, 'billing' => true, 'trialDays' => 14, 'signUp' => true], $this->decodedResponse());
     }
 }

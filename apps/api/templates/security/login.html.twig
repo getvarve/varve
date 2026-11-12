@@ -41,5 +41,5 @@
         <p class="links"><a href="{{ path('app_forgot_password') }}">Forgot your password?</a></p>
     </section>
 
-    <p class="footnote">No account yet? <a href="{{ path('app_register') }}">Create one</a>. After signing in you go back to the Varve app you came from.</p>
+    <p class="footnote">{% if sign_up %}No account yet? <a href="{{ path('app_register') }}">Create one</a>. {% endif %}After signing in you go back to the Varve app you came from.</p>
 {% endblock %}

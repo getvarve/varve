@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Tests\Functional;
 
 use Doctrine\DBAL\Exception\DriverException;
+use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\DomCrawler\Field\ChoiceFormField;
 
 /**
  * The signed-in user's account on the API: who they are, their organizations, a new password and deleting the account.
@@ -12,6 +14,7 @@ use Doctrine\DBAL\Exception\DriverException;
 final class AccountApiTest extends DatabaseTestCase
 {
     use AuthenticatesUsers;
+    use ReadsAccountMail;
 
     private const string KIM = 'kim@example.test';
     private const string NEW_PASSWORD = 'a-brand-new-password';
@@ -82,6 +85,44 @@ final class AccountApiTest extends DatabaseTestCase
         self::assertSame('invalid_grant', $this->decodedResponse()['error'] ?? null);
 
         $this->signInDevice(self::KIM, password: self::NEW_PASSWORD);
+    }
+
+    public function testChangingThePasswordEndsAResetLinkAskedForBefore(): void
+    {
+        $tokens = $this->signInDevice(self::KIM);
+        $crawler = $this->client->request('GET', '/forgot-password');
+        $this->client->submit($crawler->selectButton('Send link')->form(['email' => self::KIM]));
+        $secret = $this->linkSecret($this->sentMail(self::KIM), '/reset-password');
+        $crawler = $this->client->request('GET', '/reset-password?token='.$secret);
+        $csrf = self::string($crawler->filter('input[name="_csrf_token"]')->attr('value'));
+
+        $this->changePassword($tokens['access_token'], self::DEFAULT_PASSWORD, self::NEW_PASSWORD);
+        self::assertResponseStatusCodeSame(204);
+
+        $this->client->request('GET', '/reset-password?token='.$secret);
+        self::assertSelectorTextContains('h1', 'Link no longer works');
+        $this->client->request('POST', '/reset-password', ['token' => $secret, 'password' => 'yet-another-password', '_csrf_token' => $csrf]);
+        self::assertResponseStatusCodeSame(410);
+        $this->signInDevice(self::KIM, password: self::NEW_PASSWORD);
+    }
+
+    public function testChangingThePasswordEndsTheLiveBrowserSession(): void
+    {
+        $tokens = $this->signInDevice(self::KIM);
+        $crawler = $this->client->request('GET', '/login');
+        $form = $crawler->selectButton('Sign in')->form(['_username' => self::KIM, '_password' => self::DEFAULT_PASSWORD]);
+        $checkbox = $form['_remember_me'];
+        self::assertInstanceOf(ChoiceFormField::class, $checkbox);
+        $checkbox->untick();
+        $this->client->submit($form);
+        self::assertResponseRedirects('http://localhost/signed-in');
+
+        $this->changePassword($tokens['access_token'], self::DEFAULT_PASSWORD, self::NEW_PASSWORD);
+        self::assertResponseStatusCodeSame(204);
+        static::getContainer()->get(EntityManagerInterface::class)->clear();
+
+        $this->client->request('GET', $this->desktopAuthorizeUrl(bin2hex(random_bytes(32))));
+        self::assertResponseRedirects('http://localhost/login', null, 'The session was for the old password.');
     }
 
     public function testAPasswordChangeNeedsTheCurrentPassword(): void
@@ -160,8 +201,7 @@ final class AccountApiTest extends DatabaseTestCase
         $verifier = bin2hex(random_bytes(32));
         $crawler = $this->client->request('GET', '/login');
         $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => self::KIM, '_password' => self::DEFAULT_PASSWORD]));
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier, ['scope' => 'sync']));
-        $this->client->request('POST', '/oauth/token', $this->codeExchange($this->codeFrom((string) $this->client->getResponse()->headers->get('Location')), $verifier));
+        $this->client->request('POST', '/oauth/token', $this->codeExchange($this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl($verifier, ['scope' => 'sync']))), $verifier));
         $token = self::string($this->decodedResponse()['access_token'] ?? null);
 
         $this->deleteAccount($token, self::DEFAULT_PASSWORD);

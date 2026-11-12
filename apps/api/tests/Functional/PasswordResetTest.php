@@ -6,6 +6,7 @@ namespace App\Tests\Functional;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
+use Symfony\Component\DomCrawler\Field\ChoiceFormField;
 
 /**
  * A forgotten password: the link, the new password, and everything a reset ends.
@@ -151,12 +152,131 @@ final class PasswordResetTest extends DatabaseTestCase
     {
         $this->askForLink(self::EMAIL);
         $secret = $this->linkSecret($this->sentMail(self::EMAIL), '/reset-password');
-        $this->client->getCookieJar()->clear();
 
         $this->client->request('POST', '/reset-password', ['token' => $secret, 'password' => self::NEW_PASSWORD, '_csrf_token' => 'forged']);
-
         self::assertResponseStatusCodeSame(403);
+
+        // Without the session cookie (as another site's form sends it) nothing is rendered: back to the page.
+        $this->client->getCookieJar()->clear();
+        $this->client->request('POST', '/reset-password', ['token' => $secret, 'password' => self::NEW_PASSWORD, '_csrf_token' => 'forged']);
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame([], $this->client->getResponse()->headers->getCookies());
+
         $this->signInDevice(self::EMAIL);
+    }
+
+    public function testAResetEndsTheLiveBrowserSession(): void
+    {
+        $this->signInBrowser(rememberMe: false);
+        self::assertNull($this->client->getCookieJar()->get('REMEMBERME'));
+        $session = $this->client->getCookieJar()->get('MOCKSESSID');
+        self::assertNotNull($session);
+
+        // The reset happens in another browser.
+        $this->client->getCookieJar()->clear();
+        $this->askForLink(self::EMAIL);
+        $this->setPassword($this->linkSecret($this->sentMail(self::EMAIL), '/reset-password'), self::NEW_PASSWORD);
+        static::getContainer()->get(EntityManagerInterface::class)->clear();
+
+        $this->client->getCookieJar()->clear();
+        $this->client->getCookieJar()->set($session);
+        $this->client->request('GET', $this->desktopAuthorizeUrl(bin2hex(random_bytes(32))));
+        self::assertResponseRedirects('http://localhost/login', null, 'The session was for the old password.');
+    }
+
+    public function testTheResetMailGreetsAConfirmedAccountByName(): void
+    {
+        $this->askForLink(self::EMAIL);
+
+        self::assertStringContainsString('Hi Kim Visser,', (string) $this->sentMail(self::EMAIL)->getTextBody());
+    }
+
+    public function testRequestsFromOneNetworkAreLimitedWhateverTheAddress(): void
+    {
+        for ($ask = 1; $ask <= 20; ++$ask) {
+            $this->askForLink('nobody'.$ask.'@example.test');
+            self::assertResponseIsSuccessful();
+        }
+
+        $this->askForLink(self::EMAIL);
+
+        self::assertSelectorTextContains('h1', 'Check your mail', 'The page says the same.');
+        self::assertEmailCount(0, message: 'Asking about addresses without an account counted too.');
+    }
+
+    public function testSomeoneElsesRequestsDoNotUseUpTheOwnersLinks(): void
+    {
+        $this->client->setServerParameter('REMOTE_ADDR', '203.0.113.66');
+        for ($ask = 1; $ask <= 5; ++$ask) {
+            $this->askForLink(self::EMAIL);
+            self::assertEmailCount(1, message: 'Mail '.$ask);
+        }
+        $this->askForLink(self::EMAIL);
+        self::assertEmailCount(0, message: 'That network has had its share for this address.');
+
+        $this->client->setServerParameter('REMOTE_ADDR', '198.51.100.20');
+        $this->askForLink(self::EMAIL);
+        self::assertEmailCount(1, message: 'The owner, on another network, still gets a link.');
+    }
+
+    public function testMailOfAnotherKindDoesNotUseUpResetLinks(): void
+    {
+        for ($signUp = 1; $signUp <= 6; ++$signUp) {
+            $crawler = $this->client->request('GET', '/register');
+            $this->client->submit($crawler->selectButton('Create account')->form(['email' => self::EMAIL, 'name' => 'Someone Else', 'password' => 'another-password-entirely']));
+            self::assertEmailCount($signUp <= 5 ? 1 : 0, message: 'The note that the address has an account, '.$signUp);
+        }
+
+        $this->askForLink(self::EMAIL);
+
+        self::assertEmailCount(1);
+    }
+
+    public function testASignedInBrowserGetsALinkWhateverOthersAskedFor(): void
+    {
+        for ($ask = 1; $ask <= 6; ++$ask) {
+            $this->askForLink(self::EMAIL);
+        }
+        self::assertEmailCount(0, message: 'The budget of this network for this address is used up.');
+
+        $this->signInBrowser();
+        $this->askForLink('Kim@Example.test');
+        $this->setPassword($this->linkSecret($this->sentMail(self::EMAIL), '/reset-password'), self::NEW_PASSWORD);
+
+        $this->askForLink('someone-else@example.test');
+        self::assertEmailCount(0, message: 'Being signed in says nothing about another address.');
+    }
+
+    public function testTheHolderOfAnExpiredLinkGetsANewOneWhateverOthersAskedFor(): void
+    {
+        $secret = '';
+        for ($ask = 1; $ask <= 5; ++$ask) {
+            $this->askForLink(self::EMAIL);
+            $secret = $this->linkSecret($this->sentMail(self::EMAIL), '/reset-password');
+        }
+        $this->askForLink(self::EMAIL);
+        self::assertEmailCount(0, message: 'The budget of this network for this address is used up.');
+
+        self::mockTime('+1 hour +1 second');
+        $crawler = $this->client->request('GET', '/reset-password?token='.$secret);
+        self::assertSelectorTextContains('h1', 'Link expired');
+        $this->client->submit($crawler->selectButton('Send a new link')->form());
+
+        self::assertSelectorTextContains('h1', 'Check your mail');
+        $this->setPassword($this->linkSecret($this->sentMail(self::EMAIL), '/reset-password'), self::NEW_PASSWORD);
+    }
+
+    public function testAMadeUpLinkGetsNobodyANewOne(): void
+    {
+        $crawler = $this->client->request('GET', '/reset-password?token='.str_repeat('a', 64));
+        self::assertSelectorTextContains('h1', 'Link no longer works');
+        self::assertSame(0, $crawler->selectButton('Send a new link')->count());
+
+        $crawler = $this->client->request('GET', '/forgot-password');
+        $this->client->request('POST', '/forgot-password', ['link' => str_repeat('a', 64), '_csrf_token' => self::string($crawler->filter('input[name="_csrf_token"]')->attr('value'))]);
+
+        self::assertSelectorTextContains('h1', 'Check your mail', 'The page says the same.');
+        self::assertEmailCount(0);
     }
 
     private function askForLink(string $email): void
@@ -179,9 +299,15 @@ final class PasswordResetTest extends DatabaseTestCase
         return self::string($crawler->filter('input[name="_csrf_token"]')->attr('value'));
     }
 
-    private function signInBrowser(): void
+    private function signInBrowser(bool $rememberMe = true): void
     {
         $crawler = $this->client->request('GET', '/login');
-        $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => self::EMAIL, '_password' => self::DEFAULT_PASSWORD]));
+        $form = $crawler->selectButton('Sign in')->form(['_username' => self::EMAIL, '_password' => self::DEFAULT_PASSWORD]);
+        if (!$rememberMe) {
+            $checkbox = $form['_remember_me'];
+            self::assertInstanceOf(ChoiceFormField::class, $checkbox);
+            $checkbox->untick();
+        }
+        $this->client->submit($form);
     }
 }

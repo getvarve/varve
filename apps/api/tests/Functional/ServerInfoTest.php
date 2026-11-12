@@ -15,6 +15,6 @@ final class ServerInfoTest extends DatabaseTestCase
 
         self::assertResponseIsSuccessful();
         self::assertResponseHeaderSame('Content-Type', 'application/json');
-        self::assertSame(['product' => 'varve', 'apiVersion' => 1, 'billing' => false, 'trialDays' => 0], $this->decodedResponse());
+        self::assertSame(['product' => 'varve', 'apiVersion' => 1, 'billing' => false, 'trialDays' => 0, 'signUp' => true], $this->decodedResponse());
     }
 }

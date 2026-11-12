@@ -6,12 +6,14 @@ namespace App\State;
 
 use ApiPlatform\Metadata\Operation;
 use ApiPlatform\State\ProcessorInterface;
+use App\Account\AccountLinks;
 use App\Account\PasswordCheck;
 use App\Account\PasswordPolicy;
 use App\Account\TooManyAttempts;
 use App\ApiResource\Input\ChangePassword;
 use App\Device\CurrentDevice;
 use App\Device\Devices;
+use App\Enum\AccountLinkPurpose;
 use App\Security\CurrentUser;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
@@ -28,6 +30,7 @@ final readonly class PasswordChangeProcessor implements ProcessorInterface
         private PasswordCheck $check,
         private UserPasswordHasherInterface $passwordHasher,
         private Devices $devices,
+        private AccountLinks $links,
         private EntityManagerInterface $entityManager,
     ) {
     }
@@ -52,6 +55,8 @@ final readonly class PasswordChangeProcessor implements ProcessorInterface
         $this->entityManager->wrapInTransaction(function () use ($user, $data, $keep): void {
             $user->setPassword($this->passwordHasher->hashPassword($user, $data->newPassword));
             $this->entityManager->flush();
+            // A reset link asked for before this change must not set yet another password afterwards.
+            $this->links->end($user, AccountLinkPurpose::ResetPassword);
             $this->devices->signOutOthers($user, $keep);
         });
 

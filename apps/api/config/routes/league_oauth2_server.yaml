@@ -1,4 +1,10 @@
-league_oauth2_server:
-    resource: '@LeagueOAuth2ServerBundle/config/routes.php'
-    type: php
-    prefix: /oauth
+# Only the two endpoints this server uses, not the bundle's whole route file: that one also has /oauth/device-code,
+# for a grant that is off here.
+oauth2_authorize:
+    path: /oauth/authorize
+    controller: 'league.oauth2_server.controller.authorization::indexAction'
+
+oauth2_token:
+    path: /oauth/token
+    controller: 'league.oauth2_server.controller.token::indexAction'
+    methods: [POST]

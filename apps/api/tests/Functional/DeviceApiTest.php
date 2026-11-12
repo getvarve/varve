@@ -65,8 +65,7 @@ final class DeviceApiTest extends DatabaseTestCase
         ] as $case => $override) {
             $verifier = bin2hex(random_bytes(32));
             $this->signInBrowser(self::KIM);
-            $this->client->request('GET', $this->desktopAuthorizeUrl($verifier));
-            $code = $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
+            $code = $this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl($verifier)));
 
             $this->client->request('POST', '/oauth/token', [...$this->codeExchange($code, $verifier), ...$override]);
 

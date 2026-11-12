@@ -6,17 +6,48 @@ framework:
             limit: 10
             interval: '1 hour'
             cache_pool: cache.rate_limiter_shared
-        # Account mail (confirmation links, password reset links) per receiving address, whoever asks for them.
-        account_mail_recipient:
+        # Wrong passwords on the sign-in form (App\Security\LoginLimiter): for one account from one IPv4 address or
+        # IPv6 /64, from one such network address whatever the account, and for one account whatever the address.
+        login_account_address:
+            policy: fixed_window
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+        login_address:
+            policy: fixed_window
+            limit: 25
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter_shared
+        login_account:
+            policy: fixed_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Account mail (App\Account\AccountMailBudget), each counted per kind of mail (confirmation links, password
+        # reset links, the note to an address that has an account already).
+        # Requests per IPv4 address or IPv6 /64 that asks, whatever the address asked for.
+        account_mail_requester:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter_shared
+        # Mail to one address asked for from one network address.
+        account_mail_recipient_requester:
             policy: sliding_window
             limit: 5
             interval: '1 day'
             cache_pool: cache.rate_limiter_shared
-        # The same mail per IPv4 address or IPv6 /64 that asks, whatever the address.
-        account_mail_sender:
+        # Mail to one address from all network addresses together. Generous: the page cannot say that it was reached.
+        account_mail_recipient:
             policy: sliding_window
-            limit: 20
-            interval: '1 hour'
+            limit: 30
+            interval: '1 day'
+            cache_pool: cache.rate_limiter_shared
+        # Mail asked for by the owner of the account: from a signed-in browser, or with a link sent earlier.
+        account_mail_owner:
+            policy: sliding_window
+            limit: 10
+            interval: '1 day'
             cache_pool: cache.rate_limiter_shared
         # Checking the current password before a password change or an account deletion, per user: a stolen access
         # token must not be a way to guess the password.
@@ -54,10 +85,12 @@ when@prod:
     framework:
         cache:
             pools:
-                # Shared by every API instance, so a limit holds across them.
+                # Shared by every API instance, so a limit holds across them. On the worker's one Redis connection
+                # (app.redis in framework.yaml), which is dropped after every request, so the limits work again as
+                # soon as Redis is back after an outage.
                 cache.rate_limiter_shared:
                     adapter: cache.adapter.redis
-                    provider: '%env(REDIS_URL)%'
+                    provider: app.redis
 
 when@dev:
     framework:

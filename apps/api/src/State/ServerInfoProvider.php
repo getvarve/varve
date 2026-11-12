@@ -6,6 +6,7 @@ namespace App\State;
 
 use ApiPlatform\Metadata\Operation;
 use ApiPlatform\State\ProviderInterface;
+use App\Account\SignUpSettings;
 use App\ApiResource\ServerInfo;
 use App\Billing\BillingSettings;
 
@@ -16,11 +17,12 @@ final readonly class ServerInfoProvider implements ProviderInterface
 {
     public function __construct(
         private BillingSettings $billing,
+        private SignUpSettings $signUp,
     ) {
     }
 
     public function provide(Operation $operation, array $uriVariables = [], array $context = []): ServerInfo
     {
-        return new ServerInfo(ServerInfo::PRODUCT, ServerInfo::API_VERSION, $this->billing->enabled, $this->billing->enabled ? BillingSettings::TRIAL_DAYS : 0);
+        return new ServerInfo(ServerInfo::PRODUCT, ServerInfo::API_VERSION, $this->billing->enabled, $this->billing->enabled ? BillingSettings::TRIAL_DAYS : 0, $this->signUp->open);
     }
 }

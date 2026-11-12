@@ -22,7 +22,11 @@ use Symfony\Component\Uid\Uuid;
 #[ORM\Index(columns: ['email_confirmed_at', 'created_at'])]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
-    public const int MAX_EMAIL = 320;
+    /**
+     * The longest address an account can have, everywhere: the OAuth2 server keeps the address with every token and
+     * code it issues, in columns of this length that it does not let an application widen.
+     */
+    public const int MAX_EMAIL = 128;
     public const int MAX_DISPLAY_NAME = 120;
 
     #[ORM\Id]

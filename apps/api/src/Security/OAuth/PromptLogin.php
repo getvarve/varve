@@ -43,7 +43,7 @@ final readonly class PromptLogin
     {
     }
 
-    /** Above the firewall (8), below the sign-in host redirect (10). */
+    /** Above the firewall (8), below the router (32). */
     #[AsEventListener(event: KernelEvents::REQUEST, priority: 9)]
     public function onRequest(RequestEvent $event): void
     {

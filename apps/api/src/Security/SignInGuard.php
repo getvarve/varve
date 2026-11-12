@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Security;
 
+use App\Account\SignUpSettings;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -33,6 +34,7 @@ final readonly class SignInGuard
     public function __construct(
         private CsrfTokenManagerInterface $csrfTokens,
         private Environment $twig,
+        private SignUpSettings $signUp,
     ) {
     }
 
@@ -57,6 +59,7 @@ final readonly class SignInGuard
             'last_username' => $request->request->getString('_username'),
             'error' => null,
             'unconfirmed' => false,
+            'sign_up' => $this->signUp->open,
             'notice' => 'This page was open too long or came from another site, so nothing happened. Sign in again.',
         ]), Response::HTTP_FORBIDDEN)));
     }

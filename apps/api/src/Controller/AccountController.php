@@ -4,26 +4,33 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Account\AccountDetails;
+use App\Account\ConfirmationResult;
 use App\Account\EmailConfirmation;
 use App\Account\PasswordPolicy;
 use App\Account\PasswordReset;
 use App\Account\Registration;
+use App\Account\SignUpSettings;
 use App\Account\TooManyAttempts;
 use App\Entity\User;
 use App\Security\PageHeaders;
-use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Component\Validator\Constraints\Email;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * The account pages in the browser, next to the sign-in page: signing up, confirming the address, asking for a new
  * confirmation link, and resetting a forgotten password. Every form posts back to its own page with a CSRF token.
- * What a page says after a post never tells whether an address has an account.
+ * What a page says after a post never tells whether an address has an account, and no mail is sent before the page
+ * is: a mail server that is slow or down changes nothing a visitor sees.
+ *
+ * A post that comes without the session cookie (as a form on another site sends it) gets a 303 to the page itself:
+ * no token can match without the session, and rendering the page would start a new session whose cookie replaces the
+ * browser's, which would sign that browser out.
+ *
+ * While sign-up is closed ({@see SignUpSettings}), the sign-up page, the confirmation page and the page that sends a
+ * confirmation link again only say so.
  */
 final class AccountController extends AbstractController
 {
@@ -34,23 +41,28 @@ final class AccountController extends AbstractController
     private const string CSRF_RESET = 'reset_password';
 
     private const string FORM_EXPIRED = 'This page was open too long or came from another site, so nothing happened. Try again.';
-    private const string MAIL_FAILED = 'The mail could not be sent just now. Try again in a few minutes.';
 
     public function __construct(
         private readonly Registration $registration,
         private readonly EmailConfirmation $confirmation,
         private readonly PasswordReset $passwordReset,
-        private readonly ValidatorInterface $validator,
-        private readonly LoggerInterface $logger,
+        private readonly AccountDetails $details,
+        private readonly SignUpSettings $signUp,
     ) {
     }
 
     #[Route('/register', name: 'app_register', methods: ['GET', 'POST'])]
     public function register(Request $request): Response
     {
+        if (!$this->signUp->open) {
+            return $this->signUpClosed();
+        }
         $values = ['email' => '', 'name' => ''];
         if (!$request->isMethod('POST')) {
             return $this->page('account/register.html.twig', ['values' => $values, 'errors' => []]);
+        }
+        if (!$request->hasPreviousSession()) {
+            return $this->backToThePage($request);
         }
 
         $values = ['email' => trim($request->request->getString('email')), 'name' => trim($request->request->getString('name'))];
@@ -59,8 +71,8 @@ final class AccountController extends AbstractController
             return $this->page('account/register.html.twig', ['values' => $values, 'errors' => ['form' => self::FORM_EXPIRED]], Response::HTTP_FORBIDDEN);
         }
         $errors = array_filter([
-            'email' => $this->emailProblem($values['email']),
-            'name' => self::nameProblem($values['name']),
+            'email' => $this->details->emailProblem($values['email']),
+            'name' => AccountDetails::nameProblem($values['name']),
             'password' => PasswordPolicy::problem($password),
         ]);
         if ([] !== $errors) {
@@ -71,8 +83,6 @@ final class AccountController extends AbstractController
             $this->registration->register($values['email'], $values['name'], $password, $request->getClientIp());
         } catch (TooManyAttempts) {
             return $this->page('account/register.html.twig', ['values' => $values, 'errors' => ['form' => 'Too many sign-ups from your network. Try again in an hour.']], Response::HTTP_TOO_MANY_REQUESTS);
-        } catch (TransportExceptionInterface $exception) {
-            return $this->mailFailed('account/register.html.twig', ['values' => $values], $exception);
         }
 
         return $this->page('account/mail_sent.html.twig', ['email' => $values['email'], 'reason' => 'register']);
@@ -81,42 +91,64 @@ final class AccountController extends AbstractController
     #[Route('/confirm-email', name: 'app_confirm_email', methods: ['GET', 'POST'])]
     public function confirmEmail(Request $request): Response
     {
+        if (!$this->signUp->open) {
+            return $this->signUpClosed();
+        }
         $token = $request->isMethod('POST') ? $request->request->getString('token') : $request->query->getString('token');
         if (!$request->isMethod('POST')) {
-            return $this->page('account/confirm_email.html.twig', ['state' => $this->confirmation->isValid($token) ? 'ask' : 'invalid', 'token' => $token, 'error' => null], referrerPolicy: PageHeaders::NO_REFERRER);
+            $state = match (true) {
+                $this->confirmation->isValid($token) => 'ask',
+                $this->confirmation->isExpired($token) => 'expired',
+                default => 'invalid',
+            };
+
+            return $this->page('account/confirm_email.html.twig', ['state' => $state, 'token' => $token, 'errors' => []], referrerPolicy: PageHeaders::NO_REFERRER);
+        }
+        if (!$request->hasPreviousSession()) {
+            return $this->backToThePage($request, $token);
         }
 
         if (!$this->isCsrfTokenValid(self::CSRF_CONFIRM, $request->request->getString('_csrf_token'))) {
-            return $this->page('account/confirm_email.html.twig', ['state' => 'ask', 'token' => $token, 'error' => self::FORM_EXPIRED], Response::HTTP_FORBIDDEN, PageHeaders::NO_REFERRER);
-        }
-        if (!$this->confirmation->confirm($token)) {
-            return $this->page('account/confirm_email.html.twig', ['state' => 'invalid', 'token' => '', 'error' => null], Response::HTTP_GONE, PageHeaders::NO_REFERRER);
+            return $this->page('account/confirm_email.html.twig', ['state' => 'ask', 'token' => $token, 'errors' => ['form' => self::FORM_EXPIRED]], Response::HTTP_FORBIDDEN, PageHeaders::NO_REFERRER);
         }
 
-        return $this->page('account/confirm_email.html.twig', ['state' => 'confirmed', 'token' => '', 'error' => null], referrerPolicy: PageHeaders::NO_REFERRER);
+        return match ($this->confirmation->confirm($token, $request->request->getString('password'))) {
+            ConfirmationResult::Confirmed => $this->page('account/confirm_email.html.twig', ['state' => 'confirmed', 'token' => '', 'errors' => []], referrerPolicy: PageHeaders::NO_REFERRER),
+            ConfirmationResult::WrongPassword => $this->page('account/confirm_email.html.twig', ['state' => 'ask', 'token' => $token, 'errors' => ['password' => 'This is not the password you chose when you signed up.']], Response::HTTP_UNPROCESSABLE_ENTITY, PageHeaders::NO_REFERRER),
+            ConfirmationResult::LinkEnded => $this->page('account/confirm_email.html.twig', ['state' => 'invalid', 'token' => '', 'errors' => []], Response::HTTP_GONE, PageHeaders::NO_REFERRER),
+        };
     }
 
     #[Route('/confirm-email/resend', name: 'app_resend_confirmation', methods: ['GET', 'POST'])]
     public function resendConfirmation(Request $request): Response
     {
+        if (!$this->signUp->open) {
+            return $this->signUpClosed();
+        }
         if (!$request->isMethod('POST')) {
             return $this->page('account/resend_confirmation.html.twig', ['email' => $request->query->getString('email'), 'errors' => []]);
+        }
+        if (!$request->hasPreviousSession()) {
+            return $this->backToThePage($request);
         }
 
         $email = trim($request->request->getString('email'));
         if (!$this->isCsrfTokenValid(self::CSRF_RESEND, $request->request->getString('_csrf_token'))) {
             return $this->page('account/resend_confirmation.html.twig', ['email' => $email, 'errors' => ['form' => self::FORM_EXPIRED]], Response::HTTP_FORBIDDEN);
         }
-        $problem = $this->emailProblem($email);
+        // From the page of an expired link: its holder asks for a new one to the same address.
+        $link = $request->request->getString('link');
+        if ('' !== $link) {
+            $this->registration->resendConfirmationWithLink($link);
+
+            return $this->page('account/mail_sent.html.twig', ['email' => '', 'reason' => 'resend']);
+        }
+        $problem = $this->details->emailProblem($email);
         if (null !== $problem) {
             return $this->page('account/resend_confirmation.html.twig', ['email' => $email, 'errors' => ['email' => $problem]], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        try {
-            $this->registration->resendConfirmation($email, $request->getClientIp());
-        } catch (TransportExceptionInterface $exception) {
-            return $this->mailFailed('account/resend_confirmation.html.twig', ['email' => $email], $exception);
-        }
+        $this->registration->resendConfirmation($email, $request->getClientIp());
 
         return $this->page('account/mail_sent.html.twig', ['email' => $email, 'reason' => 'resend']);
     }
@@ -127,21 +159,28 @@ final class AccountController extends AbstractController
         if (!$request->isMethod('POST')) {
             return $this->page('account/forgot_password.html.twig', ['email' => $request->query->getString('email'), 'errors' => []]);
         }
+        if (!$request->hasPreviousSession()) {
+            return $this->backToThePage($request);
+        }
 
         $email = trim($request->request->getString('email'));
         if (!$this->isCsrfTokenValid(self::CSRF_FORGOT, $request->request->getString('_csrf_token'))) {
             return $this->page('account/forgot_password.html.twig', ['email' => $email, 'errors' => ['form' => self::FORM_EXPIRED]], Response::HTTP_FORBIDDEN);
         }
-        $problem = $this->emailProblem($email);
+        // From the page of an expired link: its holder asks for a new one to the same address.
+        $link = $request->request->getString('link');
+        if ('' !== $link) {
+            $this->passwordReset->requestWithLink($link);
+
+            return $this->page('account/mail_sent.html.twig', ['email' => '', 'reason' => 'reset']);
+        }
+        $problem = $this->details->emailProblem($email);
         if (null !== $problem) {
             return $this->page('account/forgot_password.html.twig', ['email' => $email, 'errors' => ['email' => $problem]], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        try {
-            $this->passwordReset->request($email, $request->getClientIp());
-        } catch (TransportExceptionInterface $exception) {
-            return $this->mailFailed('account/forgot_password.html.twig', ['email' => $email], $exception);
-        }
+        $signedIn = $this->getUser();
+        $this->passwordReset->request($email, $request->getClientIp(), $signedIn instanceof User ? $signedIn : null);
 
         return $this->page('account/mail_sent.html.twig', ['email' => $email, 'reason' => 'reset']);
     }
@@ -151,7 +190,16 @@ final class AccountController extends AbstractController
     {
         $token = $request->isMethod('POST') ? $request->request->getString('token') : $request->query->getString('token');
         if (!$request->isMethod('POST')) {
-            return $this->page('account/reset_password.html.twig', ['state' => $this->passwordReset->isValid($token) ? 'form' : 'invalid', 'token' => $token, 'errors' => []], referrerPolicy: PageHeaders::NO_REFERRER);
+            $state = match (true) {
+                $this->passwordReset->isValid($token) => 'form',
+                $this->passwordReset->isExpired($token) => 'expired',
+                default => 'invalid',
+            };
+
+            return $this->page('account/reset_password.html.twig', ['state' => $state, 'token' => $token, 'errors' => []], referrerPolicy: PageHeaders::NO_REFERRER);
+        }
+        if (!$request->hasPreviousSession()) {
+            return $this->backToThePage($request, $token);
         }
 
         if (!$this->isCsrfTokenValid(self::CSRF_RESET, $request->request->getString('_csrf_token'))) {
@@ -169,30 +217,20 @@ final class AccountController extends AbstractController
         return $this->page('account/reset_password.html.twig', ['state' => 'done', 'token' => '', 'errors' => []], referrerPolicy: PageHeaders::NO_REFERRER);
     }
 
-    private function emailProblem(string $email): ?string
+    private function signUpClosed(): Response
     {
-        if ('' === $email || mb_strlen($email) > User::MAX_EMAIL || \count($this->validator->validate($email, new Email(mode: Email::VALIDATION_MODE_HTML5))) > 0) {
-            return 'Enter a valid email address.';
-        }
-
-        return null;
+        return $this->page('account/sign_up_closed.html.twig', [], Response::HTTP_FORBIDDEN);
     }
 
-    private static function nameProblem(string $name): ?string
+    /**
+     * Where a post without the session cookie goes: the page it was meant for, as a navigation that carries the
+     * browser's cookies. The page of a mail link is opened with the secret the post named, when it looks like one.
+     */
+    private function backToThePage(Request $request, #[\SensitiveParameter] string $token = ''): Response
     {
-        if ('' === $name || mb_strlen($name) > User::MAX_DISPLAY_NAME || 1 === preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', $name) || !mb_check_encoding($name, 'UTF-8')) {
-            return \sprintf('Enter your name, at most %d characters.', User::MAX_DISPLAY_NAME);
-        }
+        $query = 1 === preg_match('/^[0-9a-f]{64}$/', $token) ? '?'.http_build_query(['token' => $token]) : '';
 
-        return null;
-    }
-
-    /** @param array<string, mixed> $context */
-    private function mailFailed(string $template, array $context, TransportExceptionInterface $exception): Response
-    {
-        $this->logger->error('Account mail could not be sent: {message}', ['message' => $exception->getMessage(), 'exception' => $exception]);
-
-        return $this->page($template, [...$context, 'errors' => ['form' => self::MAIL_FAILED]], Response::HTTP_SERVICE_UNAVAILABLE);
+        return PageHeaders::apply($this->redirect($request->getBaseUrl().$request->getPathInfo().$query, Response::HTTP_SEE_OTHER), '' === $query ? PageHeaders::SAME_ORIGIN : PageHeaders::NO_REFERRER);
     }
 
     /** @param array<string, mixed> $context */

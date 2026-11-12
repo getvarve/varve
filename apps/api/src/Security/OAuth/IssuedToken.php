@@ -7,7 +7,7 @@ namespace App\Security\OAuth;
 /**
  * A token this server issued, as {@see IssuedTokens} read it: its kind, its id, the client it was issued to, the
  * access token it belongs to (an access token's own id; for a refresh token, the access token issued with it), the
- * user it acts for (none for a client's own token) and its scopes.
+ * user it acts for (none for a client's own token), its scopes, and for an access token when it expires.
  */
 final readonly class IssuedToken
 {
@@ -24,6 +24,7 @@ final readonly class IssuedToken
         public string $accessTokenId,
         public ?string $userIdentifier,
         public array $scopes,
+        public ?\DateTimeImmutable $expiresAt = null,
     ) {
     }
 

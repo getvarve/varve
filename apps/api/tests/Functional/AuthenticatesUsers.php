@@ -11,8 +11,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Obtains real tokens through the OAuth2 server, as the desktop app does: browser sign-in, authorization code with
- * PKCE to a loopback port, and a token request that names the device.
+ * Obtains real tokens through the OAuth2 server, as the desktop app does: an authorization request with PKCE to a
+ * loopback port, the browser sign-in it leads to, and a token request that names the device.
  *
  * @property KernelBrowser $client
  */
@@ -57,13 +57,15 @@ trait AuthenticatesUsers
         $verifier = bin2hex(random_bytes(32));
 
         $this->client->getCookieJar()->clear();
-        $crawler = $this->client->request('GET', '/login');
+        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier));
+        $crawler = $this->client->followRedirect();
         $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => $email, '_password' => $password]));
         if (str_ends_with((string) $this->client->getResponse()->headers->get('Location'), '/login')) {
             self::fail('The sign-in was refused: '.$this->client->followRedirect()->filter('.error')->text(''));
         }
 
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier));
+        // Signed in for this very request: it goes on without asking.
+        $this->client->followRedirect();
         $code = $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
 
         $this->client->request('POST', '/oauth/token', $this->codeExchange($code, $verifier, $deviceName));
@@ -91,6 +93,22 @@ trait AuthenticatesUsers
             'code_challenge_method' => 'S256',
             ...$extra,
         ]);
+    }
+
+    /**
+     * Where an authorization request of the desktop app sends a browser that is signed in already: the page that asks
+     * whether to sign in on this computer is answered with Continue. Returns the Location of the redirect that
+     * follows (the callback with a code or an error) or of the redirect the request got at once (the sign-in page).
+     */
+    protected function authorizedCallback(string $authorizeUrl): string
+    {
+        $crawler = $this->client->request('GET', $authorizeUrl);
+        if (200 === $this->client->getResponse()->getStatusCode()) {
+            self::assertSelectorTextContains('h1', 'Sign in to Varve on this computer?');
+            $this->client->submit($crawler->selectButton('Continue')->form());
+        }
+
+        return (string) $this->client->getResponse()->headers->get('Location');
     }
 
     /**

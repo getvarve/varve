@@ -1,0 +1,22 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sign in to Varve on this computer?{% endblock %}
+
+{% block body %}
+    <section class="card" aria-labelledby="confirm-sign-in-title">
+        <h1 id="confirm-sign-in-title">Sign in to Varve on this computer?</h1>
+        <p class="lead">The Varve app on this computer asks to sign in as <strong>{{ email }}</strong>. Continue only if you started this in the Varve app just now.</p>
+
+        {% if error %}
+            <p class="error" role="alert">{{ error }}</p>
+        {% endif %}
+
+        <form class="form" method="post" action="{{ action }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token(csrf_token_id) }}">
+            <button type="submit" name="decision" value="continue" class="button">Continue</button>
+            <button type="submit" name="decision" value="cancel" class="button button-secondary">Cancel</button>
+        </form>
+
+        <p class="links">Not {{ email }}? <a href="{{ path('app_logout') }}">Sign out of this browser</a> first.</p>
+    </section>
+{% endblock %}

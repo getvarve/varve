@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Security\OAuth;
 
+use App\Device\Devices;
 use League\Bundle\OAuth2ServerBundle\Manager\ClientManagerInterface;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\Request;
@@ -16,6 +17,13 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * The token endpoint's side of {@see RefreshTokenRotation}: answers a refresh with a token that rotated moments ago
  * with the response already issued for it, and records every rotation the endpoint answers. Only for public clients
  * (our apps), which is what the grace is for.
+ *
+ * A refresh token that was used already and comes back outside that grace was copied: either the app or whoever took
+ * the token used it first, and the other one holds what followed. Nothing tells which, so the device the token
+ * belongs to is signed out with everything it was issued (OAuth 2.0 Security BCP 4.14.2), and the person signs in
+ * again. The token endpoint then refuses the request as it always did (`invalid_grant`). This also ends the sign-in
+ * of an app that sends the same token twice at the very same moment, which {@see RefreshTokenRotation} does not
+ * cover: apps refresh one at a time.
  */
 final readonly class RefreshTokenGrace
 {
@@ -28,6 +36,7 @@ final readonly class RefreshTokenGrace
         private IssuedTokens $tokens,
         private RefreshTokenRotation $rotation,
         private ClientManagerInterface $clients,
+        private Devices $devices,
     ) {
     }
 
@@ -47,6 +56,10 @@ final readonly class RefreshTokenGrace
 
         $response = $this->rotation->replay($presented, self::scopeOf($request));
         if (null === $response) {
+            if ($this->tokens->isRefreshTokenRevoked($presented->id)) {
+                $this->devices->signOutByAccessToken($presented->accessTokenId);
+            }
+
             return;
         }
         $request->attributes->remove(self::PRESENTED);

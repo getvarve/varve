@@ -12,7 +12,7 @@
         <form class="form" method="post" action="{{ path('app_resend_confirmation') }}" novalidate>
             <label class="field" for="email">
                 Email
-                <input type="email" id="email" name="email" value="{{ email }}" autocomplete="email" maxlength="320" required autofocus{% if errors.email is defined %} aria-invalid="true" aria-describedby="email-error"{% endif %}>
+                <input type="email" id="email" name="email" value="{{ email }}" autocomplete="email" maxlength="128" required autofocus{% if errors.email is defined %} aria-invalid="true" aria-describedby="email-error"{% endif %}>
                 {% if errors.email is defined %}<span class="field-error" id="email-error">{{ errors.email }}</span>{% endif %}
             </label>
 

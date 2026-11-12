@@ -13,13 +13,15 @@ use Lcobucci\JWT\UnencryptedToken;
 use Lcobucci\JWT\Validation\Constraint\SignedWith;
 use Lcobucci\JWT\Validation\Validator;
 use League\OAuth2\Server\CryptKey;
+use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
  * Reads the tokens this authorization server issued, as presented by a client: a refresh token (a ciphertext of the
  * server's encryption key, {@see TokenCrypt}) or an access token (a JWT signed with the server's private key). Only
  * what the server itself made is read: a refresh token that does not decrypt, or an access token whose signature does
- * not check out, is nothing. Expiry is not checked here.
+ * not check out, is nothing. Expiry is not checked here: an access token says when it expires, and what the database
+ * knows of a refresh token is asked separately.
  */
 final readonly class IssuedTokens
 {
@@ -28,7 +30,23 @@ final readonly class IssuedTokens
         #[Autowire('%env(resolve:OAUTH_PUBLIC_KEY)%')]
         private string $publicKey,
         private Connection $connection,
+        private ClockInterface $clock,
     ) {
+    }
+
+    /** Whether the refresh token was used or revoked. False for one the database no longer holds. */
+    public function isRefreshTokenRevoked(string $refreshTokenId): bool
+    {
+        return false !== $this->connection->fetchOne('SELECT 1 FROM oauth2_refresh_token WHERE identifier = :id AND revoked = true', ['id' => $refreshTokenId]);
+    }
+
+    /** Whether the refresh token can still be exchanged: neither used, revoked nor expired. */
+    public function isRefreshTokenLive(string $refreshTokenId): bool
+    {
+        return false !== $this->connection->fetchOne(
+            'SELECT 1 FROM oauth2_refresh_token WHERE identifier = :id AND revoked = false AND expiry > :now',
+            ['id' => $refreshTokenId, 'now' => $this->clock->now()->format('Y-m-d H:i:s')],
+        );
     }
 
     /** The id of the refresh token issued together with an access token, if any. */
@@ -97,7 +115,16 @@ final readonly class IssuedTokens
         }
 
         $user = $jwt->claims()->get('sub');
+        $expiresAt = $jwt->claims()->get('exp');
 
-        return new IssuedToken(IssuedToken::ACCESS_TOKEN, $id, $client, $id, '' === $user ? null : IssuedToken::userOf($user), IssuedToken::scopesOf($jwt->claims()->get('scopes')));
+        return new IssuedToken(
+            IssuedToken::ACCESS_TOKEN,
+            $id,
+            $client,
+            $id,
+            '' === $user ? null : IssuedToken::userOf($user),
+            IssuedToken::scopesOf($jwt->claims()->get('scopes')),
+            $expiresAt instanceof \DateTimeImmutable ? $expiresAt : null,
+        );
     }
 }
