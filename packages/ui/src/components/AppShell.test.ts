@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SIDEBAR_IDEAL, SIDEBAR_MAX, SIDEBAR_MIN, useSidebar } from '../composables/useSidebar';
 import AppShell from './AppShell.vue';
 
+const setGlassShapes = vi.fn((_shapes: unknown[]) => Promise.resolve(true));
+vi.mock('../backend', () => ({ setGlassShapes: (shapes: unknown[]) => setGlassShapes(shapes) }));
 vi.mock('../composables/useWorkspace', () => ({ useWorkspace: () => ({ refresh: () => Promise.resolve() }) }));
 vi.mock('../composables/useWorkspaceActions', () => ({ useWorkspaceActions: () => ({ newConnection: vi.fn() }) }));
 vi.mock('../composables/useUpdates', () => ({
@@ -40,6 +42,54 @@ describe('AppShell sidebar', () => {
     localStorage.clear();
     useSidebar().reload();
     document.body.innerHTML = '';
+    delete document.documentElement.dataset.glassShapes;
+    delete document.documentElement.dataset.windowInactive;
+    setGlassShapes.mockClear();
+    vi.restoreAllMocks();
+  });
+
+  it('tells the backend where the sidebar card is, only with Liquid Glass', async () => {
+    const box = { left: 8, top: 8, width: 202, height: 700 } as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(box);
+
+    // No Liquid Glass: nothing is reported.
+    const plain = shell();
+    await flushPromises();
+    expect(setGlassShapes).not.toHaveBeenCalled();
+    plain.unmount();
+
+    document.documentElement.dataset.glassShapes = '';
+    const wrapper = shell();
+    await flushPromises();
+    expect(setGlassShapes).toHaveBeenLastCalledWith([{ id: 'sidebar', x: 8, y: 8, width: 202, height: 700, radius: 18 }]);
+
+    // Hidden: the glass goes with it.
+    await wrapper.get('.side-head .icon-btn').trigger('click');
+    await flushPromises();
+    expect(setGlassShapes).toHaveBeenLastCalledWith([]);
+
+    // Shown again, then the user asks for less transparency: the glass is taken away once.
+    await wrapper.get('.titlebar .icon-btn').trigger('click');
+    await flushPromises();
+    expect(setGlassShapes).toHaveBeenLastCalledWith([expect.objectContaining({ id: 'sidebar' })]);
+    delete document.documentElement.dataset.glassShapes;
+    await flushPromises();
+    expect(setGlassShapes).toHaveBeenLastCalledWith([]);
+    const calls = setGlassShapes.mock.calls.length;
+    useSidebar().setWidth(260);
+    await flushPromises();
+    expect(setGlassShapes.mock.calls.length).toBe(calls);
+    wrapper.unmount();
+  });
+
+  it('marks the window as not in front while it has no focus', async () => {
+    const wrapper = shell();
+    await flushPromises();
+    globalThis.dispatchEvent(new FocusEvent('blur'));
+    expect(document.documentElement.dataset.windowInactive).toBe('');
+    globalThis.dispatchEvent(new FocusEvent('focus'));
+    expect(document.documentElement.dataset.windowInactive).toBeUndefined();
+    wrapper.unmount();
   });
 
   it('hides and shows the sidebar from the button and keeps the tree mounted', async () => {

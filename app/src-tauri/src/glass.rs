@@ -1,20 +1,29 @@
-//! Native glass behind the transparent main window.
+//! Native glass behind the main window.
 //!
-//! The window and its webview are transparent (`tauri.conf.json`); this puts
-//! the platform's own material behind them: Liquid Glass on macOS 26, the
-//! window vibrancy material on older macOS and Mica on Windows 11. Windows 10
-//! and Linux get none: Windows 10 Acrylic is an untinted blur that lags while
-//! dragging, and Linux has no material. The UI turns its surfaces translucent
-//! only for the glass that was actually applied, so a window without glass
-//! keeps the opaque design instead of showing the desktop through.
+//! The window and its webview are transparent (`tauri.conf.json`), and what
+//! lies behind them depends on the system:
+//!
+//! - macOS 26: the window paints an opaque background and each shape the UI
+//!   reports (the sidebar card) gets its own Liquid Glass view behind the
+//!   webview (`varve-glass`), so only that shape is glass;
+//! - older macOS: the window vibrancy material behind the whole window;
+//! - Windows 11: Mica behind the whole window;
+//! - Windows 10 and Linux: none. Windows 10 Acrylic is an untinted blur that
+//!   lags while dragging, and Linux has no material.
+//!
+//! The UI reads which one applies from `app_info` and turns translucent only
+//! where glass really is, so a window without glass keeps the opaque design
+//! instead of showing the desktop through.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 /// The glass behind the main window, as the UI reads it from `app_info`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Glass {
-    /// macOS 26 and newer: an `NSGlassEffectView`.
+    /// macOS 26 and newer: an `NSGlassEffectView` behind each shape the UI
+    /// reports with `set_glass_shapes`; the rest of the window is opaque.
     LiquidGlass,
     /// Older macOS: the window background vibrancy material.
     Vibrancy,
@@ -43,27 +52,89 @@ pub fn apply(window: &tauri::WebviewWindow, transparent: bool) -> Glass {
     glass
 }
 
+/// One glass shape as the UI reports it: CSS pixels from the top-left corner
+/// of the page.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlassShape {
+    id: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+}
+
+/// Shows exactly these glass shapes behind the page: the UI calls this when
+/// the sidebar card appears, moves, changes size or goes away. Returns whether
+/// the shapes were handed to the system; false where the window has no Liquid
+/// Glass, and the UI then keeps the card opaque.
+#[tauri::command]
+pub(crate) fn set_glass_shapes(
+    window: tauri::WebviewWindow,
+    window_glass: tauri::State<'_, WindowGlass>,
+    shapes: Vec<GlassShape>,
+) -> bool {
+    if window_glass.0 != Glass::LiquidGlass || window.label() != "main" {
+        return false;
+    }
+    let shapes: Vec<varve_glass_shape::Shape> = shapes
+        .into_iter()
+        .map(|shape| varve_glass_shape::Shape {
+            id: shape.id,
+            x: shape.x,
+            y: shape.y,
+            width: shape.width,
+            height: shape.height,
+            radius: shape.radius,
+        })
+        .collect();
+    let target = window.clone();
+    // The views live on the main thread; a command runs on a worker.
+    window
+        .app_handle()
+        .run_on_main_thread(move || {
+            varve_glass_shape::show(&target, &shapes);
+        })
+        .is_ok()
+}
+
+/// `varve-glass` on macOS; elsewhere the same names doing nothing, so the
+/// command above is one piece of code for every platform.
+#[cfg(target_os = "macos")]
+use varve_glass as varve_glass_shape;
+
+#[cfg(not(target_os = "macos"))]
+mod varve_glass_shape {
+    pub(super) struct Shape {
+        pub id: String,
+        pub x: f64,
+        pub y: f64,
+        pub width: f64,
+        pub height: f64,
+        pub radius: f64,
+    }
+
+    pub(super) fn show(_window: &tauri::WebviewWindow, _shapes: &[Shape]) -> bool {
+        false
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod platform {
     use super::Glass;
-    use window_vibrancy::{
-        Error, LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial,
-        NSVisualEffectState,
-    };
+    use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState};
 
     pub(super) fn apply(window: &tauri::WebviewWindow) -> Glass {
-        match window_vibrancy::apply_liquid_glass(
-            window,
-            LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular),
-        ) {
-            Ok(()) => return Glass::LiquidGlass,
-            // Before macOS 26: fall back to the classic material.
-            Err(Error::UnsupportedPlatformVersion(_)) => {}
-            Err(error) => {
-                tracing::warn!(?error, "could not apply Liquid Glass");
-                return Glass::None;
+        // macOS 26: glass only behind the shapes the UI reports, over a window that paints its
+        // own background again (a clear window would show the desktop through the glass).
+        if varve_glass::supported() {
+            if varve_glass::opaque_background(window) {
+                return Glass::LiquidGlass;
             }
+            tracing::warn!("could not give the window a background for Liquid Glass");
         }
+        // Before macOS 26: the classic material behind the whole window.
         match window_vibrancy::apply_vibrancy(
             window,
             NSVisualEffectMaterial::UnderWindowBackground,

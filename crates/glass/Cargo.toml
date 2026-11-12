@@ -1,0 +1,31 @@
+[package]
+name = "varve-glass"
+description = "Liquid Glass behind parts of Varve's window on macOS 26: one glass view per shape the UI reports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+tauri.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-foundation = "0.3"
+tracing.workspace = true
+
+# The workspace forbids unsafe code. The glass view is an AppKit class, so calling it is unsafe by
+# nature: like varve-sparkle, this crate may, and only in blocks that state why they are sound.
+# Everything else matches the workspace lints.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+undocumented_unsafe_blocks = "warn"

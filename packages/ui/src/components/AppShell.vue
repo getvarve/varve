@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink, RouterView } from 'vue-router';
+import { setGlassShapes } from '../backend';
 import { installExternalChanges } from '../composables/useExternalChanges';
 import { installQuitGuard } from '../composables/useQuitGuard';
 import { SIDEBAR_MAX, SIDEBAR_MIN, SIDEBAR_STEP, useSidebar } from '../composables/useSidebar';
@@ -70,6 +71,56 @@ function onDividerUp(event: PointerEvent): void {
 }
 
 const shell = ref<HTMLElement | null>(null);
+const card = ref<HTMLElement | null>(null);
+
+/** The sidebar card's corner radius, the same number as in the styles below. */
+const CARD_RADIUS = 18;
+
+/** Whether Liquid Glass lies behind single shapes of this window (macOS 26, `lib/glass.ts`). */
+function glassShapesOn(): boolean {
+  return globalThis.document?.documentElement.dataset.glassShapes !== undefined;
+}
+
+let glassWasOn = false;
+
+/**
+ * Tells the backend where the sidebar card is, so the system draws glass exactly behind it: after the card
+ * appears, moves, changes size or goes away. Without Liquid Glass it does nothing, apart from taking the glass
+ * away once when it was just switched off (the user asked for less transparency).
+ */
+function reportGlass(): void {
+  const on = glassShapesOn();
+  if (!on && !glassWasOn) return;
+  glassWasOn = on;
+  const el = card.value;
+  const shapes = [];
+  if (on && el && !sidebar.state.collapsed) {
+    const box = el.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) {
+      shapes.push({ id: 'sidebar', x: box.left, y: box.top, width: box.width, height: box.height, radius: CARD_RADIUS });
+    }
+  }
+  setGlassShapes(shapes).catch((error: unknown) => {
+    console.error('Could not place the glass behind the sidebar', error);
+  });
+}
+
+// A hidden card has no size for the observer to see change, and a drag should not wait for it.
+watch(
+  () => [sidebar.state.collapsed, sidebar.state.width],
+  () => void nextTick(reportGlass),
+);
+
+let cardSize: ResizeObserver | null = null;
+let glassMark: MutationObserver | null = null;
+
+/** The window lost or got the focus: the selected sidebar row is grey in a window that is not in front. */
+function onWindowFocus(event: FocusEvent): void {
+  const root = globalThis.document?.documentElement;
+  if (!root) return;
+  if (event.type === 'blur') root.dataset.windowInactive = '';
+  else delete root.dataset.windowInactive;
+}
 
 /** How many pixels the texts of the sidebar's rows are cut off by, for the row that lacks the most. */
 function cutOff(side: Element): number {
@@ -129,6 +180,20 @@ let unmounted = false;
 onMounted(() => {
   void workspace.refresh();
   globalThis.addEventListener('keydown', onShortcut);
+  globalThis.addEventListener('blur', onWindowFocus);
+  globalThis.addEventListener('focus', onWindowFocus);
+  globalThis.addEventListener('resize', reportGlass);
+  // The card changes size with the window and with the sidebar's width; the mark for Liquid Glass arrives once the
+  // backend has answered, and goes when the user asks for less transparency.
+  if (typeof ResizeObserver === 'function' && card.value) {
+    cardSize = new ResizeObserver(reportGlass);
+    cardSize.observe(card.value);
+  }
+  if (typeof MutationObserver === 'function') {
+    glassMark = new MutationObserver(reportGlass);
+    glassMark.observe(document.documentElement, { attributes: true, attributeFilter: ['data-glass-shapes'] });
+  }
+  reportGlass();
   installQuitGuard()
     .then((remove) => {
       // Unmounted before the guard was ready: remove its listeners at once.
@@ -159,6 +224,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   unmounted = true;
   globalThis.removeEventListener('keydown', onShortcut);
+  globalThis.removeEventListener('blur', onWindowFocus);
+  globalThis.removeEventListener('focus', onWindowFocus);
+  globalThis.removeEventListener('resize', reportGlass);
+  cardSize?.disconnect();
+  glassMark?.disconnect();
   removeQuitGuard?.();
   removeUpdates?.();
   removeExternalChanges?.();
@@ -175,6 +245,7 @@ onBeforeUnmount(() => {
     <!-- Hidden, not removed: the tree keeps what is expanded and where it was scrolled. -->
     <aside
       v-show="!sidebar.state.collapsed"
+      ref="card"
       class="side"
       aria-label="Sidebar"
     >
@@ -367,6 +438,26 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 
+/* With Liquid Glass the system draws the card: glass lies exactly behind it, under the clear page, so the card
+   paints no fill, edge or shadow of its own. The window's own background shows in the gaps around it. */
+:root[data-glass-shapes] .side {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* The page is clear there, so the rest of the shell paints itself. */
+:root[data-glass-shapes] .titlebar {
+  background: var(--ground);
+}
+
+:root[data-glass-shapes] .sidebar-foot {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-top-color: transparent;
+}
+
 /* Without the sidebar the title strip starts under the macOS window buttons. */
 .shell.collapsed .titlebar {
   padding-left: 84px;
@@ -406,7 +497,6 @@ onBeforeUnmount(() => {
   width: 2px;
   border-radius: 1px;
   background: transparent;
-  transition: background-color var(--dur-fast) var(--ease-out);
 }
 
 .divider:hover::after,
@@ -486,14 +576,14 @@ onBeforeUnmount(() => {
   outline-offset: -2px;
 }
 
-/* The selected row is the system's rounded fill: grey while the content has focus, the system accent colour with
+/* The selected row is the system's rounded fill: grey while the content has focus or the window is not in front, the system accent colour with
    its own text colour while the sidebar has focus. The brand colour is only the fallback where the webview does not
    know the system accent. */
 .menu-item.router-link-exact-active {
   background: var(--row-selected);
 }
 
-.side:focus-within .menu-item.router-link-exact-active {
+:root:not([data-window-inactive]) .side:focus-within .menu-item.router-link-exact-active {
   background: var(--accent);
   background: AccentColor;
   color: #FFFFFF;

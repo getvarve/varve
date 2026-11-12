@@ -1231,6 +1231,7 @@ async fn redis_publish(
 /// Every command of the app.
 pub(crate) fn handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        crate::glass::set_glass_shapes,
         crate::updates::update_info,
         crate::updates::update_check,
         crate::updates::update_download,

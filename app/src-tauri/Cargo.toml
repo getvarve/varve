@@ -80,6 +80,8 @@ window-vibrancy = "0.8.1"
 # (crates/sparkle holds the Objective-C calls).
 [target.'cfg(target_os = "macos")'.dependencies]
 varve-sparkle = { path = "../../crates/sparkle" }
+# Liquid Glass behind the sidebar card on macOS 26 (src/glass.rs; crates/glass holds the AppKit calls).
+varve-glass = { path = "../../crates/glass" }
 
 # Windows and Linux: the Tauri updater with latest.json from the release.
 [target.'cfg(not(target_os = "macos"))'.dependencies]
