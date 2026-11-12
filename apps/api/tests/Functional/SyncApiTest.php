@@ -70,12 +70,13 @@ final class SyncApiTest extends DatabaseTestCase
             self::assertSame(1, $record['version'] ?? null);
             self::assertFalse($record['deleted'] ?? null);
             self::assertEquals(json_decode(json_encode($payloads[$id], \JSON_THROW_ON_ERROR | \JSON_PRESERVE_ZERO_FRACTION), true), $record['payload'] ?? null);
+            self::assertSame($kimId, $record['createdBy'] ?? null);
             self::assertSame($kimId, $record['updatedBy'] ?? null);
             self::assertSame($device, $record['updatedByDevice'] ?? null);
             self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/', self::string($record['createdAt'] ?? null));
             self::assertSame($record['createdAt'], $record['updatedAt'] ?? null);
         }
-        self::assertSame(['id', 'kind', 'version', 'deleted', 'payload', 'createdAt', 'updatedAt', 'updatedBy', 'updatedByDevice'], array_keys($page['changes'][0]));
+        self::assertSame(['id', 'kind', 'version', 'deleted', 'payload', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'updatedByDevice'], array_keys($page['changes'][0]));
 
         self::assertSame([], $this->pull($this->path('changes'), $this->kim, $page['cursor'])['changes'], 'Nothing new after the cursor.');
     }
@@ -98,7 +99,7 @@ final class SyncApiTest extends DatabaseTestCase
         self::assertSame([$favourite, $preference, $override], array_column($page['changes'], 'id'));
         self::assertSame(['favourite', 'preference', 'override'], array_column($page['changes'], 'kind'));
         self::assertSame(['editor' => ['fontSize' => 13, 'theme' => 'dark']], $page['changes'][1]['payload'] ?? null);
-        self::assertSame(['id', 'kind', 'version', 'deleted', 'payload', 'createdAt', 'updatedAt', 'updatedByDevice'], array_keys($page['changes'][0]), 'A user\'s own record does not say who wrote it.');
+        self::assertSame(['id', 'kind', 'version', 'deleted', 'payload', 'createdAt', 'updatedAt', 'updatedByDevice'], array_keys($page['changes'][0]), 'A user\'s own record does not say who created or wrote it.');
 
         self::assertSame([], $this->pull($this->path('changes'), $this->kim)['changes'], 'The organization\'s feed is another feed.');
     }
@@ -310,6 +311,115 @@ final class SyncApiTest extends DatabaseTestCase
         self::assertResponseStatusCodeSame(404);
     }
 
+    /**
+     * Until teams exist, being a member of an organization is not enough to sync it: only its personal owner can.
+     * A member row for Lisa in Kim's organization, which no API can make yet, opens nothing.
+     */
+    public function testAMemberOfSomeoneElsesPersonalOrganizationCannotSyncIt(): void
+    {
+        $id = self::newId();
+        $this->push($this->path('push'), [self::upsert($id, 'query', self::savedQuery($id))], $this->kim);
+        $lisa = $this->userHeaders(self::LISA);
+        $this->connection()->insert('organization_member', [
+            'id' => Uuid::v7()->toRfc4122(), 'organization_id' => $this->organization, 'user_id' => $this->userId(self::LISA),
+            'role' => 'owner', 'joined_at' => '2026-11-12 00:00:00',
+        ]);
+
+        $this->client->request('GET', $this->path('changes'), server: $lisa);
+        self::assertResponseStatusCodeSame(404);
+        $this->client->jsonRequest('POST', $this->path('push'), ['changes' => [self::upsert($id, 'query', self::savedQuery($id, ['name' => 'Lisa was here']), 1)]], $lisa);
+        self::assertResponseStatusCodeSame(404);
+        $this->client->request('GET', $this->path('records/'.$id.'/revisions'), server: $lisa);
+        self::assertResponseStatusCodeSame(404);
+
+        self::assertSame(1, $this->countRows("SELECT COUNT(*) FROM record WHERE version = 1 AND payload->>'name' = 'Open orders'"), 'Kim\'s record is as it was.');
+        self::assertCount(1, $this->pull($this->path('changes'), $this->kim)['changes'], 'And Kim still syncs it.');
+    }
+
+    /**
+     * Requests for an organization that is not the user's are counted like any other, so they cannot be made without
+     * end. In tests: 30 pulls and 30 pushes per user (config/packages/rate_limiter.yaml).
+     */
+    public function testRequestsForSomeoneElsesOrganizationCountAgainstTheUser(): void
+    {
+        $lisa = $this->userHeaders(self::LISA);
+
+        for ($i = 0; $i < 30; ++$i) {
+            $this->client->request('GET', $this->path(0 === $i % 2 ? 'changes' : 'records/'.self::newId().'/revisions'), server: $lisa);
+            self::assertResponseStatusCodeSame(404);
+        }
+        $this->client->request('GET', $this->path('changes'), server: $lisa);
+        self::assertResponseStatusCodeSame(429);
+        $this->client->request('GET', $this->path('records/'.self::newId().'/revisions'), server: $lisa);
+        self::assertResponseStatusCodeSame(429);
+
+        for ($i = 0; $i < 30; ++$i) {
+            $this->client->jsonRequest('POST', $this->path('push'), ['changes' => []], $lisa);
+            self::assertResponseStatusCodeSame(404);
+        }
+        $this->client->jsonRequest('POST', $this->path('push'), ['changes' => []], $lisa);
+        self::assertResponseStatusCodeSame(429);
+
+        $this->pull($this->path('changes'), $this->kim);
+        $this->push($this->path('push'), [], $this->kim);
+    }
+
+    /**
+     * A page holds the records that fit in 4 MiB of payload, whatever the limit: 20 saved queries of 250 KiB come in
+     * pages of 16 and 4, each record once.
+     */
+    public function testAPageEndsAfterFourMebibytesOfPayload(): void
+    {
+        $ids = [];
+        $changes = [];
+        for ($i = 0; $i < 20; ++$i) {
+            $ids[] = $id = self::newId();
+            $changes[] = self::upsert($id, 'query', self::savedQuery($id, ['sql' => str_repeat('x', 250 * 1024)]));
+        }
+        self::assertSame(array_fill(0, 20, 'accepted'), array_column($this->push($this->path('push'), $changes, $this->kim), 'status'));
+
+        $first = $this->pull($this->path('changes'), $this->kim, limit: 1000);
+        self::assertCount(16, $first['changes'], 'The record that would take the page past 4 MiB starts the next page.');
+        self::assertTrue($first['hasMore']);
+        $all = $this->pullAll($this->path('changes'), $this->kim, limit: 1000);
+
+        self::assertSame(2, $all['pages']);
+        self::assertSame($ids, array_column($all['changes'], 'id'));
+        self::assertSame([], $this->pull($this->path('changes'), $this->kim, $all['cursor'])['changes']);
+
+        $single = $this->pull($this->path('changes'), $this->kim, limit: 1);
+        self::assertSame([$ids[0]], array_column($single['changes'], 'id'));
+    }
+
+    public function testARecordKeepsItsCreatorAndItsCreation(): void
+    {
+        $id = self::newId();
+        $this->push($this->path('push'), [self::upsert($id, 'folder', self::folderRecord($id))], $this->kim);
+        $created = $this->pull($this->path('changes'), $this->kim)['changes'][0];
+        $this->connection()->executeStatement("UPDATE record SET created_at = '2026-01-01 00:00:00'");
+
+        // Another device changes it, deletes it and brings it back.
+        $desktop = $this->userHeaders(self::KIM, 'Desktop');
+        $results = $this->push($this->path('push'), [
+            self::upsert($id, 'folder', self::folderRecord($id, ['name' => 'Renamed']), 1),
+            self::delete($id, 2),
+            self::upsert($id, 'folder', self::folderRecord($id, ['name' => 'Back']), 3),
+        ], $desktop);
+        self::assertSame(['accepted', 'accepted', 'accepted'], array_column($results, 'status'));
+
+        $record = $this->pull($this->path('changes'), $this->kim)['changes'][0];
+        self::assertSame(4, $record['version'] ?? null);
+        self::assertSame($this->userId(self::KIM), $record['createdBy'] ?? null);
+        self::assertSame('2026-01-01T00:00:00+00:00', $record['createdAt'] ?? null);
+        self::assertNotSame($created['updatedByDevice'] ?? null, $record['updatedByDevice'] ?? null);
+
+        // The creator is gone: the record says so, as it does for the last writer.
+        $this->connection()->executeStatement('UPDATE record SET created_by_id = NULL');
+        $orphan = $this->pull($this->path('changes'), $this->kim)['changes'][0];
+        self::assertArrayHasKey('createdBy', $orphan);
+        self::assertNull($orphan['createdBy']);
+    }
+
     public function testATokenWithoutTheSyncScopeIsRefused(): void
     {
         $accountOnly = $this->headersWithScope(self::KIM, 'account');
@@ -342,6 +452,12 @@ final class SyncApiTest extends DatabaseTestCase
         foreach (['0', '1001', 'ten'] as $limit) {
             $this->client->request('GET', $this->path('changes').'?limit='.$limit, server: $this->kim);
             self::assertResponseStatusCodeSame(422, $limit);
+        }
+
+        // A parameter given as a list is not a cursor or a number at all.
+        foreach (['cursor[]='.$organizationCursor, 'limit[]=10', 'cursor[a]=b&limit=10'] as $query) {
+            $this->client->request('GET', $this->path('changes').'?'.$query, server: $this->kim);
+            self::assertResponseStatusCodeSame(422, $query);
         }
 
         // A cursor past what the server has (a server restored from an older backup) asks for a full pull.
@@ -489,8 +605,7 @@ final class SyncApiTest extends DatabaseTestCase
         $this->client->getCookieJar()->clear();
         $crawler = $this->client->request('GET', '/login');
         $this->client->submit($crawler->selectButton('Sign in')->form(['_username' => $email, '_password' => 'correct-horse-battery-staple']));
-        $this->client->request('GET', $this->desktopAuthorizeUrl($verifier, ['scope' => $scope]));
-        $code = $this->codeFrom((string) $this->client->getResponse()->headers->get('Location'));
+        $code = $this->codeFrom($this->authorizedCallback($this->desktopAuthorizeUrl($verifier, ['scope' => $scope])));
         $this->client->request('POST', '/oauth/token', $this->codeExchange($code, $verifier));
         self::assertResponseIsSuccessful();
         $this->client->getCookieJar()->clear();

@@ -10,8 +10,9 @@ use App\Security\Scope;
 use App\State\RecordRevisionsProvider;
 
 /**
- * The earlier versions of a saved query (design 8.11), newest first: `{"revisions": [...]}`, the last 50. A record of
- * another kind has none; a record the organization does not have is a 404. The wire format is in docs/sync.md.
+ * The earlier versions of a saved query (design 8.11), newest first: `{"revisions": [...]}`, as many as the server
+ * keeps per record (the last 50, and at most 8 MiB of them, unless it is set otherwise). A record of another kind has
+ * none; a record the organization does not have is a 404. The wire format is in docs/sync.md.
  */
 #[ApiResource(
     shortName: 'RecordRevisions',

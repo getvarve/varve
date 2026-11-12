@@ -39,8 +39,9 @@ final readonly class RecordRevisionsProvider implements ProviderInterface
         if (!$request instanceof Request) {
             throw new \LogicException('Revisions need their request.');
         }
+        $this->limits->pullBy($user);
         $scope = $this->scopes->organization($user, $request->attributes->get('organizationId'));
-        $this->limits->pull($user, $scope);
+        $this->limits->pullFrom($scope);
 
         $record = $request->attributes->get('recordId');
         $parameters = ['organization' => $scope->owner->toRfc4122(), 'record' => $record];

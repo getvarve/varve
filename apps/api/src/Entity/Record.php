@@ -24,6 +24,7 @@ use Symfony\Component\Uid\Uuid;
 #[ORM\Entity(readOnly: true)]
 #[ORM\UniqueConstraint(columns: ['organization_id', 'change_seq'])]
 #[ORM\Index(columns: ['deleted_at'])]
+#[ORM\Index(columns: ['organization_id', 'payload_bytes'], options: ['where' => '(deleted_at IS NULL)'])]
 class Record
 {
     /** The longest name a folder, connection or saved query may have, as in the desktop app. */
@@ -45,6 +46,13 @@ class Record
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $payload = null;
 
+    /**
+     * The size of the payload as it is stored, in bytes; 0 for a tombstone. Kept beside the payload so the storage an
+     * organization uses and the size of a page of a pull are known without reading any payload.
+     */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $payloadBytes = 0;
+
     #[ORM\Column]
     private int $version;
 
@@ -53,6 +61,11 @@ class Record
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
+
+    /** Who created the record; null once that user is gone. Bringing a deleted record back keeps its creator. */
+    #[ORM\ManyToOne]
+    #[ORM\JoinColumn(onDelete: 'SET NULL')]
+    private ?User $createdBy = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;

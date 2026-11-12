@@ -36,20 +36,27 @@ final readonly class SyncChangesProvider implements ProviderInterface
         if (!$request instanceof Request) {
             throw new \LogicException('A pull needs its request.');
         }
+        $this->limits->pullBy($user);
         $scope = 'sync_changes_user' === $operation->getName()
             ? $this->scopes->user($user)
             : $this->scopes->organization($user, $request->attributes->get('organizationId'));
-        $this->limits->pull($user, $scope);
+        $this->limits->pullFrom($scope);
 
+        // Checked here as well as by the parameters of the operation, so the answer does not depend on those: a
+        // parameter can also arrive as a list (?cursor[]=x).
+        $query = $request->query->all();
         $cursor = null;
-        $text = $request->query->get('cursor');
-        if (null !== $text) {
-            $cursor = Cursor::decode((string) $text, $scope);
+        if (\array_key_exists('cursor', $query)) {
+            $cursor = \is_string($query['cursor']) ? Cursor::decode($query['cursor'], $scope) : null;
             if (null === $cursor) {
                 throw Violation::on('cursor', 'This is not a cursor of these records.');
             }
         }
+        $limit = $query['limit'] ?? (string) RecordPull::DEFAULT_LIMIT;
+        if (!\is_string($limit) || 1 !== preg_match('/^\d{1,4}$/', $limit) || (int) $limit < 1 || (int) $limit > RecordPull::MAX_LIMIT) {
+            throw Violation::on('limit', \sprintf('limit must be a whole number from 1 to %d.', RecordPull::MAX_LIMIT));
+        }
 
-        return SyncJson::response($this->pull->pull($scope, $cursor, (int) $request->query->get('limit', (string) RecordPull::DEFAULT_LIMIT)));
+        return SyncJson::response($this->pull->pull($scope, $cursor, (int) $limit));
     }
 }

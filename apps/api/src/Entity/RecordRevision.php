@@ -11,7 +11,8 @@ use Symfony\Component\Uid\Uuid;
 
 /**
  * An earlier version of a saved query (design 8.11): every accepted change to one keeps the payload it replaced, with
- * who wrote it and when. The last {@see self::KEEP} per record are kept; they go with the record.
+ * who wrote it and when. The newest per record are kept, up to a number of revisions and a number of bytes that the
+ * server sets (VARVE_SYNC_MAX_REVISIONS, 50 by design, and VARVE_SYNC_MAX_REVISION_BYTES); they go with the record.
  *
  * Written and read by App\Sync in SQL, never through the ORM; mapped here for the schema.
  */
@@ -19,8 +20,6 @@ use Symfony\Component\Uid\Uuid;
 #[ORM\UniqueConstraint(columns: ['organization_id', 'record_id', 'version'])]
 class RecordRevision
 {
-    public const int KEEP = 50;
-
     #[ORM\Id]
     #[ORM\Column(type: UuidType::NAME)]
     private Uuid $id;
@@ -37,6 +36,10 @@ class RecordRevision
     /** @var array<mixed> */
     #[ORM\Column(type: Types::JSON)]
     private array $payload;
+
+    /** The size of the payload as it is stored, in bytes. */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $payloadBytes = 0;
 
     /** When that version was written. */
     #[ORM\Column]

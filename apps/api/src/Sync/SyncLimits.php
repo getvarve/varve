@@ -28,19 +28,42 @@ final readonly class SyncLimits
     ) {
     }
 
-    /** @throws TooManyRequestsHttpException */
-    public function push(User $user, SyncScope $scope): void
+    /**
+     * Counts a push against its user. Called before the organization in the address is looked up, so requests for
+     * organizations that are not the user's count as well.
+     *
+     * @throws TooManyRequestsHttpException
+     */
+    public function pushBy(User $user): void
     {
         $this->consume($this->pushPerUser, $user->getId()->toRfc4122());
+    }
+
+    /**
+     * Counts a push against its organization; a user's own records have the limit per user only.
+     *
+     * @throws TooManyRequestsHttpException
+     */
+    public function pushTo(SyncScope $scope): void
+    {
         if ($scope->isOrganization()) {
             $this->consume($this->pushPerOrganization, $scope->owner->toRfc4122());
         }
     }
 
-    /** @throws TooManyRequestsHttpException */
-    public function pull(User $user, SyncScope $scope): void
+    /**
+     * Counts a pull against its user, as {@see self::pushBy()} does a push.
+     *
+     * @throws TooManyRequestsHttpException
+     */
+    public function pullBy(User $user): void
     {
         $this->consume($this->pullPerUser, $user->getId()->toRfc4122());
+    }
+
+    /** @throws TooManyRequestsHttpException */
+    public function pullFrom(SyncScope $scope): void
+    {
         if ($scope->isOrganization()) {
             $this->consume($this->pullPerOrganization, $scope->owner->toRfc4122());
         }

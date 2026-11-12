@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Sync;
 
-use App\Entity\RecordRevision;
 use App\Enum\RecordKind;
 use Doctrine\DBAL\Connection;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -26,7 +26,9 @@ use Symfony\Component\Uid\Uuid;
  * - an upsert or delete with the record's current version writes the next version; with any other version it is a
  *   conflict, answered with the server's copy (null when the server has no such record);
  * - a delete leaves a tombstone without payload; deleting a tombstone again with its version changes nothing;
- * - a change that creates or revives a record past the scope's limit of live records is rejected.
+ * - a change that creates or revives a record past the scope's limit of live records is rejected;
+ * - a change that makes a record larger (or creates or revives one) is rejected when the payloads of the scope's live
+ *   records would then pass the scope's limit of bytes. A change that makes a record smaller always goes.
  */
 final readonly class RecordPush
 {
@@ -37,6 +39,14 @@ final readonly class RecordPush
         private int $maxRecords,
         #[Autowire('%env(int:VARVE_SYNC_MAX_USER_RECORDS)%')]
         private int $maxUserRecords,
+        #[Autowire('%env(int:VARVE_SYNC_MAX_BYTES)%')]
+        private int $maxBytes,
+        #[Autowire('%env(int:VARVE_SYNC_MAX_USER_BYTES)%')]
+        private int $maxUserBytes,
+        #[Autowire('%env(int:VARVE_SYNC_MAX_REVISIONS)%')]
+        private int $maxRevisions,
+        #[Autowire('%env(int:VARVE_SYNC_MAX_REVISION_BYTES)%')]
+        private int $maxRevisionBytes,
     ) {
     }
 
@@ -44,15 +54,24 @@ final readonly class RecordPush
      * @param list<Change|Rejection> $changes
      *
      * @return list<array<string, mixed>> one result per change, in the same order
+     *
+     * @throws NotFoundHttpException when the owner of the scope is gone (deleted while the request was on its way)
      */
     public function push(SyncScope $scope, array $changes, Uuid $user, ?Uuid $device): array
     {
         return $this->connection->transactional(function () use ($scope, $changes, $user, $device): array {
-            $seq = RecordRows::int($this->connection->fetchOne(
+            $locked = $this->connection->fetchOne(
                 \sprintf('SELECT record_seq FROM %s WHERE id = :owner FOR NO KEY UPDATE', $scope->ownerTable),
                 ['owner' => $scope->owner->toRfc4122()],
-            ));
-            $live = null;
+            );
+            if (false === $locked) {
+                throw $scope->notFound();
+            }
+            $seq = RecordRows::int($locked);
+            /** @var array{records: int, bytes: int}|null $usage what the scope's live records add up to, once a change needs it */
+            $usage = null;
+            $maxRecords = $scope->isOrganization() ? $this->maxRecords : $this->maxUserRecords;
+            $maxBytes = $scope->isOrganization() ? $this->maxBytes : $this->maxUserBytes;
             $now = $this->clock->now()->format('Y-m-d H:i:s');
             $writer = ['owner' => $scope->owner->toRfc4122(), 'now' => $now, 'device' => $device?->toRfc4122(), 'user' => $user->toRfc4122()];
 
@@ -66,6 +85,7 @@ final readonly class RecordPush
                 $current = $this->current($scope, $change->id);
                 $version = null === $current ? null : RecordRows::int($current['version']);
                 $tombstone = null !== $current && null !== $current['deleted_at'];
+                $bytesBefore = null === $current ? 0 : RecordRows::int($current['payload_bytes']);
 
                 if ($change->isDelete()) {
                     if (null === $current) {
@@ -76,9 +96,9 @@ final readonly class RecordPush
                         $results[] = self::accepted($change, $version);
                     } else {
                         $this->keepRevision($scope, $change->id, $current);
-                        $this->write($scope, 'payload = NULL, deleted_at = :now', $change, $writer + ['seq' => ++$seq]);
-                        if (null !== $live) {
-                            --$live;
+                        $this->write($scope, 'payload = NULL, payload_bytes = 0, deleted_at = :now', $change, $writer + ['seq' => ++$seq]);
+                        if (null !== $usage) {
+                            $usage = ['records' => $usage['records'] - 1, 'bytes' => $usage['bytes'] - $bytesBefore];
                         }
                         $results[] = self::accepted($change, $version + 1);
                     }
@@ -93,25 +113,32 @@ final readonly class RecordPush
                     $results[] = new Rejection($change->id, Rejection::INVALID, \sprintf('This record is a %s; its kind cannot change.', self::string($current['kind'])), 'kind')->toArray();
                     continue;
                 }
-                if (null === $current || $tombstone) {
-                    $live ??= $this->liveCount($scope);
-                    $limit = $scope->isOrganization() ? $this->maxRecords : $this->maxUserRecords;
-                    if ($live >= $limit) {
-                        $results[] = new Rejection($change->id, Rejection::RECORD_LIMIT, \sprintf('There can be at most %d records; delete some first.', $limit))->toArray();
+                $bytes = \strlen((string) $change->payload);
+                $adds = null === $current || $tombstone;
+                if ($adds || $bytes > $bytesBefore) {
+                    $usage ??= $this->usage($scope);
+                    if ($adds && $usage['records'] >= $maxRecords) {
+                        $results[] = new Rejection($change->id, Rejection::RECORD_LIMIT, \sprintf('There can be at most %d records; delete some first.', $maxRecords), limit: $maxRecords)->toArray();
                         continue;
                     }
-                    ++$live;
+                    if ($usage['bytes'] - $bytesBefore + $bytes > $maxBytes) {
+                        $results[] = new Rejection($change->id, Rejection::STORAGE_LIMIT, \sprintf('The records can hold at most %d bytes together; make some smaller or delete some first.', $maxBytes), limit: $maxBytes)->toArray();
+                        continue;
+                    }
+                }
+                if (null !== $usage) {
+                    $usage = ['records' => $usage['records'] + ($adds ? 1 : 0), 'bytes' => $usage['bytes'] - $bytesBefore + $bytes];
                 }
 
                 if (null === $current) {
                     $this->connection->executeStatement(
                         \sprintf(
-                            'INSERT INTO %s (%s, id, kind, payload, version, change_seq, created_at, updated_at, updated_device_id%s)
-                             VALUES (:owner, :id, :kind, CAST(:payload AS JSON), 1, :seq, :now, :now, :device%s)',
+                            'INSERT INTO %s (%s, id, kind, payload, payload_bytes, version, change_seq, created_at, updated_at, updated_device_id%s)
+                             VALUES (:owner, :id, :kind, CAST(:payload AS JSON), :bytes, 1, :seq, :now, :now, :device%s)',
                             $scope->table, $scope->ownerColumn,
-                            $scope->recordsAuthor ? ', updated_by_id' : '', $scope->recordsAuthor ? ', :user' : '',
+                            $scope->recordsAuthor ? ', created_by_id, updated_by_id' : '', $scope->recordsAuthor ? ', :user, :user' : '',
                         ),
-                        self::only($writer + ['id' => $change->id, 'kind' => $change->kind?->value, 'payload' => $change->payload, 'seq' => ++$seq], $scope),
+                        self::only($writer + ['id' => $change->id, 'kind' => $change->kind?->value, 'payload' => $change->payload, 'bytes' => $bytes, 'seq' => ++$seq], $scope),
                     );
                     $results[] = self::accepted($change, 1);
                     continue;
@@ -120,7 +147,7 @@ final readonly class RecordPush
                 if (!$tombstone) {
                     $this->keepRevision($scope, $change->id, $current);
                 }
-                $this->write($scope, 'payload = CAST(:payload AS JSON), deleted_at = NULL', $change, $writer + ['payload' => $change->payload, 'seq' => ++$seq]);
+                $this->write($scope, 'payload = CAST(:payload AS JSON), payload_bytes = :bytes, deleted_at = NULL', $change, $writer + ['payload' => $change->payload, 'bytes' => $bytes, 'seq' => ++$seq]);
                 $results[] = self::accepted($change, $version + 1);
             }
 
@@ -165,7 +192,8 @@ final readonly class RecordPush
     }
 
     /**
-     * Keeps the payload a change to a saved query replaces, and the last {@see RecordRevision::KEEP} of them.
+     * Keeps the payload a change to a saved query replaces, then drops the oldest revisions of the record past the
+     * number and the bytes a record may keep. The newest revision always stays.
      *
      * @param array<string, mixed> $current
      */
@@ -174,27 +202,40 @@ final readonly class RecordPush
         if (!$scope->isOrganization() || RecordKind::tryFrom(self::string($current['kind']))?->keepsRevisions() !== true) {
             return;
         }
-        $parameters = ['revision' => Uuid::v7()->toRfc4122(), 'owner' => $scope->owner->toRfc4122(), 'id' => $id];
+        $record = ['owner' => $scope->owner->toRfc4122(), 'id' => $id];
         $this->connection->executeStatement(
-            'INSERT INTO record_revision (id, organization_id, record_id, version, payload, updated_at, updated_by_id, updated_device_id)
-             SELECT :revision, organization_id, id, version, payload, updated_at, updated_by_id, updated_device_id
+            'INSERT INTO record_revision (id, organization_id, record_id, version, payload, payload_bytes, updated_at, updated_by_id, updated_device_id)
+             SELECT :revision, organization_id, id, version, payload, payload_bytes, updated_at, updated_by_id, updated_device_id
              FROM record WHERE organization_id = :owner AND id = :id',
-            $parameters,
+            $record + ['revision' => Uuid::v7()->toRfc4122()],
         );
         $this->connection->executeStatement(
-            'DELETE FROM record_revision WHERE organization_id = :owner AND record_id = :id AND version <= (
-                SELECT version FROM record_revision WHERE organization_id = :owner AND record_id = :id ORDER BY version DESC OFFSET :keep LIMIT 1
+            'DELETE FROM record_revision WHERE organization_id = :owner AND record_id = :id AND version IN (
+                SELECT version FROM (
+                    SELECT version, ROW_NUMBER() OVER (ORDER BY version DESC) AS position, SUM(payload_bytes) OVER (ORDER BY version DESC) AS bytes
+                    FROM record_revision WHERE organization_id = :owner AND record_id = :id
+                ) newest_first WHERE position > :revisions OR (position > 1 AND bytes > :bytes)
              )',
-            ['owner' => $parameters['owner'], 'id' => $id, 'keep' => RecordRevision::KEEP],
+            $record + ['revisions' => $this->maxRevisions, 'bytes' => $this->maxRevisionBytes],
         );
     }
 
-    private function liveCount(SyncScope $scope): int
+    /**
+     * How many live records the scope holds and the bytes of their payloads.
+     *
+     * @return array{records: int, bytes: int}
+     */
+    private function usage(SyncScope $scope): array
     {
-        return RecordRows::int($this->connection->fetchOne(
-            \sprintf('SELECT COUNT(*) FROM %s WHERE %s = :owner AND deleted_at IS NULL', $scope->table, $scope->ownerColumn),
+        $usage = $this->connection->fetchAssociative(
+            \sprintf('SELECT COUNT(*) AS records, COALESCE(SUM(payload_bytes), 0) AS bytes FROM %s WHERE %s = :owner AND deleted_at IS NULL', $scope->table, $scope->ownerColumn),
             ['owner' => $scope->owner->toRfc4122()],
-        ));
+        );
+        if (false === $usage) {
+            throw new \UnexpectedValueException('Expected the usage of a scope from the database.');
+        }
+
+        return ['records' => RecordRows::int($usage['records']), 'bytes' => RecordRows::int($usage['bytes'])];
     }
 
     /** @return array{id: string, status: 'accepted', version: int} */

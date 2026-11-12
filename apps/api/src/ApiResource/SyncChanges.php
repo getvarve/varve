@@ -34,7 +34,7 @@ use Symfony\Component\Validator\Constraints as Assert;
                 ),
                 'limit' => new QueryParameter(
                     schema: ['type' => 'integer', 'minimum' => 1, 'maximum' => RecordPull::MAX_LIMIT, 'default' => RecordPull::DEFAULT_LIMIT],
-                    description: 'Records per page at most; a page also ends after 4 MiB of payload.',
+                    description: 'Records per page at most; a page also holds no more than fit in 4 MiB of payload.',
                     constraints: [new Assert\Regex('/^\d{1,4}$/', message: 'limit must be a whole number.'), new Assert\Range(min: 1, max: RecordPull::MAX_LIMIT)],
                 ),
             ],
@@ -53,7 +53,7 @@ use Symfony\Component\Validator\Constraints as Assert;
                 ),
                 'limit' => new QueryParameter(
                     schema: ['type' => 'integer', 'minimum' => 1, 'maximum' => RecordPull::MAX_LIMIT, 'default' => RecordPull::DEFAULT_LIMIT],
-                    description: 'Records per page at most; a page also ends after 4 MiB of payload.',
+                    description: 'Records per page at most; a page also holds no more than fit in 4 MiB of payload.',
                     constraints: [new Assert\Regex('/^\d{1,4}$/', message: 'limit must be a whole number.'), new Assert\Range(min: 1, max: RecordPull::MAX_LIMIT)],
                 ),
             ],

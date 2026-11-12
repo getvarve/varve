@@ -6,6 +6,7 @@ namespace App\Sync;
 
 use App\Enum\RecordKind;
 use App\Enum\UserRecordKind;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Uid\Uuid;
 
 /**
@@ -47,6 +48,12 @@ final readonly class SyncScope
     public function kind(string $name): RecordKind|UserRecordKind|null
     {
         return $this->isOrganization() ? RecordKind::tryFrom($name) : UserRecordKind::tryFrom($name);
+    }
+
+    /** The 404 for a scope whose owner is gone: the account or organization was deleted while a request was on its way. */
+    public function notFound(): NotFoundHttpException
+    {
+        return new NotFoundHttpException($this->isOrganization() ? 'Organization not found.' : 'User not found.');
     }
 
     /** What a cursor of this scope is bound to, so it cannot be used for another. */

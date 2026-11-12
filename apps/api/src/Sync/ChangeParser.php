@@ -25,7 +25,7 @@ final class ChangeParser
     public const int MAX_PAYLOAD_BYTES = 262144;
     /** A whole push; split a larger one. */
     public const int MAX_BODY_BYTES = 8388608;
-    /** How deep objects and lists may nest inside a payload. */
+    /** How many levels of objects and lists may nest below a payload (the payload itself is level 0). */
     public const int MAX_DEPTH = 32;
     /** 2^63: numbers must lie in the range of a signed 64-bit integer, or they would not come back as sent. */
     private const float MAX_NUMBER = 9.2233720368547758E18;
@@ -40,11 +40,15 @@ final class ChangeParser
     public static function parse(string $body, SyncScope $scope): array
     {
         if (\strlen($body) > self::MAX_BODY_BYTES) {
-            throw new HttpException(413, \sprintf('A push can be at most %d bytes; send the changes in more than one push.', self::MAX_BODY_BYTES));
+            throw self::bodyTooLarge();
         }
         try {
             $decoded = json_decode($body, false, 512, \JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (\JsonException $exception) {
+            // Valid JSON that PHP cannot hold as an object. It cannot be pinned on one change, so the push fails.
+            if (\JSON_ERROR_INVALID_PROPERTY_NAME === $exception->getCode()) {
+                throw Violation::on('changes', 'The name of a field cannot start with a NUL character (\u0000).');
+            }
             throw new BadRequestHttpException('The body is not valid JSON.');
         }
         if (!$decoded instanceof \stdClass || !\is_array($decoded->changes ?? null)) {
@@ -55,6 +59,12 @@ final class ChangeParser
         }
 
         return array_map(static fn (mixed $change): Change|Rejection => self::change($change, $scope), array_values($decoded->changes));
+    }
+
+    /** The 413 for a push whose body is larger than {@see self::MAX_BODY_BYTES}. */
+    public static function bodyTooLarge(): HttpException
+    {
+        return new HttpException(413, \sprintf('A push can be at most %d bytes; send the changes in more than one push.', self::MAX_BODY_BYTES));
     }
 
     private static function change(mixed $change, SyncScope $scope): Change|Rejection
@@ -74,7 +84,9 @@ final class ChangeParser
         }
         foreach (array_keys($fields) as $field) {
             if (!\in_array($field, 'upsert' === $op ? self::UPSERT_FIELDS : self::DELETE_FIELDS, true)) {
-                return new Rejection($id, Rejection::INVALID, \sprintf('A change of op "%s" has no field %s.', $op, $field), (string) $field);
+                $name = Rejection::path((string) $field);
+
+                return new Rejection($id, Rejection::INVALID, \sprintf('A change of op "%s" has no field %s.', $op, $name), $name);
             }
         }
         $baseVersion = $fields['baseVersion'] ?? null;
@@ -95,13 +107,18 @@ final class ChangeParser
             return new Rejection($id, Rejection::INVALID, 'payload must be an object.', 'payload');
         }
 
-        $stored = json_encode($payload, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION);
-        if (\strlen($stored) > self::MAX_PAYLOAD_BYTES) {
-            return new Rejection($id, Rejection::TOO_LARGE, \sprintf('payload is %d bytes as JSON; at most %d are allowed.', \strlen($stored), self::MAX_PAYLOAD_BYTES), 'payload');
-        }
+        // Before the payload is encoded: a number too large for a double (1e999) cannot be, and is refused here.
         $shape = self::shape($payload, 'payload', 0);
         if (null !== $shape) {
             return new Rejection($id, Rejection::INVALID, $shape['message'], $shape['field']);
+        }
+        $stored = json_encode($payload, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION);
+        if (\strlen($stored) > self::MAX_PAYLOAD_BYTES) {
+            return new Rejection(
+                $id, Rejection::TOO_LARGE,
+                \sprintf('payload is %d bytes as JSON; at most %d are allowed.', \strlen($stored), self::MAX_PAYLOAD_BYTES),
+                'payload', self::MAX_PAYLOAD_BYTES, \strlen($stored),
+            );
         }
         $secret = SecretGuard::find($payload);
         if (null !== $secret) {
@@ -116,7 +133,8 @@ final class ChangeParser
     }
 
     /**
-     * Nesting and numbers a payload may not have.
+     * Nesting and numbers a payload may not have. `$depth` is 0 for the payload and one more for every object or list
+     * inside another.
      *
      * @return array{field: string, message: string}|null
      */
@@ -125,14 +143,14 @@ final class ChangeParser
         if (\is_float($value)) {
             // Integers beyond 64 bits arrive as floats; a float that large would come back in another notation.
             return $value >= self::MAX_NUMBER || $value < -self::MAX_NUMBER
-                ? ['field' => $path, 'message' => \sprintf('%s is a number beyond a signed 64-bit integer.', $path)]
+                ? ['field' => Rejection::path($path), 'message' => \sprintf('%s is a number beyond a signed 64-bit integer.', Rejection::path($path))]
                 : null;
         }
         if (!\is_array($value) && !$value instanceof \stdClass) {
             return null;
         }
-        if ($depth >= self::MAX_DEPTH) {
-            return ['field' => $path, 'message' => \sprintf('%s nests more than %d levels deep.', $path, self::MAX_DEPTH)];
+        if ($depth > self::MAX_DEPTH) {
+            return ['field' => Rejection::path($path), 'message' => \sprintf('%s nests more than %d levels below the payload.', Rejection::path($path), self::MAX_DEPTH)];
         }
         foreach (\is_array($value) ? $value : get_object_vars($value) as $key => $item) {
             $found = self::shape($item, \is_array($value) ? \sprintf('%s[%d]', $path, $key) : $path.'.'.$key, $depth + 1);

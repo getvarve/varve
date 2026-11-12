@@ -20,6 +20,7 @@ use Symfony\Component\Uid\Uuid;
 #[ORM\Entity(readOnly: true)]
 #[ORM\UniqueConstraint(columns: ['user_id', 'change_seq'])]
 #[ORM\Index(columns: ['deleted_at'])]
+#[ORM\Index(columns: ['user_id', 'payload_bytes'], options: ['where' => '(deleted_at IS NULL)'])]
 class UserRecord
 {
     #[ORM\Id]
@@ -37,6 +38,10 @@ class UserRecord
     /** @var array<mixed>|null null for a tombstone */
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $payload = null;
+
+    /** The size of the payload as it is stored, in bytes; 0 for a tombstone ({@see Record::$payloadBytes}). */
+    #[ORM\Column(options: ['default' => 0])]
+    private int $payloadBytes = 0;
 
     #[ORM\Column]
     private int $version;

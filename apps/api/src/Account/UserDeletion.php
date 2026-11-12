@@ -16,6 +16,12 @@ use Symfony\Component\Uid\Uuid;
  * The records go first, on their own: left to the cascade from the user row, the database would also clear the
  * device and author columns of rows it is deleting in the same statement.
  *
+ * Before anything is deleted, the deletion takes the row locks a push takes (App\Sync\RecordPush): first the personal
+ * organization's, then the user's. A push holds one of the two while it writes records, and a push to the
+ * organization also reads the user's row for the author of its records; taking them in this order, and before any
+ * record row, the deletion waits for a push in progress instead of meeting it halfway, where the database would have
+ * to stop one of the two as a deadlock. A push that comes after finds its owner gone and is a 404.
+ *
  * Not covered: database backups, WAL archives and point-in-time recovery keep the rows until they expire.
  */
 final readonly class UserDeletion
@@ -32,6 +38,8 @@ final readonly class UserDeletion
         }
 
         $this->connection->transactional(function () use ($user, $email): void {
+            $this->connection->executeStatement('SELECT 1 FROM organization WHERE personal_owner_id = :id FOR UPDATE', ['id' => $user->toRfc4122()]);
+            $this->connection->executeStatement('SELECT 1 FROM app_user WHERE id = :id FOR UPDATE', ['id' => $user->toRfc4122()]);
             $this->connection->executeStatement(
                 'DELETE FROM oauth2_refresh_token WHERE access_token IN (SELECT identifier FROM oauth2_access_token WHERE user_identifier = :email)',
                 ['email' => $email],
