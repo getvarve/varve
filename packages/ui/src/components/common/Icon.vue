@@ -35,6 +35,9 @@ const PATHS = {
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   sidebar: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 4v16',
   filter: 'M3 5h18l-7 8v6l-4-2v-4z',
+  // Sidebar: Collapse all, and Close connection (a plug struck through).
+  collapseAll: 'M7 20l5-5 5 5M7 4l5 5 5-5',
+  plugOff: 'M9 2v4M15 2v6M6 8h12v4a6 6 0 0 1-9.5 4.9M12 18v4M3 3l18 18',
   // Activity categories (lib/activityColumns.ts).
   plug: 'M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4',
   brackets: 'M8 4H5v16h3M16 4h3v16h-3',

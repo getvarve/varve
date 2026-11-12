@@ -2,7 +2,6 @@
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
-import { presentError } from '../../api/errors';
 import { KEY_TYPE_FILTERS, keyTypeName, keyTypeOfFilter, moduleTypeFilters, redisModules, redisScan } from '../../api/redis';
 import type { BulkFilter, DbKeyspace, KeyEntry, RedisEditRequest } from '../../api/redis';
 import { useDialogs } from '../../composables/useDialogs';
@@ -19,13 +18,12 @@ import { redisErrorView } from '../../lib/redisErrors';
 import { createdKeyType } from '../../lib/redisEdit';
 import { entryForKey, scanBatch } from '../../lib/redisKeys';
 import type { RedisErrorView } from '../../lib/redisErrors';
-import { initCommandProblem } from '../../lib/redisInit';
 import { requiredFields } from '../../lib/schemaRequired';
 import { keyTypeTip, READ_ONLY_TIP } from '../../lib/tips';
 import { formatCount } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
-import InitCommandNotice from '../notices/InitCommandNotice.vue';
+import TabConnectionState from '../common/TabConnectionState.vue';
 import RedisBulkTtlDialog from './RedisBulkTtlDialog.vue';
 import RedisDbSelect from './RedisDbSelect.vue';
 import RedisNewKeyDialog from './RedisNewKeyDialog.vue';
@@ -570,10 +568,6 @@ function onNewKey(request: RedisEditRequest | null): void {
   void createEdit.review(request);
 }
 
-const connectError = computed(() => (props.tab.connectError ? presentError(props.tab.connectError) : null));
-/** A refused init command of the profile gets its own explanation and an "Edit connection" button. */
-const initProblem = computed(() => (props.tab.connectError ? initCommandProblem(props.tab.connectError) : null));
-
 async function retryAfterError(): Promise<void> {
   const view = ui.error;
   if (!view) return;
@@ -778,27 +772,12 @@ async function retryAfterError(): Promise<void> {
           <span v-if="createEdit.state.error.hint">{{ createEdit.state.error.hint }}</span>
         </div>
       </div>
-      <InitCommandNotice
-        v-if="tab.connectError && initProblem"
-        class="notice-block"
-        :error="tab.connectError"
-        :connection-id="tab.connectionId"
-        @edited="tabs.reconnect(tab.id)"
+      <!-- Not connected (closed, failed or cancelled): the block every tab shows. "Connecting…" is on the progress line above. -->
+      <TabConnectionState
+        v-if="tab.status !== 'connecting'"
+        :tab="tab"
+        compact
       />
-      <div
-        v-else-if="connectError"
-        class="notice tone-danger state"
-        role="alert"
-      >
-        <span>{{ connectError.title }}: {{ connectError.message }}</span>
-        <button
-          type="button"
-          class="btn compact"
-          @click="tabs.reconnect(tab.id)"
-        >
-          Connect again
-        </button>
-      </div>
 
       <ul
         ref="list"
@@ -1067,10 +1046,6 @@ async function retryAfterError(): Promise<void> {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-}
-
-.notice-block {
-  margin: 0 12px 8px;
 }
 
 .tree {

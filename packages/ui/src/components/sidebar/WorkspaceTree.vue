@@ -839,18 +839,7 @@ function objectTitle(node: ObjNode): string | undefined {
           :disabled="!collapser.canCollapseAll.value"
           @click="collapser.collapseAll()"
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-            focusable="false"
-          ><path d="M7 20l5-5 5 5M7 4l5 5 5-5" /></svg>
+          <Icon name="collapseAll" />
         </button>
       </span>
     </div>
@@ -1006,18 +995,10 @@ function objectTitle(node: ObjNode): string | undefined {
               @click.stop="closeConnection(row.item.node.connection)"
               @dblclick.stop
             >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-                focusable="false"
-              ><path d="M9 2v4M15 2v6M6 8h12v4a6 6 0 0 1-9.5 4.9M12 18v4M3 3l18 18" /></svg>
+              <Icon
+                name="plugOff"
+                :size="13"
+              />
             </button>
           </template>
           <span

@@ -4,6 +4,7 @@ import { watch } from 'vue';
 import type { Router } from 'vue-router';
 import type { ConnectionProfile } from '../api/records';
 import { setMenuEnabled } from '../backend';
+import { canRun } from '../components/query/runOnTab';
 import { openConnectionOverview } from '../components/tree/openConnection';
 import { showWorkspace } from '../components/tree/showWorkspace';
 import type { LivePanel } from '../lib/tree';
@@ -76,7 +77,13 @@ export interface MenuState {
   /** How many connections exist. */
   connections: number;
   /** The tab in front, if any. */
-  tab: { kind: string; running: boolean; hasCommands: boolean } | null;
+  tab: {
+    kind: string;
+    running: boolean;
+    /** Run can start (a query tab that is not connected connects first; see `canRun`). */
+    canRun: boolean;
+    hasCommands: boolean;
+  } | null;
 }
 
 /** Which menu bar actions can be carried out in this state. Every action is listed. */
@@ -97,7 +104,7 @@ export function menuEnabled(state: MenuState): Record<MenuAction, boolean> {
     'live:status': anyConnection,
     'live:processes': anyConnection,
     'live:variables': anyConnection,
-    'query-run': query && !tab.running,
+    'query-run': query && tab.canRun,
     'query-cancel': query && tab.running,
     'query-save': query,
     'query-save-as': query,
@@ -215,7 +222,14 @@ export async function installAppMenu(router: Router): Promise<() => void> {
       return menuEnabled({
         onWorkspace: router.currentRoute.value.name === 'home',
         connections: useWorkspace().records.value.connections.length,
-        tab: tab ? { kind: tab.kind, running: tab.kind === 'query' && tab.running, hasCommands: tabCommands(tab.id) !== null } : null,
+        tab: tab
+          ? {
+              kind: tab.kind,
+              running: tab.kind === 'query' && tab.running,
+              canRun: tab.kind === 'query' && canRun(tab, useWorkspace().connection(tab.connectionId) !== null),
+              hasCommands: tabCommands(tab.id) !== null,
+            }
+          : null,
       });
     },
     (enabled, before) => {

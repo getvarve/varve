@@ -266,4 +266,29 @@ describe('workspace tabs', () => {
     expect(views.unmounted).toEqual([]);
     wrapper.unmount();
   });
+
+  it('offers Connect again on a tab whose connection was closed and keeps its view for after', async () => {
+    const tabs = useTabs();
+    const a = tabs.openTableDataTab(profile, orders);
+    const { wrapper } = mountShell();
+    await flushPromises();
+    const panel = wrapper.get(`#wpanel-${a.id}`);
+    await panel.get('input').setValue('staged');
+
+    await tabs.disconnectConnection(profile.id);
+    await flushPromises();
+    expect(panel.text()).toContain('Not connected.');
+    expect((panel.get('.view-body').element as HTMLElement).style.display).toBe('none');
+    const connectAgain = panel.findAll('button').find((b) => b.text() === 'Connect again');
+    expect(connectAgain).toBeDefined();
+
+    await connectAgain?.trigger('click');
+    await flushPromises();
+    expect(tabs.tabs.find((t) => t.id === a.id)?.status).toBe('ready');
+    expect(panel.text()).not.toContain('Not connected.');
+    expect((panel.get('.view-body').element as HTMLElement).style.display).toBe('');
+    expect((panel.get('input').element as HTMLInputElement).value).toBe('staged');
+    expect(views.unmounted).toEqual([]);
+    wrapper.unmount();
+  });
 });

@@ -6,7 +6,7 @@ import { presentError } from '../api/errors';
 import ExtensionSlot from '../components/ExtensionSlot.vue';
 import Icon from '../components/common/Icon.vue';
 import type { IconName } from '../components/common/Icon.vue';
-import InitCommandNotice from '../components/notices/InitCommandNotice.vue';
+import TabConnectionState from '../components/common/TabConnectionState.vue';
 import NoticeHost from '../components/notices/NoticeHost.vue';
 import { useObjectBrowser } from '../components/tree/objectBrowser';
 import { useQuerySave } from '../composables/useQuerySave';
@@ -206,10 +206,6 @@ function missingView(tab: WorkspaceTab): string | null {
   return TAB_VIEWS[tab.kind].what;
 }
 
-function connectError(tab: WorkspaceTab): ReturnType<typeof presentError> | null {
-  return tab.connectError ? presentError(tab.connectError) : null;
-}
-
 function reconnectMessage(tab: WorkspaceTab): string | null {
   return tab.reconnectNeeded ? presentError(tab.reconnectNeeded).message : null;
 }
@@ -238,14 +234,6 @@ function onViewCreated(id: string, object: ObjectRef): void {
   if (!tab) return;
   tabs.setTabObject(tab.id, object);
   void useObjectBrowser().refreshObject(tab.connectionId, object);
-}
-
-function isRedisTab(tab: WorkspaceTab): boolean {
-  return workspace.connection(tab.connectionId)?.engine === 'redis';
-}
-
-function profileName(tab: WorkspaceTab): string {
-  return workspace.connection(tab.connectionId)?.name ?? 'the server';
 }
 
 async function select(id: string, focus = false): Promise<void> {
@@ -391,46 +379,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
             :tab="tab"
           />
           <template v-else>
-            <div
-              v-if="tab.status === 'connecting'"
-              class="state"
-              role="status"
-            >
-              Connecting to {{ profileName(tab) }}…
-            </div>
-            <div
-              v-else-if="tab.status === 'error' || tab.status === 'cancelled'"
-              class="state"
-            >
-              <div
-                v-if="connectError(tab)"
-                class="notice tone-danger"
-                role="alert"
-              >
-                <Icon name="warning" />
-                <span><strong>{{ connectError(tab)?.title }}.</strong> {{ connectError(tab)?.message }}<template v-if="connectError(tab)?.code"> ({{ connectError(tab)?.code }})</template></span>
-              </div>
-              <p
-                v-else
-                class="subtle"
-              >
-                Not connected.
-              </p>
-              <!-- A refused Redis init command explains itself and offers to edit the connection. -->
-              <InitCommandNotice
-                v-if="tab.connectError && isRedisTab(tab)"
-                :error="tab.connectError"
-                :connection-id="tab.connectionId"
-                @edited="tabs.reconnect(tab.id)"
-              />
-              <button
-                type="button"
-                class="btn"
-                @click="tabs.reconnect(tab.id)"
-              >
-                <Icon name="refresh" />Connect again
-              </button>
-            </div>
+            <TabConnectionState :tab="tab" />
             <!-- Once mounted, the view stays mounted while a reconnect hides it, so its state survives. -->
             <div
               v-if="viewMounted.has(tab.id)"

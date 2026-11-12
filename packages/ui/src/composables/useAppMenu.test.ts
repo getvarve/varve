@@ -153,21 +153,26 @@ describe('menu bar actions', () => {
     expect(nothing['query-run']).toBe(false);
     expect(nothing['live:status']).toBe(false);
 
-    const query = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: false, hasCommands: true } });
+    const query = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: false, canRun: true, hasCommands: true } });
     expect(query['query-run']).toBe(true);
     expect(query['query-cancel']).toBe(false);
     expect(query['query-save']).toBe(true);
     expect(query['close-tab']).toBe(true);
 
-    const running = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: true, hasCommands: true } });
+    const running = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: true, canRun: false, hasCommands: true } });
     expect(running['query-run']).toBe(false);
     expect(running['query-cancel']).toBe(true);
 
+    // A tab that is connecting cannot start a run yet; its other query actions stay.
+    const connecting = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'query', running: false, canRun: false, hasCommands: true } });
+    expect(connecting['query-run']).toBe(false);
+    expect(connecting['query-save']).toBe(true);
+
     // A table tab has no query actions; on another page no tab is in front.
-    const table = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'tableData', running: false, hasCommands: false } });
+    const table = menuEnabled({ onWorkspace: true, connections: 2, tab: { kind: 'tableData', running: false, canRun: false, hasCommands: false } });
     expect(table['query-save']).toBe(false);
     expect(table['tab-reconnect']).toBe(true);
-    const away = menuEnabled({ onWorkspace: false, connections: 2, tab: { kind: 'query', running: false, hasCommands: true } });
+    const away = menuEnabled({ onWorkspace: false, connections: 2, tab: { kind: 'query', running: false, canRun: true, hasCommands: true } });
     expect(away['query-run']).toBe(false);
     expect(away['close-tab']).toBe(false);
     expect(away['new-query']).toBe(true);
