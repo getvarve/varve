@@ -104,6 +104,7 @@ const ackId = useId();
           <span>I checked the new fingerprint with the server's administrator.<span
             v-if="ackRequired"
             class="required"
+            title="Required"
             aria-hidden="true"
           > *</span></span>
         </label>

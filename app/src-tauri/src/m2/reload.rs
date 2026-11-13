@@ -96,6 +96,16 @@ impl Services {
         open
     }
 
+    /// The user sessions of a profile that are working now (session ids):
+    /// a running statement, a designer or DDL apply, a grid save. The UI
+    /// asks before it closes a connection with one of these, because
+    /// [`Self::open_transactions`] does not count them and the close stops
+    /// the work at its next step.
+    #[must_use]
+    pub fn busy_sessions(&self, connection_id: &str) -> Vec<String> {
+        self.sessions.busy_sessions(connection_id)
+    }
+
     /// What the last reload closed (emptied by the call), waiting while
     /// the previous page's sessions are still being closed. The new page
     /// shows it once.

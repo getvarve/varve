@@ -90,6 +90,7 @@ async function act(): Promise<void> {
       <span
         v-if="destructive"
         class="pill tone-danger"
+        title="Drops or rewrites data or objects, so it asks for confirmation"
       ><span class="dot" />Destructive</span>
       <span
         v-if="statusText"

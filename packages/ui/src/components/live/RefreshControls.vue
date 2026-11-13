@@ -45,7 +45,7 @@ const canPause = computed(() => props.state.intervalMs !== null);
       :disabled="!canPause"
       :aria-label="state.paused ? 'Resume auto refresh' : 'Pause auto refresh'"
       :aria-pressed="state.paused"
-      :title="state.paused ? 'Resume auto refresh' : 'Pause auto refresh'"
+      :title="!canPause ? 'Auto refresh is off' : state.paused ? 'Resume auto refresh' : 'Pause auto refresh'"
       @click="state.paused ? emit('resume') : emit('pause')"
     >
       <Icon

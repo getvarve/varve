@@ -15,6 +15,7 @@ import {
   splitList,
 } from '../../lib/gridDesigner';
 import type { MyReorganizeTarget, PartitionInterval, PgBoundDraft } from '../../lib/gridDesigner';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatBytes, formatCount } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { useDesigner } from './designerContext';
@@ -323,6 +324,7 @@ function myPartitionBy(): void {
                     <span
                       v-if="p.detachPending"
                       class="tag tone-danger"
+                      title="A concurrent detach did not finish: it needs DETACH PARTITION ... FINALIZE"
                     >DETACH PENDING</span>
                   </td>
                   <template v-if="strategy === 'range' && !p.isDefault">
@@ -445,6 +447,7 @@ function myPartitionBy(): void {
                 type="button"
                 class="btn primary"
                 :disabled="ctx.readOnly || proposals.length === 0"
+                :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                 @click="createNext"
               >
                 Create {{ proposals.length }} partitions
@@ -627,6 +630,7 @@ function myPartitionBy(): void {
               type="button"
               class="btn"
               :disabled="ctx.readOnly || !createReady"
+              :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
               @click="createOne"
             >
               {{ create.attach ? 'Attach table' : 'Create partition' }}
@@ -666,6 +670,7 @@ function myPartitionBy(): void {
                 class="btn"
                 :class="{ danger: detach.drop }"
                 :disabled="ctx.readOnly"
+                :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                 @click="detachSelected"
               >
                 {{ detach.drop ? 'Detach and drop' : 'Detach partition' }}
@@ -828,6 +833,7 @@ function myPartitionBy(): void {
           type="button"
           class="btn primary"
           :disabled="ctx.readOnly || (partitionBy.kind !== 'key' && !partitionBy.expression.trim()) || (subpartitionable && partitionBy.sub === 'hash' && !partitionBy.subText.trim())"
+          :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
           @click="myPartitionBy"
         >
           Partition table
@@ -846,6 +852,7 @@ function myPartitionBy(): void {
             type="button"
             class="btn compact"
             :disabled="ctx.readOnly"
+            :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
             @click="myAction('remove')"
           >
             Remove partitioning
@@ -968,6 +975,7 @@ function myPartitionBy(): void {
               type="button"
               class="btn"
               :disabled="ctx.readOnly || (!hashLike && (!myAdd.name.trim() || !myAdd.values.trim()))"
+              :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
               @click="myAddPartition"
             >
               Add
@@ -977,6 +985,7 @@ function myPartitionBy(): void {
                 type="button"
                 class="btn"
                 :disabled="ctx.readOnly || myParts.length < 2"
+                :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                 @click="myAction('coalesce')"
               >
                 Coalesce one partition
@@ -991,6 +1000,7 @@ function myPartitionBy(): void {
                 type="button"
                 class="btn"
                 :disabled="ctx.readOnly"
+                :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                 @click="myAction('truncate')"
               >
                 Truncate partition
@@ -1000,6 +1010,7 @@ function myPartitionBy(): void {
                 type="button"
                 class="btn danger"
                 :disabled="ctx.readOnly"
+                :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                 @click="myAction('drop')"
               >
                 Drop partition and its rows
@@ -1055,6 +1066,7 @@ function myPartitionBy(): void {
                     <button
                       type="button"
                       class="icon-btn"
+                      :title="reorg.into.length < 2 ? 'Reorganizing needs at least one new partition' : 'Remove this partition'"
                       :aria-label="`Remove new partition ${i + 1}`"
                       :disabled="reorg.into.length < 2"
                       @click="reorg.into.splice(i, 1)"
@@ -1080,6 +1092,7 @@ function myPartitionBy(): void {
                   type="button"
                   class="btn"
                   :disabled="ctx.readOnly || reorgPlan.op === null"
+                  :title="ctx.readOnly ? READ_ONLY_TIP : undefined"
                   @click="myReorganizePartitions"
                 >
                   Reorganize partitions

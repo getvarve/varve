@@ -8,6 +8,7 @@ import type { SessionInfo } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
 import { latestOnly } from '../../lib/async';
 import { buildObjectComment, commentChanged, commentHidden, commentOf, commentSupported } from '../../lib/objectComment';
+import { READ_ONLY_BADGE_TIP, READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import PlanPreview from './PlanPreview.vue';
@@ -161,11 +162,13 @@ onMounted(load);
       <span
         v-if="session.readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon name="lock" />Read only</span>
       <span class="grow" />
       <button
         type="button"
         class="icon-btn"
+        title="Reload the comment"
         aria-label="Reload the comment"
         :disabled="loading"
         @click="reload"
@@ -206,6 +209,7 @@ onMounted(load);
         type="button"
         class="btn compact"
         :disabled="session.readOnly || !dirty || plan.state.planning"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="preview"
       >
         Preview change

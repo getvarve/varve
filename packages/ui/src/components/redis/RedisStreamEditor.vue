@@ -210,6 +210,7 @@ function stageTrim(): void {
           v-if="entry.fields.length > 1"
           type="button"
           class="icon-btn"
+          title="Remove this field"
           :aria-label="`Remove field ${i + 1}`"
           @click="entry.fields.splice(i, 1)"
         >

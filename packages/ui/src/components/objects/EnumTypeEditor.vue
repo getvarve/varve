@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue';
 import type { PgEnumType } from '../../api/ddl';
 import { buildPgEnum, enumNeedsRecreate, errorsOf, objectRef, pgEnumFormFrom, pgEnumSchema } from '../../lib/ddlPlan';
 import type { PgEnumForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -94,6 +95,7 @@ async function applied(): Promise<void> {
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -148,6 +150,7 @@ async function applied(): Promise<void> {
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Move up"
                     :aria-label="`Move ${v.label || 'value'} up`"
                     @click="move(i, -1)"
                   >
@@ -159,6 +162,7 @@ async function applied(): Promise<void> {
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Move down"
                     :aria-label="`Move ${v.label || 'value'} down`"
                     @click="move(i, 1)"
                   >
@@ -167,6 +171,7 @@ async function applied(): Promise<void> {
                   <button
                     type="button"
                     class="icon-btn"
+                    title="Remove this value"
                     :aria-label="`Remove ${v.label || 'value'}`"
                     @click="form.values.splice(i, 1)"
                   >

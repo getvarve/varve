@@ -165,6 +165,24 @@ describe('workspace tabs', () => {
     wrapper.unmount();
   });
 
+  it('says in tooltips what a tab and its marks stand for', async () => {
+    const tabs = useTabs();
+    const a = tabs.openTableDataTab(profile, orders);
+    const { wrapper } = mountShell();
+    await flushPromises();
+    const tab = wrapper.get(`#wtab-${a.id}`).element.parentElement as HTMLElement;
+    // The full title (the strip cuts long ones short), then the connection and the environment of the coloured edge.
+    expect(tab.getAttribute('title')).toBe(`${a.title}\nOrders · Development environment`);
+    // Close Tab has a shortcut only in the macOS menu bar; the test document is not macOS.
+    expect(tab.querySelector('.close')?.getAttribute('title')).toBe('Close tab');
+    expect(tab.querySelector('.dirty')).toBeNull();
+
+    tabs.setUnsaved(a.id, true);
+    await flushPromises();
+    expect(tab.querySelector('.dirty')?.getAttribute('title')).toBe('Unsaved changes');
+    wrapper.unmount();
+  });
+
   it('keeps the tabs while another page is shown and mounts tabs opened meanwhile on return', async () => {
     const tabs = useTabs();
     const a = tabs.openTableDataTab(profile, orders);
@@ -245,6 +263,31 @@ describe('workspace tabs', () => {
     expect((panel.get('.view-body').element as HTMLElement).style.display).toBe('');
     expect((panel.get('input').element as HTMLInputElement).value).toBe('staged');
     expect(views.mounted).toEqual([a.id]);
+    expect(views.unmounted).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it('offers Connect again on a tab whose connection was closed and keeps its view for after', async () => {
+    const tabs = useTabs();
+    const a = tabs.openTableDataTab(profile, orders);
+    const { wrapper } = mountShell();
+    await flushPromises();
+    const panel = wrapper.get(`#wpanel-${a.id}`);
+    await panel.get('input').setValue('staged');
+
+    await tabs.disconnectConnection(profile.id);
+    await flushPromises();
+    expect(panel.text()).toContain('Not connected.');
+    expect((panel.get('.view-body').element as HTMLElement).style.display).toBe('none');
+    const connectAgain = panel.findAll('button').find((b) => b.text() === 'Connect again');
+    expect(connectAgain).toBeDefined();
+
+    await connectAgain?.trigger('click');
+    await flushPromises();
+    expect(tabs.tabs.find((t) => t.id === a.id)?.status).toBe('ready');
+    expect(panel.text()).not.toContain('Not connected.');
+    expect((panel.get('.view-body').element as HTMLElement).style.display).toBe('');
+    expect((panel.get('input').element as HTMLInputElement).value).toBe('staged');
     expect(views.unmounted).toEqual([]);
     wrapper.unmount();
   });

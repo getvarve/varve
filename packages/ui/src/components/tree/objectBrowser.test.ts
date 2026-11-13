@@ -1,3 +1,4 @@
+import { computed, watch } from 'vue';
 import type * as RecordsModule from '../../api/records';
 import type * as SessionsModule from '../../api/sessions';
 import type { Capabilities, Container, KindCount, ObjectKind, ObjectSummary } from '../../api/catalog';
@@ -287,5 +288,30 @@ describe('object browser', () => {
     expect(browser.browsing('my')).toBe(false);
     expect(browser.source.root('my')).toEqual({ status: 'idle' });
     expect(browser.source.children(`${objectRootKey('my')}/x`)).toBeUndefined();
+  });
+
+  it('lists its open sessions, also those on other databases, and the list follows them', async () => {
+    const browser = useObjectBrowser();
+    const ids = computed(() => browser.sessions('pg').map((s) => s.database));
+    // What a view sees: only changes that trigger it.
+    let seen: (string | null)[] = [];
+    const stop = watch(ids, (value) => (seen = value), { flush: 'sync' });
+    await browser.browse('pg');
+    expect(seen).toEqual(['shop']);
+    await browser.loadChildren(byName(loaded(browser.source.root('pg')), 'analytics'));
+    expect(seen).toEqual(['shop', 'analytics']);
+    browser.disconnect('pg');
+    expect(seen).toEqual([]);
+    stop();
+  });
+
+  it('closes several object nodes at once', () => {
+    const browser = useObjectBrowser();
+    browser.setExpanded('objects:pg/a', true);
+    browser.setExpanded('objects:pg/b', true);
+    browser.setExpanded('objects:pg/c', true);
+    browser.collapseKeys(['objects:pg/a', 'objects:pg/c', 'objects:pg/missing']);
+    expect([...browser.objectExpanded].filter((k) => k.startsWith('objects:pg/'))).toEqual(['objects:pg/b']);
+    browser.collapseKeys(['objects:pg/b']);
   });
 });

@@ -6,7 +6,7 @@ import { presentError } from '../api/errors';
 import ExtensionSlot from '../components/ExtensionSlot.vue';
 import Icon from '../components/common/Icon.vue';
 import type { IconName } from '../components/common/Icon.vue';
-import InitCommandNotice from '../components/notices/InitCommandNotice.vue';
+import TabConnectionState from '../components/common/TabConnectionState.vue';
 import NoticeHost from '../components/notices/NoticeHost.vue';
 import { useObjectBrowser } from '../components/tree/objectBrowser';
 import { useQuerySave } from '../composables/useQuerySave';
@@ -14,6 +14,7 @@ import { showsView, TAB_VISIBLE_KEY, useTabs } from '../composables/useTabs';
 import type { TabKind, WorkspaceTab } from '../composables/useTabs';
 import { useWorkspace } from '../composables/useWorkspace';
 import { ENVIRONMENT_INFO } from '../lib/display';
+import { isMacPlatform, tabTip, withKeys } from '../lib/tips';
 import HomeView from './HomeView.vue';
 
 // AppShell keeps this view alive (`<KeepAlive include="WorkspaceView">`) while Activity or Settings is shown.
@@ -182,6 +183,15 @@ function envColor(tab: WorkspaceTab): string {
   return profile ? ENVIRONMENT_INFO[profile.environment].color : 'var(--border)';
 }
 
+/** The tab's full title and its connection's environment (the colour of its top edge). */
+function tipOf(tab: WorkspaceTab): string {
+  const profile = workspace.connection(tab.connectionId);
+  return tabTip(tab.title, profile ? { name: profile.name, environment: ENVIRONMENT_INFO[profile.environment].label } : null);
+}
+
+/** Close Tab has its shortcut in the macOS menu bar; the other systems have no menu bar. */
+const closeTip = withKeys('Close tab', isMacPlatform() ? 'CmdOrCtrl+W' : null);
+
 function dirty(tab: WorkspaceTab): boolean {
   return tab.kind === 'query' ? querySave.hasUnsavedEdits(tab) : tab.unsaved;
 }
@@ -194,10 +204,6 @@ function viewOf(tab: WorkspaceTab): Component | null {
 function missingView(tab: WorkspaceTab): string | null {
   if (tab.kind === 'query' || tab.kind === 'keys' || tab.kind === 'overview' || views.has(tab.kind)) return null;
   return TAB_VIEWS[tab.kind].what;
-}
-
-function connectError(tab: WorkspaceTab): ReturnType<typeof presentError> | null {
-  return tab.connectError ? presentError(tab.connectError) : null;
 }
 
 function reconnectMessage(tab: WorkspaceTab): string | null {
@@ -228,14 +234,6 @@ function onViewCreated(id: string, object: ObjectRef): void {
   if (!tab) return;
   tabs.setTabObject(tab.id, object);
   void useObjectBrowser().refreshObject(tab.connectionId, object);
-}
-
-function isRedisTab(tab: WorkspaceTab): boolean {
-  return workspace.connection(tab.connectionId)?.engine === 'redis';
-}
-
-function profileName(tab: WorkspaceTab): string {
-  return workspace.connection(tab.connectionId)?.name ?? 'the server';
 }
 
 async function select(id: string, focus = false): Promise<void> {
@@ -290,6 +288,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
           class="tab"
           :class="{ active: tab.id === tabs.activeId.value }"
           :style="{ boxShadow: `inset 0 2px 0 ${envColor(tab)}` }"
+          :title="tipOf(tab)"
           @auxclick="onAuxClick($event, tab.id)"
         >
           <button
@@ -312,6 +311,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
               v-if="dirty(tab)"
               class="dirty"
               role="img"
+              title="Unsaved changes"
               aria-label="Unsaved changes"
             />
             <span
@@ -323,6 +323,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
             type="button"
             class="close"
             tabindex="-1"
+            :title="closeTip"
             :aria-label="`Close ${tab.title}`"
             @click="querySave.closeWithCheck(tab.id)"
           >
@@ -378,46 +379,7 @@ function onAuxClick(event: MouseEvent, id: string): void {
             :tab="tab"
           />
           <template v-else>
-            <div
-              v-if="tab.status === 'connecting'"
-              class="state"
-              role="status"
-            >
-              Connecting to {{ profileName(tab) }}…
-            </div>
-            <div
-              v-else-if="tab.status === 'error' || tab.status === 'cancelled'"
-              class="state"
-            >
-              <div
-                v-if="connectError(tab)"
-                class="notice tone-danger"
-                role="alert"
-              >
-                <Icon name="warning" />
-                <span><strong>{{ connectError(tab)?.title }}.</strong> {{ connectError(tab)?.message }}<template v-if="connectError(tab)?.code"> ({{ connectError(tab)?.code }})</template></span>
-              </div>
-              <p
-                v-else
-                class="subtle"
-              >
-                Not connected.
-              </p>
-              <!-- A refused Redis init command explains itself and offers to edit the connection. -->
-              <InitCommandNotice
-                v-if="tab.connectError && isRedisTab(tab)"
-                :error="tab.connectError"
-                :connection-id="tab.connectionId"
-                @edited="tabs.reconnect(tab.id)"
-              />
-              <button
-                type="button"
-                class="btn"
-                @click="tabs.reconnect(tab.id)"
-              >
-                <Icon name="refresh" />Connect again
-              </button>
-            </div>
+            <TabConnectionState :tab="tab" />
             <!-- Once mounted, the view stays mounted while a reconnect hides it, so its state survives. -->
             <div
               v-if="viewMounted.has(tab.id)"

@@ -2,7 +2,7 @@
 import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
-import { computed, onMounted, reactive, ref, useId, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { CATEGORIES, clearActivity, exportActivity, fetchActivity, OUTCOMES, statementOf } from '../api/activity';
 import type { ActivityEvent, ActivityExportFormat, ActivityFilter, Category, Outcome } from '../api/activity';
@@ -14,12 +14,30 @@ import { useToasts } from '../composables/useToasts';
 import { useWorkspace } from '../composables/useWorkspace';
 import { useWorkspaceActions } from '../composables/useWorkspaceActions';
 import { formatDateTime, formatDay, formatTime } from '../lib/display';
+import {
+  actionFilterTitle,
+  CATEGORY_ICONS,
+  categoryFilterTitle,
+  categoryTone,
+  connectionFilterTitle,
+  DEFAULT_SORT,
+  effectiveSort,
+  groupEvents,
+  hiddenSortTitle,
+  nextSort,
+  OUTCOME_LABELS,
+  outcomeFilterTitle,
+  popoverTab,
+  sortHiddenWhenNarrow,
+  sortTitle,
+} from '../lib/activityColumns';
+import type { ActivitySort, ActivitySortKey } from '../lib/activityColumns';
 import { parseActions } from '../lib/activityFilter';
 import { activityFilterSchema } from '../lib/forms';
 import type { ActivityFilterValues } from '../lib/forms';
 import { formatCount, formatDuration, reindentJson } from '../lib/values';
 
-/** The local activity log (design doc 9.6): filters, newest first, details, export and clear. */
+/** The local activity log (design doc 9.6): filters, newest first or sorted by a column, details, export and clear. */
 const route = useRoute();
 const router = useRouter();
 const workspace = useWorkspace();
@@ -37,7 +55,7 @@ const RANGES: { value: Range; label: string }[] = [
   { value: 'all', label: 'All' },
 ];
 
-/** Range and categories are toggle buttons; the input fields below are a validated form. */
+/** The time range (toggle buttons) and the categories (the category column's filter); the other fields are a validated form. */
 const filters = reactive<{ range: Range; categories: Category[] }>({ range: '7d', categories: [] });
 
 const filterForm = useForm({
@@ -61,6 +79,8 @@ const nextCursor = ref<string | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const selected = ref<ActivityEvent | null>(null);
+/** True when the loaded events are every event that matches their filter (no "Load more" left). */
+const allLoaded = ref(false);
 
 function rangeStart(range: Range): number | undefined {
   const now = new Date();
@@ -106,6 +126,7 @@ async function load(more = false): Promise<void> {
     if (mine !== request) return;
     events.value = more ? [...events.value, ...page.events] : page.events;
     nextCursor.value = page.nextCursor;
+    allLoaded.value = page.nextCursor === null;
     pageFilter = used;
     error.value = null;
     if (!more) selected.value = null;
@@ -141,12 +162,6 @@ watch(
 );
 onMounted(() => void load());
 
-function toggleCategory(category: Category): void {
-  const at = filters.categories.indexOf(category);
-  if (at >= 0) filters.categories.splice(at, 1);
-  else filters.categories.push(category);
-}
-
 function resetFilters(): void {
   filters.range = '7d';
   filters.categories = [];
@@ -156,21 +171,216 @@ function resetFilters(): void {
 
 // Display
 
-const groups = computed(() => {
-  const out: { day: string; events: ActivityEvent[] }[] = [];
-  for (const event of events.value) {
-    const day = formatDay(event.occurredAt);
-    const last = out.at(-1);
-    if (last && last.day === day) last.events.push(event);
-    else out.push({ day, events: [event] });
-  }
-  return out;
-});
-
 function connectionName(id: string | null): string | null {
   if (!id) return null;
   return workspace.connection(id)?.name ?? 'Deleted connection';
 }
+
+// Sorting. The backend pages newest first only, so another order applies
+// once every matching event is loaded (lib/activityColumns.ts).
+
+const requestedSort = ref<ActivitySort>(DEFAULT_SORT);
+const sort = computed(() => effectiveSort(requestedSort.value, allLoaded.value));
+
+/** `key` is null for a column without sorting (the header passes its column's key as is). */
+function sortBy(key: ActivitySortKey | null): void {
+  // While more pages exist the button says why in its tooltip; it stays focusable so that tooltip can be read.
+  if (key === null || !allLoaded.value) return;
+  requestedSort.value = nextSort(sort.value, key);
+}
+
+/** Back to the order the list loads in (the mark a narrow list shows for a sort on a column it hides). */
+function sortByDefault(): void {
+  requestedSort.value = DEFAULT_SORT;
+}
+
+function ariaSort(key: ActivitySortKey): 'ascending' | 'descending' | undefined {
+  return sort.value.key === key ? sort.value.direction : undefined;
+}
+
+const groups = computed(() =>
+  groupEvents(events.value, sort.value, formatDay, (e) => connectionName(e.connectionId) ?? ''),
+);
+
+// Column filters: each funnel opens a popover over the same filter state the list loads with.
+
+type FilterColumn = 'category' | 'action' | 'connection' | 'outcome';
+
+/** The column header row. `filterLabel` names the filter for its funnel's accessible name. */
+const COLUMNS: {
+  cls: string;
+  label: string;
+  sort: ActivitySortKey | null;
+  filter: FilterColumn | null;
+  filterLabel: string;
+}[] = [
+  { cls: 'time', label: 'Time', sort: 'time', filter: null, filterLabel: '' },
+  { cls: 'cat', label: 'Category', sort: null, filter: 'category', filterLabel: 'Filter by category' },
+  { cls: 'what', label: 'Action and target', sort: 'action', filter: 'action', filterLabel: 'Filter by action' },
+  { cls: 'conn', label: 'Connection', sort: 'connection', filter: 'connection', filterLabel: 'Filter by connection' },
+  { cls: 'outcome', label: 'Outcome', sort: 'outcome', filter: 'outcome', filterLabel: 'Filter by outcome' },
+  { cls: 'dur', label: 'Took', sort: 'duration', filter: null, filterLabel: '' },
+];
+
+const FILTER_TITLES: Record<FilterColumn, string> = {
+  category: 'Category',
+  action: 'Action',
+  connection: 'Connection',
+  outcome: 'Outcome',
+};
+
+const filterActive = computed<Record<FilterColumn, boolean>>(() => ({
+  category: filters.categories.length > 0,
+  // Typed text counts even while it is not valid yet: it is still there to fix or clear.
+  action: formValues.value.actions.trim() !== '',
+  connection: formValues.value.connectionId !== '',
+  outcome: formValues.value.outcome !== '',
+}));
+
+const filterTitles = computed<Record<FilterColumn, string>>(() => {
+  const v = formValues.value;
+  return {
+    category: categoryFilterTitle(filters.categories, CATEGORIES.length),
+    action: filterForm.errors.value.actions
+      ? 'Action: not a valid filter yet. Click to fix.'
+      : actionFilterTitle(parseActions(v.actions)),
+    connection: connectionFilterTitle(connectionName(v.connectionId || null)),
+    outcome: outcomeFilterTitle(v.outcome as Outcome | ''),
+  };
+});
+
+/** The connections to choose from, plus the filtered one when it no longer exists. */
+const connectionChoices = computed(() => {
+  const list = workspace.records.value.connections.map((c) => ({ id: c.id, name: c.name }));
+  const current = formValues.value.connectionId;
+  if (current && !list.some((c) => c.id === current)) list.push({ id: current, name: 'Deleted connection' });
+  return list;
+});
+
+const openFilter = ref<FilterColumn | null>(null);
+const popover = ref<HTMLElement | null>(null);
+const popoverPos = ref({ left: 0, top: 0 });
+let filterOpener: HTMLElement | null = null;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
+}
+
+async function toggleFilter(column: FilterColumn | null, event: MouseEvent): Promise<void> {
+  if (column === null) return;
+  if (openFilter.value === column) {
+    closeFilter(true);
+    return;
+  }
+  const button = event.currentTarget as HTMLElement;
+  filterOpener = button;
+  const rect = button.getBoundingClientRect();
+  popoverPos.value = { left: rect.left, top: rect.bottom + 4 };
+  openFilter.value = column;
+  await nextTick();
+  const el = popover.value;
+  if (!el) return;
+  // Under the funnel, kept inside the window; above it when there is no room below.
+  const below = rect.bottom + 4;
+  const fitsBelow = below + el.offsetHeight <= window.innerHeight - 4;
+  popoverPos.value = {
+    left: clamp(rect.left, 4, window.innerWidth - el.offsetWidth - 4),
+    top: fitsBelow ? below : clamp(rect.top - 4 - el.offsetHeight, 4, window.innerHeight - el.offsetHeight - 4),
+  };
+  focusPopover();
+}
+
+/** Puts focus on the popover's first choice (the checked one of a radio group), or on the popover itself. */
+function focusPopover(): void {
+  const el = popover.value;
+  if (!el) return;
+  const first = el.querySelector<HTMLElement>('input:checked') ?? el.querySelector<HTMLElement>('input, button:not(:disabled)');
+  (first ?? el).focus();
+}
+
+/**
+ * "Show all categories" and "Any action" turn themselves off by their own
+ * click, and a button that is off cannot keep focus: move it to the first
+ * choice, so the keyboard stays in the popover.
+ */
+async function clearFilter(column: 'category' | 'action'): Promise<void> {
+  if (column === 'category') filters.categories = [];
+  else filterForm.setFieldValue('actions', '');
+  await nextTick();
+  focusPopover();
+}
+
+/** A press on the popover's padding or a legend would move focus to the page: keep it in the popover. */
+function onPopoverMouseDown(event: MouseEvent): void {
+  const el = popover.value;
+  if (!el || !(event.target instanceof Element) || event.target.closest('input, label, button:not(:disabled)')) return;
+  event.preventDefault();
+  if (!el.contains(document.activeElement)) el.focus();
+}
+
+function closeFilter(returnFocus: boolean): void {
+  openFilter.value = null;
+  if (returnFocus && filterOpener?.isConnected) filterOpener.focus();
+  filterOpener = null;
+}
+
+/** The popover's Tab stops in order. A radio group is one stop: its checked radio. */
+function tabStops(): HTMLElement[] {
+  const all = [...(popover.value?.querySelectorAll<HTMLElement>('input, button:not(:disabled)') ?? [])];
+  return all.filter((el) => !(el instanceof HTMLInputElement && el.type === 'radio') || el.checked);
+}
+
+/**
+ * The popover's keys, heard on the document while it is open: focus can be
+ * outside it (a click on a button that is off, or one that turned itself
+ * off, drops focus to the page in some engines) and the keys must still
+ * work. Escape closes; Tab past either end closes too and goes back to the
+ * funnel, as menus do; Tab with focus lost brings it back into the popover.
+ */
+function onDocumentKeydown(event: KeyboardEvent): void {
+  const el = popover.value;
+  if (!openFilter.value || !el) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    // The popover is what Escape closes now, not what lies under it.
+    event.stopPropagation();
+    closeFilter(true);
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const list = tabStops();
+  const active = document.activeElement;
+  const at = active && el.contains(active) ? list.indexOf(active as HTMLElement) : null;
+  const move = popoverTab(list.length, at, event.shiftKey);
+  if (move === 'browser') return;
+  event.preventDefault();
+  if (move === 'close') closeFilter(true);
+  else list[move.focus]?.focus();
+}
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  if (!openFilter.value) return;
+  const target = event.target as Node;
+  // The funnel's own click toggles; anything else outside the popover closes it.
+  if (popover.value?.contains(target) || filterOpener?.contains(target)) return;
+  closeFilter(false);
+}
+
+function onWindowResize(): void {
+  if (openFilter.value) closeFilter(false);
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown, true);
+  document.addEventListener('keydown', onDocumentKeydown, true);
+  window.addEventListener('resize', onWindowResize);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true);
+  document.removeEventListener('keydown', onDocumentKeydown, true);
+  window.removeEventListener('resize', onWindowResize);
+  clearTimeout(debounce);
+});
 
 function summary(event: ActivityEvent): string {
   const statement = statementOf(event);
@@ -186,11 +396,11 @@ function summary(event: ActivityEvent): string {
   return '';
 }
 
-const OUTCOME = {
-  success: { label: 'Success', tone: 'tone-success' },
-  failure: { label: 'Failed', tone: 'tone-danger' },
-  cancelled: { label: 'Cancelled', tone: 'tone-neutral' },
-} as const;
+const OUTCOME_TONES: Record<Outcome, string> = {
+  success: 'tone-success',
+  failure: 'tone-danger',
+  cancelled: 'tone-neutral',
+};
 
 /** Details JSON as stored. Backend values pass through JSON.parse in the IPC layer, so this re-indents its text. */
 const detailsJson = computed(() => (selected.value ? reindentJson(JSON.stringify(selected.value.details) ?? 'null') : ''));
@@ -319,64 +529,14 @@ async function clearLog(): Promise<void> {
           placeholder="Search actions, targets and details"
         >
       </label>
-      <label :for="`${uid}-outcome`">Outcome</label>
-      <select
-        :id="`${uid}-outcome`"
-        v-model="outcome"
-        class="select compact"
+      <button
+        type="button"
+        class="btn ghost compact"
+        title="Clears the search and every column filter, and sets the range back to 7 days"
+        @click="resetFilters"
       >
-        <option value="">
-          Any outcome
-        </option>
-        <option
-          v-for="o in OUTCOMES"
-          :key="o"
-          :value="o"
-        >
-          {{ OUTCOME[o].label }}
-        </option>
-      </select>
-      <label :for="`${uid}-action`">Action</label>
-      <input
-        :id="`${uid}-action`"
-        v-model="actionsText"
-        v-bind="actionsAttrs"
-        class="input compact action"
-        :aria-invalid="!!filterForm.errors.value.actions"
-        :list="`${uid}-actions`"
-        placeholder="query.failed, connection.*"
-        spellcheck="false"
-        autocomplete="off"
-        :aria-describedby="filterForm.errors.value.actions ? 'activity-action-error' : 'activity-action-help'"
-      >
-      <datalist :id="`${uid}-actions`">
-        <option
-          v-for="a in knownActions"
-          :key="a"
-          :value="a"
-        />
-      </datalist>
-      <span
-        id="activity-action-help"
-        class="visually-hidden"
-      >Comma separated actions; end one with .* to match a prefix.</span>
-      <label :for="`${uid}-conn`">Connection</label>
-      <select
-        :id="`${uid}-conn`"
-        v-model="connectionId"
-        class="select compact"
-      >
-        <option value="">
-          All connections
-        </option>
-        <option
-          v-for="c in workspace.records.value.connections"
-          :key="c.id"
-          :value="c.id"
-        >
-          {{ c.name }}
-        </option>
-      </select>
+        Reset filters
+      </button>
     </div>
 
     <p
@@ -396,34 +556,95 @@ async function clearLog(): Promise<void> {
       {{ filterForm.errors.value.actions }} The list shows the last valid filter.
     </p>
 
-    <div
-      class="chips"
-      role="group"
-      aria-label="Categories"
-    >
-      <span class="label">Category</span>
-      <button
-        v-for="c in CATEGORIES"
-        :key="c"
-        type="button"
-        class="chip"
-        :aria-pressed="filters.categories.includes(c)"
-        @click="toggleCategory(c)"
-      >
-        {{ c }}
-      </button>
-      <span class="spacer" />
-      <button
-        type="button"
-        class="btn ghost compact"
-        @click="resetFilters"
-      >
-        Reset filters
-      </button>
-    </div>
-
     <div class="body">
       <div class="list">
+        <!-- A header-only table: the rows below stay buttons, so the list keeps its keyboard and selection behaviour. -->
+        <div
+          class="cols-table"
+          role="table"
+          aria-label="Activity columns"
+        >
+          <div
+            class="cols"
+            role="row"
+          >
+            <span
+              v-for="c in COLUMNS"
+              :key="c.cls"
+              role="columnheader"
+              class="col"
+              :class="c.cls"
+              :aria-sort="c.sort ? ariaSort(c.sort) : undefined"
+            >
+              <button
+                v-if="c.sort"
+                type="button"
+                class="sort"
+                :class="{ sorted: sort.key === c.sort }"
+                :aria-disabled="allLoaded ? undefined : 'true'"
+                :title="sortTitle(c.sort, sort, allLoaded)"
+                @click="sortBy(c.sort)"
+              >
+                <span class="sort-label">{{ c.label }}</span><Icon
+                  v-if="sort.key === c.sort"
+                  :name="sort.direction === 'ascending' ? 'chevronUp' : 'chevronDown'"
+                  :size="10"
+                />
+              </button>
+              <span
+                v-else
+                class="visually-hidden"
+              >{{ c.label }}</span>
+              <button
+                v-if="c.filter"
+                type="button"
+                class="icon-btn funnel"
+                :class="{ on: filterActive[c.filter] }"
+                :aria-label="c.filterLabel"
+                aria-haspopup="dialog"
+                :aria-expanded="openFilter === c.filter"
+                :title="filterTitles[c.filter]"
+                @click="toggleFilter(c.filter, $event)"
+              >
+                <Icon
+                  name="filter"
+                  :size="12"
+                />
+              </button>
+              <!-- The connection column drops out of a narrow list; its filter moves next to the action's. -->
+              <button
+                v-if="c.cls === 'what'"
+                type="button"
+                class="icon-btn funnel narrow-only"
+                :class="{ on: filterActive.connection }"
+                aria-label="Filter by connection"
+                aria-haspopup="dialog"
+                :aria-expanded="openFilter === 'connection'"
+                :title="filterTitles.connection"
+                @click="toggleFilter('connection', $event)"
+              >
+                <Icon
+                  name="plug"
+                  :size="12"
+                />
+              </button>
+              <!-- A narrow list hides the connection and duration columns: a sort on one of them shows here. -->
+              <button
+                v-if="c.cls === 'what' && sortHiddenWhenNarrow(sort)"
+                type="button"
+                class="icon-btn funnel on narrow-only"
+                aria-label="Sort by time again"
+                :title="hiddenSortTitle(sort)"
+                @click="sortByDefault"
+              >
+                <Icon
+                  :name="sort.direction === 'ascending' ? 'chevronUp' : 'chevronDown'"
+                  :size="12"
+                />
+              </button>
+            </span>
+          </div>
+        </div>
         <p
           v-if="error"
           class="notice tone-danger"
@@ -456,21 +677,32 @@ async function clearLog(): Promise<void> {
                 @click="selected = e"
               >
                 <span class="time mono">{{ formatTime(e.occurredAt) }}</span>
-                <span class="cat">{{ e.category }}</span>
+                <span
+                  class="cat"
+                  :class="`tone-${categoryTone(e.outcome)}`"
+                  :title="e.category"
+                >
+                  <Icon :name="CATEGORY_ICONS[e.category]" />
+                  <span class="visually-hidden">{{ e.category }}</span>
+                </span>
                 <span class="what">
                   <span class="line"><span class="action mono">{{ e.action }}</span><span
-                    v-if="e.target || connectionName(e.connectionId)"
+                    v-if="e.target"
                     class="target"
-                  >{{ e.target ?? connectionName(e.connectionId) }}</span></span>
+                  >{{ e.target }}</span><span
+                    v-else-if="connectionName(e.connectionId)"
+                    class="target narrow-only"
+                  >{{ connectionName(e.connectionId) }}</span></span>
                   <span
                     v-if="summary(e)"
                     class="detail mono"
                   >{{ summary(e) }}</span>
                 </span>
-                <span
+                <span class="conn">{{ connectionName(e.connectionId) ?? '' }}</span>
+                <span class="outcome"><span
                   class="pill"
-                  :class="OUTCOME[e.outcome].tone"
-                ><span class="dot" />{{ OUTCOME[e.outcome].label }}</span>
+                  :class="OUTCOME_TONES[e.outcome]"
+                ><span class="dot" />{{ OUTCOME_LABELS[e.outcome] }}</span></span>
                 <span class="dur mono">{{ e.durationMs !== null ? formatDuration(e.durationMs) : '' }}</span>
               </button>
             </li>
@@ -504,6 +736,12 @@ async function clearLog(): Promise<void> {
         aria-label="Event details"
       >
         <header>
+          <span
+            class="cat"
+            :class="`tone-${categoryTone(selected.outcome)}`"
+          >
+            <Icon :name="CATEGORY_ICONS[selected.category]" />
+          </span>
           <div>
             <div class="mono">
               {{ selected.action }}
@@ -528,7 +766,7 @@ async function clearLog(): Promise<void> {
             {{ formatDateTime(selected.occurredAt) }}
           </dd>
           <dt>Outcome</dt>
-          <dd>{{ OUTCOME[selected.outcome].label }}</dd>
+          <dd>{{ OUTCOME_LABELS[selected.outcome] }}</dd>
           <template v-if="selected.connectionId">
             <dt>Connection</dt>
             <dd>{{ connectionName(selected.connectionId) }}</dd>
@@ -585,6 +823,142 @@ async function clearLog(): Promise<void> {
         </div>
       </aside>
     </div>
+
+    <!-- The open column filter. Choices apply at once, like the search; Escape or a click outside closes it. -->
+    <Teleport to="body">
+      <div
+        v-if="openFilter"
+        ref="popover"
+        class="filter-pop"
+        role="dialog"
+        :aria-label="`${FILTER_TITLES[openFilter]} filter`"
+        :style="{ left: `${popoverPos.left}px`, top: `${popoverPos.top}px` }"
+        tabindex="-1"
+        @mousedown="onPopoverMouseDown"
+      >
+        <fieldset v-if="openFilter === 'outcome'">
+          <legend>Outcome</legend>
+          <label class="opt">
+            <input
+              v-model="outcome"
+              type="radio"
+              :name="`${uid}-outcome`"
+              value=""
+            >Any outcome
+          </label>
+          <label
+            v-for="o in OUTCOMES"
+            :key="o"
+            class="opt"
+          >
+            <input
+              v-model="outcome"
+              type="radio"
+              :name="`${uid}-outcome`"
+              :value="o"
+            >{{ OUTCOME_LABELS[o] }}
+          </label>
+        </fieldset>
+
+        <fieldset v-else-if="openFilter === 'connection'">
+          <legend>Connection</legend>
+          <div class="opts">
+            <label class="opt">
+              <input
+                v-model="connectionId"
+                type="radio"
+                :name="`${uid}-conn`"
+                value=""
+              >All connections
+            </label>
+            <label
+              v-for="c in connectionChoices"
+              :key="c.id"
+              class="opt"
+            >
+              <input
+                v-model="connectionId"
+                type="radio"
+                :name="`${uid}-conn`"
+                :value="c.id"
+              ><span class="opt-text">{{ c.name }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset v-else-if="openFilter === 'category'">
+          <legend>Category</legend>
+          <div class="opts">
+            <label
+              v-for="c in CATEGORIES"
+              :key="c"
+              class="opt"
+            >
+              <input
+                v-model="filters.categories"
+                type="checkbox"
+                :value="c"
+              ><span class="opt-icon"><Icon :name="CATEGORY_ICONS[c]" /></span>{{ c }}
+            </label>
+          </div>
+          <div class="pop-actions">
+            <button
+              type="button"
+              class="btn ghost compact"
+              :disabled="filters.categories.length === 0"
+              @click="clearFilter('category')"
+            >
+              Show all categories
+            </button>
+          </div>
+        </fieldset>
+
+        <div
+          v-else
+          class="action-filter"
+        >
+          <label
+            class="legend"
+            :for="`${uid}-action`"
+          >Action</label>
+          <input
+            :id="`${uid}-action`"
+            v-model="actionsText"
+            v-bind="actionsAttrs"
+            class="input compact action"
+            :aria-invalid="!!filterForm.errors.value.actions"
+            :list="`${uid}-actions`"
+            placeholder="query.failed, connection.*"
+            spellcheck="false"
+            autocomplete="off"
+            :aria-describedby="filterForm.errors.value.actions ? 'activity-action-error' : 'activity-action-help'"
+          >
+          <datalist :id="`${uid}-actions`">
+            <option
+              v-for="a in knownActions"
+              :key="a"
+              :value="a"
+            />
+          </datalist>
+          <p
+            id="activity-action-help"
+            class="help"
+          >
+            Separate actions with commas. End one with .* to match a prefix.
+          </p>
+          <div class="pop-actions">
+            <button
+              type="button"
+              class="btn ghost compact"
+              :disabled="!filterActive.action"
+              @click="clearFilter('action')"
+            >
+              Any action
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -655,17 +1029,6 @@ h1 {
   outline: none;
 }
 
-.input.compact.action {
-  width: 200px;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.input.compact.action[aria-invalid='true'] {
-  border-color: var(--danger);
-}
-
 .filter-error {
   margin: 0;
   padding: 0 20px 8px;
@@ -673,43 +1036,11 @@ h1 {
   color: var(--danger-text);
 }
 
-.select.compact {
-  width: auto;
-  height: 28px;
-  font-size: 12px;
-}
-
-.chips {
-  display: flex;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 0 20px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.chip {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.chip[aria-pressed='true'] {
-  border-color: var(--accent);
-  background: var(--accent-tint);
-  color: var(--accent-hover);
-}
-
 .body {
   display: flex;
   flex: 1;
   min-height: 0;
+  border-top: 1px solid var(--border);
 }
 
 .list {
@@ -719,9 +1050,101 @@ h1 {
   container-type: inline-size;
 }
 
-.day {
+/* Column header: stays on top while the list scrolls; the day headings stick under it. */
+.cols-table {
   position: sticky;
   top: 0;
+  z-index: 2;
+}
+
+.cols,
+.event {
+  display: grid;
+  grid-template-columns: 72px 28px minmax(0, 1fr) 136px 112px 72px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+}
+
+.cols {
+  height: 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sticky-surface);
+}
+
+.col {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.col.cat {
+  justify-content: center;
+}
+
+.col.dur {
+  justify-content: flex-end;
+}
+
+.sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* A long header in a narrow column is cut with an ellipsis; its tooltip names the column. */
+.sort-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sort .icon,
+.sort svg {
+  flex: none;
+}
+
+.sort.sorted,
+.sort:hover:not([aria-disabled='true']) {
+  color: var(--text);
+}
+
+/* Sorting waits for every event to be loaded; the tooltip says so. */
+.sort[aria-disabled='true'] {
+  cursor: default;
+}
+
+.icon-btn.funnel {
+  flex: none;
+  width: 22px;
+  height: 22px;
+}
+
+.icon-btn.funnel.on,
+.icon-btn.funnel.on:hover {
+  color: var(--accent);
+}
+
+.narrow-only {
+  display: none;
+}
+
+.day {
+  position: sticky;
+  top: 28px;
   z-index: 1;
   margin: 0;
   padding: 6px 20px;
@@ -739,13 +1162,10 @@ h1 {
 }
 
 .event {
-  display: grid;
-  grid-template-columns: 72px 90px 1fr auto 72px;
-  align-items: center;
-  gap: 12px;
   width: 100%;
   min-height: 48px;
-  padding: 6px 20px;
+  padding-top: 6px;
+  padding-bottom: 6px;
   border: 0;
   border-bottom: 1px solid var(--border-inner);
   background: var(--surface);
@@ -763,15 +1183,26 @@ h1 {
   outline-offset: -2px;
 }
 
-/* Narrow list (details open in a small window): category and duration stay in the details panel. */
+/* Narrow list (details open in a small window): connection and duration stay in the details panel,
+   in the header as in the rows. The connection filter moves next to the action's, and a row without
+   a target names its connection there. */
 @container (max-width: 520px) {
+  .cols,
   .event {
-    grid-template-columns: 72px 1fr auto;
+    grid-template-columns: 72px 28px minmax(0, 1fr) 112px;
   }
 
-  .event .cat,
-  .event .dur {
+  .conn,
+  .dur {
     display: none;
+  }
+
+  .funnel.narrow-only {
+    display: inline-flex;
+  }
+
+  .target.narrow-only {
+    display: inline;
   }
 }
 
@@ -780,22 +1211,41 @@ h1 {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.time,
-.dur {
+.event .time,
+.event .dur,
+.event .conn {
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.dur {
+.event .dur {
   text-align: right;
 }
 
-.cat {
-  font-size: 12px;
-  color: var(--text-subtle);
+.event .conn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.what {
+.event .outcome {
+  display: flex;
+  min-width: 0;
+}
+
+/* The category icon; its tone follows the outcome (tone-danger or tone-neutral from base.css). */
+.event .cat,
+.side .cat {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-panel);
+}
+
+.event .what {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -895,5 +1345,120 @@ h1 {
   display: flex;
   gap: 8px;
   padding: 12px 16px;
+}
+
+/* Column filter popover (teleported to the body, like the context menu, and drawn the same way). */
+.filter-pop {
+  position: fixed;
+  z-index: 200;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--overlay);
+  box-shadow: var(--shadow-dialog), var(--glass-edge);
+  color: var(--text);
+  font-size: 13px;
+  -webkit-backdrop-filter: var(--overlay-blur);
+  backdrop-filter: var(--overlay-blur);
+}
+
+/* The popover itself only holds focus when none of its controls can (a press on its padding). */
+.filter-pop:focus {
+  outline: none;
+}
+
+.filter-pop fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.filter-pop legend,
+.filter-pop .legend {
+  display: block;
+  padding: 0 6px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.opts {
+  display: flex;
+  flex-direction: column;
+  max-height: min(360px, 60vh);
+  overflow: auto;
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: var(--radius-control);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.opt:hover {
+  background: var(--accent-tint);
+}
+
+.opt input {
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.opt-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opt-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-inner);
+}
+
+.action-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+}
+
+.action-filter .legend {
+  padding-bottom: 0;
+}
+
+.input.compact.action {
+  width: 100%;
+  height: 28px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.input.compact.action[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.help {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 </style>

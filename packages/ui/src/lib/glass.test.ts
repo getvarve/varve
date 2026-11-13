@@ -17,10 +17,22 @@ function stubReducedTransparency(matches: boolean) {
 }
 
 describe('applyGlass', () => {
-  it('marks the root with the native glass', () => {
+  it('marks the root with a material behind the whole window', () => {
+    const root = document.createElement('html');
+    applyGlass(root, 'vibrancy', false);
+    expect(root.dataset.glass).toBe('vibrancy');
+    expect(root.dataset.glassShapes).toBeUndefined();
+  });
+
+  it('marks the root for glass shapes with Liquid Glass, and keeps the window opaque', () => {
     const root = document.createElement('html');
     applyGlass(root, 'liquidGlass', false);
-    expect(root.dataset.glass).toBe('liquidGlass');
+    expect(root.dataset.glassShapes).toBe('');
+    expect(root.dataset.glass).toBeUndefined();
+    applyGlass(root, 'liquidGlass', true);
+    expect(root.dataset.glassShapes).toBeUndefined();
+    applyGlass(root, 'none', false);
+    expect(root.dataset.glassShapes).toBeUndefined();
   });
 
   it('keeps the opaque design without native glass', () => {
@@ -54,13 +66,13 @@ describe('watchGlass', () => {
     const setting = stubReducedTransparency(false);
     const root = document.createElement('html');
     watchGlass('liquidGlass', root);
-    expect(root.dataset.glass).toBe('liquidGlass');
+    expect(root.dataset.glassShapes).toBe('');
 
     setting.set(true);
-    expect(root.dataset.glass).toBeUndefined();
+    expect(root.dataset.glassShapes).toBeUndefined();
 
     setting.set(false);
-    expect(root.dataset.glass).toBe('liquidGlass');
+    expect(root.dataset.glassShapes).toBe('');
   });
 
   it('turns glass on in a webview without matchMedia', () => {

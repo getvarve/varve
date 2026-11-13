@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { isDriverError, presentError } from '../../api/errors';
+import { computed, onBeforeUnmount, ref } from 'vue';
+import { isDriverError } from '../../api/errors';
 import { useQuerySave } from '../../composables/useQuerySave';
+import { registerTabCommands } from '../../composables/useTabCommands';
 import { useTabs } from '../../composables/useTabs';
 import { useToasts } from '../../composables/useToasts';
 import type { QueryTab } from '../../composables/useTabs';
 import { useWorkspace } from '../../composables/useWorkspace';
 import { errorMark } from '../../lib/errorPosition';
+import { isMacPlatform, READ_ONLY_BADGE_TIP, withKeys } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
+import TabConnectionState from '../common/TabConnectionState.vue';
 import RedisDbSelect from '../redis/RedisDbSelect.vue';
 import Icon from '../common/Icon.vue';
 import HistoryPanel from './HistoryPanel.vue';
 import RedisCommandHelp from './RedisCommandHelp.vue';
 import ResultsPanel from './ResultsPanel.vue';
 import SqlEditor from './SqlEditor.vue';
+import { canRun, runOnTab, runStep } from './runOnTab';
 
 const props = defineProps<{ tab: QueryTab }>();
 
@@ -52,11 +56,26 @@ async function cancelRun(): Promise<void> {
   }
 }
 
+/**
+ * Runs the selection (else the whole editor). A tab that is not connected
+ * connects again first and then runs it, once (`runOnTab`).
+ */
 function run(text?: string, offset?: number): void {
   const target = text === undefined ? editor.value?.runTarget() : { text, offset: offset ?? 0 };
   if (!target) return;
-  void tabs.runQuery(props.tab.id, target.text, target.offset);
+  const deps = {
+    find: (id: string) => {
+      const tab = tabs.tabs.find((t) => t.id === id);
+      return tab?.kind === 'query' ? tab : undefined;
+    },
+    reconnect: tabs.reconnect,
+    runQuery: tabs.runQuery,
+  };
+  void runOnTab(deps, props.tab.id, target, () => editor.value?.runTarget() ?? null);
 }
+
+/** Run is off only while it cannot start: a statement is running, the tab is connecting, or its connection is gone. */
+const runEnabled = computed(() => canRun(props.tab, profile.value !== null));
 
 // Error position: a 1-based character position in the submitted text.
 
@@ -86,6 +105,12 @@ function saveAs(): void {
   void querySave.saveQueryTab(props.tab.id, 'saveAs');
 }
 
+/** Tooltips of the toolbar; Cancel has its shortcut only in the macOS menu bar. */
+const runTip = computed(() => withKeys(runStep(props.tab) === 'connect' ? 'Connect again and run' : 'Run', 'CmdOrCtrl+Enter'));
+const cancelTip = withKeys('Cancel the statement', isMacPlatform() ? 'CmdOrCtrl+.' : null);
+const saveAsTip = withKeys('Save as a new saved query', 'CmdOrCtrl+Shift+S');
+const saveTip = computed(() => (props.tab.savedQuery ? withKeys('Save', 'CmdOrCtrl+S') : withKeys('Save as a saved query', 'CmdOrCtrl+S')));
+
 function onKeydown(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
     event.preventDefault();
@@ -93,6 +118,19 @@ function onKeydown(event: KeyboardEvent): void {
     else save();
   }
 }
+
+// The Query menu of the menu bar runs these same functions.
+onBeforeUnmount(
+  registerTabCommands(props.tab.id, {
+    run: () => run(),
+    cancel: () => void cancelRun(),
+    save,
+    saveAs,
+    toggleHistory: () => {
+      showHistory.value = !showHistory.value;
+    },
+  }),
+);
 
 function loadFromHistory(text: string): void {
   tabs.loadText(props.tab.id, text);
@@ -132,7 +170,6 @@ function onSplitKey(event: KeyboardEvent): void {
   event.preventDefault();
 }
 
-const connectError = computed(() => (props.tab.connectError ? presentError(props.tab.connectError) : null));
 const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.name ?? 'result').replace(/[^\w.-]+/g, '_'));
 </script>
 
@@ -150,8 +187,8 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         v-if="!tab.running"
         type="button"
         class="btn primary compact"
-        :disabled="tab.status !== 'ready'"
-        title="Run (Cmd or Ctrl+Enter)"
+        :disabled="!runEnabled"
+        :title="runTip"
         @click="run()"
       >
         <Icon
@@ -163,6 +200,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         v-else
         type="button"
         class="btn compact"
+        :title="cancelTip"
         @click="cancelRun"
       >
         <Icon
@@ -174,7 +212,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         type="button"
         class="btn compact"
         :disabled="saving || !profile"
-        :title="tab.savedQuery ? 'Save (Cmd or Ctrl+S)' : 'Save as a saved query (Cmd or Ctrl+S)'"
+        :title="saveTip"
         @click="save"
       >
         <Icon name="save" />{{ tab.savedQuery ? 'Save' : 'Save as…' }}
@@ -184,6 +222,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
         type="button"
         class="btn compact"
         :disabled="saving || !profile"
+        :title="saveAsTip"
         @click="saveAs"
       >
         Save as…
@@ -214,6 +253,7 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
       <span
         v-if="tab.session?.readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon
         name="lock"
         :size="11"
@@ -265,39 +305,11 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
           @keydown="onSplitKey"
         />
         <div class="results-pane">
-          <div
-            v-if="tab.status === 'connecting'"
-            class="state"
-            role="status"
-          >
-            Connecting to {{ profile?.name ?? 'the server' }}…
-          </div>
-          <div
-            v-else-if="tab.status === 'error' || tab.status === 'cancelled'"
-            class="state"
-          >
-            <div
-              v-if="connectError"
-              class="notice tone-danger"
-              role="alert"
-            >
-              <Icon name="warning" />
-              <span><strong>{{ connectError.title }}.</strong> {{ connectError.message }}<template v-if="connectError.code"> ({{ connectError.code }})</template></span>
-            </div>
-            <p
-              v-else
-              class="subtle"
-            >
-              Not connected.
-            </p>
-            <button
-              type="button"
-              class="btn"
-              @click="tabs.reconnect(tab.id)"
-            >
-              <Icon name="refresh" />Connect again
-            </button>
-          </div>
+          <TabConnectionState
+            v-if="tab.status !== 'ready'"
+            :tab="tab"
+            compact
+          />
           <ResultsPanel
             v-else
             :run="tab.run"
@@ -386,19 +398,5 @@ const exportName = computed(() => (props.tab.savedQuery?.name ?? profile.value?.
   flex: 1;
   flex-direction: column;
   min-height: 0;
-}
-
-.state {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px;
-  color: var(--text-muted);
-}
-
-.state .notice {
-  align-items: flex-start;
-  max-width: 720px;
 }
 </style>

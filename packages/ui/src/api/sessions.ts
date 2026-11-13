@@ -199,6 +199,16 @@ export function openTransactions(): Promise<string[]> {
 }
 
 /**
+ * Ids of a connection's user sessions that are working now: a running
+ * statement, or a sequence that keeps the session between its steps (a
+ * designer or DDL apply, a grid save). `openTransactions` does not count
+ * these.
+ */
+export function busySessions(connectionId: string): Promise<string[]> {
+  return call<string[]>('busy_sessions', { connectionId });
+}
+
+/**
  * Opens a user session of a PostgreSQL profile on another database, to browse
  * that database (same prompts and tunnel as `openSession`).
  */

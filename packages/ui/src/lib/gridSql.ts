@@ -210,6 +210,25 @@ export interface FilterCondition {
 /** The filter of the data view: builder conditions joined with AND, or a raw WHERE clause. */
 export type GridFilter = { mode: 'builder'; conditions: FilterCondition[] } | { mode: 'raw'; sql: string };
 
+const sameCondition = (a: FilterCondition, b: FilterCondition): boolean => a.column === b.column && a.op === b.op && a.value === b.value;
+
+/**
+ * The applied filter without `removed`, or null when `removed` is not part of
+ * it (a condition that was added but never applied). Only the first match
+ * goes, so one of two equal conditions stays.
+ */
+export function withoutCondition(applied: GridFilter, removed: FilterCondition): GridFilter | null {
+  if (applied.mode !== 'builder') return null;
+  const at = applied.conditions.findIndex((c) => sameCondition(c, removed));
+  if (at < 0) return null;
+  return { mode: 'builder', conditions: applied.conditions.filter((_, i) => i !== at) };
+}
+
+/** Whether the condition being typed is complete enough to become part of the filter. */
+export function conditionComplete(c: FilterCondition): boolean {
+  return c.column !== '' && (c.value !== '' || !operatorNeedsValue(c.op));
+}
+
 /** A column to sort by. */
 export interface SortKey {
   column: string;

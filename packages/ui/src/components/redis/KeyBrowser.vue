@@ -2,7 +2,6 @@
 import { toTypedSchema } from '@vee-validate/zod';
 import { useForm } from 'vee-validate';
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
-import { presentError } from '../../api/errors';
 import { KEY_TYPE_FILTERS, keyTypeName, keyTypeOfFilter, moduleTypeFilters, redisModules, redisScan } from '../../api/redis';
 import type { BulkFilter, DbKeyspace, KeyEntry, RedisEditRequest } from '../../api/redis';
 import { useDialogs } from '../../composables/useDialogs';
@@ -19,12 +18,12 @@ import { redisErrorView } from '../../lib/redisErrors';
 import { createdKeyType } from '../../lib/redisEdit';
 import { entryForKey, scanBatch } from '../../lib/redisKeys';
 import type { RedisErrorView } from '../../lib/redisErrors';
-import { initCommandProblem } from '../../lib/redisInit';
 import { requiredFields } from '../../lib/schemaRequired';
+import { keyTypeTip, READ_ONLY_TIP } from '../../lib/tips';
 import { formatCount } from '../../lib/values';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
-import InitCommandNotice from '../notices/InitCommandNotice.vue';
+import TabConnectionState from '../common/TabConnectionState.vue';
 import RedisBulkTtlDialog from './RedisBulkTtlDialog.vue';
 import RedisDbSelect from './RedisDbSelect.vue';
 import RedisNewKeyDialog from './RedisNewKeyDialog.vue';
@@ -569,10 +568,6 @@ function onNewKey(request: RedisEditRequest | null): void {
   void createEdit.review(request);
 }
 
-const connectError = computed(() => (props.tab.connectError ? presentError(props.tab.connectError) : null));
-/** A refused init command of the profile gets its own explanation and an "Edit connection" button. */
-const initProblem = computed(() => (props.tab.connectError ? initCommandProblem(props.tab.connectError) : null));
-
 async function retryAfterError(): Promise<void> {
   const view = ui.error;
   if (!view) return;
@@ -607,7 +602,7 @@ async function retryAfterError(): Promise<void> {
           type="button"
           class="btn ghost compact"
           :disabled="!sessionId || readOnly || createEdit.state.planning"
-          :title="readOnly ? 'This connection is read-only.' : undefined"
+          :title="readOnly ? READ_ONLY_TIP : undefined"
           @click="creating = true"
         >
           <Icon name="plus" />New key
@@ -616,7 +611,7 @@ async function retryAfterError(): Promise<void> {
           type="button"
           class="btn ghost compact"
           :disabled="!sessionId || readOnly || !tab.scanned"
-          :title="readOnly ? 'This connection is read-only.' : 'Set or remove the TTL of every key that matches the filter'"
+          :title="readOnly ? READ_ONLY_TIP : 'Set or remove the TTL of every key that matches the filter'"
           @click="bulkTtl = true"
         >
           Bulk TTL
@@ -641,6 +636,7 @@ async function retryAfterError(): Promise<void> {
             <span class="label">MATCH<span
               v-if="required.has('pattern')"
               class="required"
+              title="Required"
               aria-hidden="true"
             > *</span></span>
             <input
@@ -776,27 +772,12 @@ async function retryAfterError(): Promise<void> {
           <span v-if="createEdit.state.error.hint">{{ createEdit.state.error.hint }}</span>
         </div>
       </div>
-      <InitCommandNotice
-        v-if="tab.connectError && initProblem"
-        class="notice-block"
-        :error="tab.connectError"
-        :connection-id="tab.connectionId"
-        @edited="tabs.reconnect(tab.id)"
+      <!-- Not connected (closed, failed or cancelled): the block every tab shows. "Connecting…" is on the progress line above. -->
+      <TabConnectionState
+        v-if="tab.status !== 'connecting'"
+        :tab="tab"
+        compact
       />
-      <div
-        v-else-if="connectError"
-        class="notice tone-danger state"
-        role="alert"
-      >
-        <span>{{ connectError.title }}: {{ connectError.message }}</span>
-        <button
-          type="button"
-          class="btn compact"
-          @click="tabs.reconnect(tab.id)"
-        >
-          Connect again
-        </button>
-      </div>
 
       <ul
         ref="list"
@@ -824,7 +805,7 @@ async function retryAfterError(): Promise<void> {
           :aria-expanded="row.node.kind === 'prefix' ? row.expanded : undefined"
           :aria-selected="row.node.kind === 'key' && row.node.item.id === tab.selected"
           :aria-disabled="row.node.kind === 'key' && !row.node.item.openable ? true : undefined"
-          :title="row.node.kind === 'key' && !row.node.item.openable ? 'This key name is too large to read, so the key cannot be opened here.' : undefined"
+          :title="row.node.kind === 'key' && !row.node.item.openable ? 'This key name is too large to read, so the key cannot be opened here' : undefined"
           :tabindex="tabStop === row.node.key ? 0 : -1"
           :style="{ top: `${index * rowHeight}px`, paddingLeft: `${8 + (row.level - 1) * 16}px` }"
           @focus="focused = row.node.key"
@@ -837,15 +818,24 @@ async function retryAfterError(): Promise<void> {
               :size="12"
               class="subtle"
             />
-            <span class="name mono">{{ row.node.label }}</span>
-            <span class="count mono">{{ formatCount(row.node.count) }}</span>
+            <span
+              class="name mono"
+              :title="row.node.label"
+            >{{ row.node.label }}</span>
+            <span
+              class="count mono"
+              :title="row.node.count === 1 ? 'One key found under this prefix' : `${formatCount(row.node.count)} keys found under this prefix`"
+            >{{ formatCount(row.node.count) }}</span>
           </template>
           <template v-else>
             <span
               class="type mono"
-              :title="row.node.item.entry.keyType === 'unknown' ? 'Type not read yet; it is read when you open the key.' : undefined"
+              :title="keyTypeTip(row.node.item.entry.keyType)"
             >{{ TYPE_LABELS[keyTypeName(row.node.item.entry.keyType)] ?? keyTypeName(row.node.item.entry.keyType) }}</span>
-            <span class="name mono">{{ row.node.label }}</span>
+            <span
+              class="name mono"
+              :title="row.node.item.openable ? row.node.label : undefined"
+            >{{ row.node.label }}</span>
           </template>
         </li>
       </ul>
@@ -1056,10 +1046,6 @@ async function retryAfterError(): Promise<void> {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-}
-
-.notice-block {
-  margin: 0 12px 8px;
 }
 
 .tree {

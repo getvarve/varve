@@ -90,6 +90,7 @@ const STATUS: Record<PlanStep['status'], { text: string; tone: string }> = {
             <span
               v-if="step.plan.destructive"
               class="pill tone-danger"
+              title="Drops or rewrites data or objects, so it asks for confirmation"
             ><span class="dot" />Destructive</span>
             <span class="spacer" />
             <span

@@ -53,6 +53,7 @@ watch(() => [props.sessionId, props.command], () => void load(), { immediate: tr
       <button
         type="button"
         class="icon-btn"
+        title="Close help"
         aria-label="Close help"
         @click="emit('close')"
       >

@@ -1,6 +1,6 @@
 /* Glass: the UI over the window's native glass (app/src-tauri/src/glass.rs).
    createVarveApp sets data-glass on <html> only when the backend applied a native material
-   (Liquid Glass, vibrancy or Mica) and the user does not ask for less transparency. Without it
+   behind the whole window (vibrancy or Mica) and the user does not ask for less transparency. Without it
    every token keeps its opaque value from tokens.css, so Linux, Windows 10 and a failed effect
    look exactly as before.
 
@@ -116,4 +116,13 @@
   :root[data-glass] body {
     transition: none;
   }
+}
+
+/* Liquid Glass on macOS 26 lies behind single shapes, not behind the window (app/src-tauri/src/glass.rs): the window
+   paints its own background and the webview is clear over it. So the page itself paints nothing, the regions of the
+   shell paint their own opaque backgrounds, and a shape that has glass behind it (the sidebar card) stays clear. None
+   of the tokens above apply: everything else keeps the opaque design. */
+:root[data-glass-shapes],
+:root[data-glass-shapes] body {
+  background: transparent;
 }

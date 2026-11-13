@@ -123,6 +123,7 @@ function bytes(value: number | null): string {
             v-if="connectionShare !== null"
             class="meter"
             role="img"
+            :title="`${Math.round(connectionShare * 100)}% of the connection limit in use`"
             :aria-label="`${Math.round(connectionShare * 100)}% of the connection limit in use`"
           ><span
             :style="{ width: `${connectionShare * 100}%`, background: connectionShare >= 0.8 ? 'var(--danger)' : connectionShare >= 0.6 ? 'var(--warning)' : 'var(--accent)' }"
@@ -301,8 +302,14 @@ function bytes(value: number | null): string {
   margin: 8px 16px 0;
 }
 
+/*
+ * The server's own version line (PostgreSQL `version()`, MySQL and MariaDB `version_comment`). It lines up with the
+ * cards under it (their row has the same 16px side padding) and wraps when it is longer than the panel is wide.
+ * Padding, not margin, places it: it is also a `.note`, whose `margin: 0` below would win.
+ */
 .detail-line {
-  margin: 12px 16px 0;
+  padding: 12px 16px 0;
+  overflow-wrap: anywhere;
 }
 
 .role {

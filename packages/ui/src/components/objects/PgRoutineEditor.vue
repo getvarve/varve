@@ -5,6 +5,7 @@ import type { ObjectSummary } from '../../api/catalog';
 import type { PgFunction } from '../../api/ddl';
 import { buildPgRoutine, createsOverload, errorsOf, identitySignature, objectRef, pgRoutineFormFrom, pgRoutineSchema } from '../../lib/ddlPlan';
 import type { PgRoutineForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -139,6 +140,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -237,6 +239,7 @@ onMounted(() => void editor.load());
                     <button
                       type="button"
                       class="icon-btn"
+                      title="Remove this argument"
                       :aria-label="`Remove argument ${arg.name || i + 1}`"
                       @click="form.args.splice(i, 1)"
                     >
@@ -342,6 +345,7 @@ onMounted(() => void editor.load());
                       <button
                         type="button"
                         class="icon-btn"
+                        title="Remove this column"
                         :aria-label="`Remove result column ${col.name || i + 1}`"
                         @click="form.returnColumns.splice(i, 1)"
                       >

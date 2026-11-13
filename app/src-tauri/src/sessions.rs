@@ -1434,6 +1434,35 @@ impl SessionManager {
         Some(guard.as_ref().and_then(|s| s.in_transaction()))
     }
 
+    /// The user sessions of a profile that are working now: a statement, or
+    /// a sequence of steps that keeps the session for itself (a designer or
+    /// DDL apply, a grid save), holds their lock. Never waits and never
+    /// sends anything to the server. The UI asks before it closes a
+    /// connection with one of these, since the close cancels the work.
+    #[must_use]
+    pub fn busy_sessions(&self, connection_id: &str) -> Vec<String> {
+        let open: Vec<Arc<OpenSession>> = self
+            .sessions
+            .lock()
+            .map(|map| {
+                map.values()
+                    .filter(|s| {
+                        s.info.purpose == SessionPurpose::User
+                            && s.info.connection_id == connection_id
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut busy: Vec<String> = open
+            .iter()
+            .filter(|s| s.session.try_lock().is_err())
+            .map(|s| s.info.id.clone())
+            .collect();
+        busy.sort();
+        busy
+    }
+
     /// A whole number read on a session without waiting for it (for example
     /// a session variable): `None` while a statement runs on it, or when
     /// the query fails or returns no number. Not logged; use only for
@@ -2057,6 +2086,39 @@ mod tests {
             list.iter()
                 .any(|e| matches!(e, SessionEvent::Closed { .. }))
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn busy_sessions_are_the_profiles_sessions_with_a_statement_running()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (manager, profile, _, _) = setup(Environment::Development)?;
+        let manager = Arc::new(manager);
+        let working = manager.open(&profile, params(), None).await?;
+        let idle = manager.open(&profile, params(), None).await?;
+        assert!(manager.busy_sessions(&profile.id).is_empty());
+        let running = {
+            let manager = Arc::clone(&manager);
+            let id = working.id.clone();
+            tokio::spawn(async move {
+                manager
+                    .execute(&id, "select sleep", false, &ExecOptions::default())
+                    .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(manager.busy_sessions(&profile.id), vec![working.id.clone()]);
+        // Another profile's question is not about this session.
+        assert!(manager.busy_sessions("another-profile").is_empty());
+        manager.cancel(&working.id).await?;
+        let outcome = running.await?;
+        assert!(outcome.is_err(), "{outcome:?}");
+        assert!(manager.busy_sessions(&profile.id).is_empty());
+        // A sequence that keeps the session between its steps counts too.
+        let locked = manager.lock_for_scripts(&idle.id).await?;
+        assert_eq!(manager.busy_sessions(&profile.id), vec![idle.id.clone()]);
+        drop(locked);
+        assert!(manager.busy_sessions(&profile.id).is_empty());
         Ok(())
     }
 

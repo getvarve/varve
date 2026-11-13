@@ -7,6 +7,7 @@ import type { SessionInfo } from '../../api/sessions';
 import { useToasts } from '../../composables/useToasts';
 import { latestOnly } from '../../lib/async';
 import { libraryNameOf } from '../../lib/live';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
 import LiveError from './LiveError.vue';
@@ -164,7 +165,7 @@ async function apply(): Promise<void> {
         type="button"
         class="btn compact primary"
         :disabled="readOnly || unsupported"
-        :title="readOnly ? 'Read-only connection' : ''"
+        :title="readOnly ? READ_ONLY_TIP : ''"
         @click="startLoad(false)"
       >
         <Icon name="plus" />Load library
@@ -184,6 +185,7 @@ async function apply(): Promise<void> {
         type="button"
         class="btn compact"
         :disabled="readOnly || plans.busy.value"
+        :title="readOnly ? READ_ONLY_TIP : undefined"
         @click="previewFlush"
       >
         Flush script cache
@@ -330,6 +332,7 @@ async function apply(): Promise<void> {
                   type="button"
                   class="btn compact"
                   :disabled="readOnly || plans.busy.value"
+                  :title="readOnly ? READ_ONLY_TIP : undefined"
                   :aria-label="`Delete library ${l.name}`"
                   @click.stop="previewDelete(l.name)"
                 >
@@ -360,6 +363,7 @@ async function apply(): Promise<void> {
             type="button"
             class="btn compact"
             :disabled="readOnly || code === null"
+            :title="readOnly ? READ_ONLY_TIP : undefined"
             @click="startLoad(true)"
           >
             Edit and reload

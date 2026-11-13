@@ -138,6 +138,7 @@ const submit = handleSubmit((form) => {
           <button
             type="button"
             class="icon-btn"
+            :title="reveal ? 'Hide what you typed' : 'Show what you typed'"
             :aria-label="reveal ? `Hide ${secretLabel(secret)}` : `Show ${secretLabel(secret)}`"
             :aria-pressed="reveal"
             @click="reveal = !reveal"

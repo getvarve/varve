@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue';
 import type { MyEvent } from '../../api/ddl';
 import { INTERVAL_UNITS, buildMyEvent, errorsOf, myEventFormFrom, myEventSchema, nextRuns, objectRef } from '../../lib/ddlPlan';
 import type { MyEventForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -97,6 +98,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop

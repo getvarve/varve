@@ -14,11 +14,12 @@
       {
         "label": "main",
         "title": "Varve",
-        "width": 1280,
-        "height": 800,
+        "width": 1240,
+        "height": 780,
         "minWidth": 960,
         "minHeight": 600,
         "titleBarStyle": "Overlay",
+        "trafficLightPosition": { "x": 17.5, "y": 27.5 },
         "hiddenTitle": true,
         "transparent": true
       }

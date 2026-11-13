@@ -375,3 +375,26 @@
   transition: none !important;
   pointer-events: none !important;
 }
+
+/* The app's tooltip (lib/tooltips.ts): one box for the whole window, placed by script. Dark on every theme, so it
+   stands apart from the surface it explains. It never takes the pointer and has no motion. */
+.tip {
+  position: fixed;
+  z-index: 10000;
+  /* Its own width whatever its place, so it is measured as it will show; long words break instead of running out. */
+  width: max-content;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+  border-radius: var(--radius-control);
+  background: #14171C;
+  color: #FFFFFF;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+}
+
+.tip[hidden] {
+  display: none;
+}

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue';
 import type { MyRoutine } from '../../api/ddl';
 import { buildMyRoutine, errorsOf, myRoutineFormFrom, myRoutineSchema, objectRef } from '../../lib/ddlPlan';
 import type { MyRoutineForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -78,6 +79,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -187,6 +189,7 @@ onMounted(() => void editor.load());
                     <button
                       type="button"
                       class="icon-btn"
+                      title="Remove this parameter"
                       :aria-label="`Remove parameter ${p.name || i + 1}`"
                       @click="form.params.splice(i, 1)"
                     >

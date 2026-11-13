@@ -2,7 +2,7 @@
 import { useToasts } from '../../composables/useToasts';
 import Icon from './Icon.vue';
 
-const { toasts, dismiss } = useToasts();
+const { toasts, dismiss, act } = useToasts();
 
 /**
  * A leaving toast is taken out of the flow so the others can slide into its
@@ -40,8 +40,17 @@ function pinLeaving(el: Element): void {
         <span v-if="t.message">{{ t.message }}</span>
       </div>
       <button
+        v-if="t.action"
+        type="button"
+        class="btn compact"
+        @click="act(t.id)"
+      >
+        {{ t.action.label }}
+      </button>
+      <button
         type="button"
         class="icon-btn"
+        title="Dismiss"
         aria-label="Dismiss notification"
         @click="dismiss(t.id)"
       >
@@ -143,6 +152,11 @@ function pinLeaving(el: Element): void {
   gap: 2px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.toast .btn {
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .text span {

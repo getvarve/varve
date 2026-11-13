@@ -2,6 +2,7 @@
 import { computed, inject, useId, watch } from 'vue';
 import type { Environment } from '../../api/records';
 import EnvBadge from '../common/EnvBadge.vue';
+import { READ_ONLY_BADGE_TIP } from '../../lib/tips';
 import Icon from '../common/Icon.vue';
 import { OBJECT_EDITOR_CONTEXT } from './types';
 
@@ -84,6 +85,7 @@ function onKey(event: KeyboardEvent, index: number): void {
       <span
         v-if="readOnly"
         class="pill tone-neutral"
+        :title="READ_ONLY_BADGE_TIP"
       ><Icon name="lock" />Read only</span>
       <slot name="badges" />
       <span

@@ -4,6 +4,7 @@ import type { ScoredMember } from '../../api/redis';
 import type { Value } from '../../api/sessions';
 import { canReference, parseScore, scoreText, targetOf, textValue } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
+import { offReason } from '../../lib/tips';
 import { cellClass, cellText, fullText, isPlaceholder, placeholderHelp, plainText } from '../../lib/values';
 import { vFocus } from './vFocus';
 
@@ -213,6 +214,7 @@ function add(allowEmpty = false): void {
                 class="btn ghost compact"
                 :aria-label="`Change the score of ${cellText(m.member)}`"
                 :disabled="!canReference(m.member)"
+                :title="canReference(m.member) ? undefined : 'This member is too large to read, so it cannot be changed here'"
                 @click="startEdit(m)"
               >
                 Score
@@ -222,7 +224,7 @@ function add(allowEmpty = false): void {
                 class="btn ghost compact"
                 :aria-label="`Remove ${cellText(m.member)}`"
                 :disabled="!canReference(m.member) || m.score.t === 'null'"
-                :title="m.score.t === 'null' ? 'A lex range has no scores; remove it from the rank or score view.' : undefined"
+                :title="offReason([!canReference(m.member), 'This member is too large to read, so it cannot be changed here'], [m.score.t === 'null', 'A lex range has no scores; remove it from the rank or score view'])"
                 @click="draft.stage({ op: 'zsetRemove', member: m.member, original: m.score })"
               >
                 Remove

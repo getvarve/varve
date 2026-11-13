@@ -3,6 +3,7 @@ import { computed, onMounted, ref, useId } from 'vue';
 import type { PgDomain } from '../../api/ddl';
 import { buildPgDomain, buildPgDomainValidate, domainProblem, errorsOf, objectRef, pgDomainFormFrom, pgDomainSchema } from '../../lib/ddlPlan';
 import type { PgDomainForm } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -96,6 +97,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -188,6 +190,7 @@ onMounted(() => void editor.load());
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="planValidate(c.original)"
               >
                 Validate
@@ -195,6 +198,7 @@ onMounted(() => void editor.load());
               <button
                 type="button"
                 class="icon-btn"
+                title="Remove this check"
                 :aria-label="`Remove check ${c.name || i + 1}`"
                 @click="form.checks.splice(i, 1)"
               >

@@ -510,12 +510,14 @@ const title = computed(() => (props.profile ? `Edit connection: ${props.profile.
             v-if="tabErrors.has(tab.name)"
             class="tab-dot error"
             role="img"
+            title="Some fields on this tab need fixing"
             aria-label="Has errors"
           />
           <span
             v-else-if="tab.name === 'ssh' && form.ssh.enabled"
             class="tab-dot on"
             role="img"
+            title="The SSH tunnel is on"
             aria-label="Enabled"
           />
         </button>
@@ -623,7 +625,10 @@ const title = computed(() => (props.profile ? `Edit connection: ${props.profile.
               @click="chooseEngine(e)"
               @keydown="onRadioKey($event, ENGINES, form.engine, chooseEngine)"
             >
-              <EngineTile :engine="e" />
+              <EngineTile
+                :engine="e"
+                named
+              />
               <span class="engine-text">
                 <span>{{ ENGINE_INFO[e].name }}</span>
                 <span class="subtle">{{ ENGINE_INFO[e].versions }}</span>

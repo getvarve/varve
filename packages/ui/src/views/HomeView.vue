@@ -51,7 +51,10 @@ const ENGINE_VERSIONS: Record<string, string> = {
           class="engine"
           @click="actions.newConnection(null, engine)"
         >
-          <EngineTile :engine="engine" />
+          <EngineTile
+            :engine="engine"
+            named
+          />
           <span class="engine-text">
             <span>{{ ENGINE_INFO[engine].name }}</span>
             <span class="subtle">{{ ENGINE_VERSIONS[engine] }}</span>

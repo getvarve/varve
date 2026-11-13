@@ -4,6 +4,7 @@ import type { FieldValue } from '../../api/redis';
 import type { Value } from '../../api/sessions';
 import { canReference, editableText, targetOf, textValue } from '../../lib/redisEdit';
 import type { EditDraft } from '../../lib/redisEdit';
+import { offReason } from '../../lib/tips';
 import { cellClass, cellText, fullText, isPlaceholder, placeholderHelp, plainText } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { vFocus } from './vFocus';
@@ -157,7 +158,7 @@ function add(): void {
                 class="btn ghost compact"
                 :aria-label="`Edit ${cellText(f.field)}`"
                 :disabled="!editableText(f.value) || !canReference(f.field)"
-                :title="editableText(f.value) ? undefined : 'Binary and very large values cannot be edited here.'"
+                :title="offReason([!canReference(f.field), 'This field name is too large to read, so it cannot be changed here'], [!editableText(f.value), 'Binary and very large values cannot be edited here'])"
                 @click="startEdit(f)"
               >
                 Edit
@@ -167,6 +168,7 @@ function add(): void {
                 class="btn ghost compact"
                 :aria-label="`Delete ${cellText(f.field)}`"
                 :disabled="!canReference(f.value) || !canReference(f.field)"
+                :title="canReference(f.value) && canReference(f.field) ? undefined : 'This value is too large to read, so it cannot be changed here'"
                 @click="remove(f)"
               >
                 Delete

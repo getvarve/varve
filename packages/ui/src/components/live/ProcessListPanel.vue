@@ -446,6 +446,7 @@ const killDisabledReason = computed(() => {
             <span
               class="pill"
               :class="link.waitsFor === null ? 'tone-danger' : 'tone-neutral'"
+              :title="link.waitsFor === null ? 'Waits for no one: ending it releases the whole chain' : undefined"
             >{{ link.waitsFor === null ? 'root blocker' : `waits for ${link.waitsFor}` }}</span>
           </button>
         </li>
@@ -463,12 +464,14 @@ const killDisabledReason = computed(() => {
           <span
             v-if="isLongRunning(selected, engine, thresholdMs)"
             class="pill tone-warning"
+            :title="`Running longer than ${longSeconds} s, the highlight threshold`"
           ><span class="dot" />Long running · {{ formatAgeMs(selected.durationMs) }}</span>
           <span class="note">{{ selected.user ?? '' }}{{ selected.database ? ` · db ${selected.database}` : '' }}{{ client(selected) ? ` from ${client(selected)}` : '' }}</span>
           <span class="grow" />
           <button
             type="button"
             class="icon-btn"
+            title="Close details"
             aria-label="Close details"
             @click="selectedId = null"
           >
@@ -521,6 +524,7 @@ const killDisabledReason = computed(() => {
                 type="button"
                 class="btn compact"
                 :disabled="busy || killDisabledReason !== ''"
+                :title="killDisabledReason || undefined"
                 @click="kill(selected, 'query')"
               >
                 <Icon name="stop" />{{ actionLabel('query') }} {{ selected.id }}
@@ -529,6 +533,7 @@ const killDisabledReason = computed(() => {
                 type="button"
                 class="btn compact danger"
                 :disabled="busy || killDisabledReason !== ''"
+                :title="killDisabledReason || undefined"
                 @click="kill(selected, 'connection')"
               >
                 {{ actionLabel('connection') }}
@@ -555,6 +560,7 @@ const killDisabledReason = computed(() => {
         <button
           type="button"
           class="icon-btn"
+          title="Close details"
           aria-label="Close details"
           @click="selectedId = null"
         >

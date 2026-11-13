@@ -23,6 +23,7 @@ const emit = defineEmits<{ apply: []; discard: [] }>();
       <span
         v-if="shown.plan.destructive"
         class="pill tone-danger"
+        title="Can lose data or lock clients out, so it asks for confirmation"
       ><span class="dot" />Destructive</span>
       <span
         v-if="shown.plan.sensitive"

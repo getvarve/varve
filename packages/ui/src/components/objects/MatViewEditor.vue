@@ -24,6 +24,7 @@ import {
 import type { PgMatViewBuild, PgMatViewForm, PgMatViewStanding } from '../../lib/ddlPlan';
 import { isMissing } from '../../lib/ddlApply';
 import { refreshedMatView } from '../../lib/ddlText';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatBytes, formatCount, formatDuration } from '../../lib/values';
 import FormField from '../common/FormField.vue';
 import Icon from '../common/Icon.vue';
@@ -316,7 +317,7 @@ watch(
         type="button"
         class="btn compact"
         :disabled="!editor.dirty.value || (unfinished && standing !== 'both')"
-        :title="unfinished && standing !== 'both' ? 'The old view is gone: finish the save with its remaining steps.' : undefined"
+        :title="unfinished && standing !== 'both' ? 'The old view is gone: finish the save with its remaining steps' : undefined"
         @click="editor.revert"
       >
         Revert
@@ -326,6 +327,7 @@ watch(
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop' || unfinished"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -466,6 +468,7 @@ watch(
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly || unfinished"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="planRefresh(false)"
               >
                 <Icon name="refresh" />Refresh
@@ -603,6 +606,7 @@ watch(
               <span
                 v-if="!i.valid"
                 class="pill tone-warning"
+                title="The index is not valid, so queries do not use it"
               >invalid</span>
               <span class="grow" />
               <span class="hint">{{ i.sizeBytes === null ? '' : formatBytes(i.sizeBytes) }}</span>

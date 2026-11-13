@@ -31,6 +31,7 @@ function yesNo(value: boolean | null): string {
       <span
         class="pill"
         :class="tone"
+        title="Cluster status (wsrep_cluster_status)"
       ><span class="dot" />{{ galera.clusterStatus ?? 'Unknown' }}</span>
       <dl class="facts">
         <dt>Cluster size</dt><dd>{{ galera.clusterSize ?? 'n/a' }}</dd>

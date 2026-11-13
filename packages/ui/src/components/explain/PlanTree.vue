@@ -134,7 +134,10 @@ defineExpose({ fit });
           >
             <div class="line">
               <span class="op">{{ nodeTitle(cardOf(p.id)) }}</span>
-              <span class="subject mono">{{ nodeSubject(cardOf(p.id)) }}</span>
+              <span
+                class="subject mono"
+                :title="nodeSubject(cardOf(p.id))"
+              >{{ nodeSubject(cardOf(p.id)) }}</span>
               <span class="self mono">{{ nodeSelfText(cardOf(p.id), plan.shareBasis) }}</span>
             </div>
             <div class="line">
@@ -165,6 +168,7 @@ defineExpose({ fit });
       <button
         type="button"
         class="zbtn"
+        title="Zoom out"
         aria-label="Zoom out"
         @click="zoomBy(-0.1)"
       >
@@ -174,6 +178,7 @@ defineExpose({ fit });
       <button
         type="button"
         class="zbtn"
+        title="Zoom in"
         aria-label="Zoom in"
         @click="zoomBy(0.1)"
       >

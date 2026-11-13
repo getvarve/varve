@@ -6581,6 +6581,7 @@ dependencies = [
  "varve-driver-postgres",
  "varve-driver-redis",
  "varve-extension",
+ "varve-glass",
  "varve-live-stats",
  "varve-records",
  "varve-redis-syntax",
@@ -6708,6 +6709,16 @@ dependencies = [
  "tracing",
  "varve-core",
  "varve-store",
+]
+
+[[package]]
+name = "varve-glass"
+version = "0.3.2"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
+ "tauri",
+ "tracing",
 ]
 
 [[package]]

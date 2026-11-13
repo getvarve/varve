@@ -187,7 +187,10 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
           @click="active = i"
         >
           Result {{ rowResults.length > 1 ? i + 1 : '' }}
-          <span class="count">{{ formatCount(r.result.rows.length) }}</span>
+          <span
+            class="count"
+            :title="r.result.rows.length === 1 ? 'One row' : `${formatCount(r.result.rows.length)} rows`"
+          >{{ formatCount(r.result.rows.length) }}</span>
         </button>
         <button
           :id="`${uid}-tab-messages`"
@@ -204,6 +207,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
             v-if="failure"
             class="err-dot"
             role="img"
+            title="The run failed: the error is here"
             aria-label="Error"
           />
         </button>
@@ -218,6 +222,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
         <button
           type="button"
           class="btn ghost compact"
+          title="Export this result as CSV"
           @click="exportAs('csv')"
         >
           <Icon name="download" />CSV
@@ -225,6 +230,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
         <button
           type="button"
           class="btn ghost compact"
+          title="Export this result as JSON"
           @click="exportAs('json')"
         >
           <Icon name="download" />JSON
@@ -269,6 +275,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
             <button
               type="button"
               class="icon-btn"
+              title="Copy value"
               aria-label="Copy value"
               @click="copyCell"
             >
@@ -277,6 +284,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
             <button
               type="button"
               class="icon-btn"
+              title="Close value panel"
               aria-label="Close value panel"
               @click="cell = null"
             >
@@ -308,6 +316,7 @@ async function exportAs(format: 'csv' | 'json'): Promise<void> {
             <span
               v-if="failure.code"
               class="mono code"
+              title="Error code from the server"
             >{{ failure.code }}</span>
           </div>
           <p class="mono">

@@ -115,6 +115,7 @@ const run = handleSubmit(() => {
         type="button"
         class="btn danger"
         :disabled="!enabled"
+        :title="enabled ? undefined : 'Type the connection name first'"
         @click="run"
       >
         Run

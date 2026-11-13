@@ -8,15 +8,38 @@ export const ENGINE_INFO: Record<Engine, { code: string; name: string; versions:
   redis: { code: 'RD', name: 'Redis', versions: '6.2 and later', color: 'var(--engine-rd)' },
 };
 
+/**
+ * `short` is the word of the status bar's band; `tag` the shorter word at the end of a connection's row in the
+ * sidebar, where it must fit next to the name at the narrowest sidebar.
+ */
 export const ENVIRONMENT_INFO: Record<
   Environment,
-  { label: string; short: string; tone: 'danger' | 'warning' | 'info' | 'success'; color: string; onColor: string }
+  { label: string; short: string; tag: string; tone: 'danger' | 'warning' | 'info' | 'success'; color: string; onColor: string }
 > = {
-  production: { label: 'Production', short: 'PRODUCTION', tone: 'danger', color: 'var(--env-production)', onColor: 'var(--on-env-production)' },
-  staging: { label: 'Staging', short: 'STAGING', tone: 'warning', color: 'var(--env-staging)', onColor: 'var(--on-env-staging)' },
-  test: { label: 'Test', short: 'TEST', tone: 'info', color: 'var(--env-test)', onColor: 'var(--on-env-test)' },
-  development: { label: 'Development', short: 'DEV', tone: 'success', color: 'var(--env-development)', onColor: 'var(--on-env-development)' },
+  production: {
+    label: 'Production',
+    short: 'PRODUCTION',
+    tag: 'PROD',
+    tone: 'danger',
+    color: 'var(--env-production)',
+    onColor: 'var(--on-env-production)',
+  },
+  staging: { label: 'Staging', short: 'STAGING', tag: 'STAGING', tone: 'warning', color: 'var(--env-staging)', onColor: 'var(--on-env-staging)' },
+  test: { label: 'Test', short: 'TEST', tag: 'TEST', tone: 'info', color: 'var(--env-test)', onColor: 'var(--on-env-test)' },
+  development: {
+    label: 'Development',
+    short: 'DEV',
+    tag: 'DEV',
+    tone: 'success',
+    color: 'var(--env-development)',
+    onColor: 'var(--on-env-development)',
+  },
 };
+
+/** The tooltip of an environment tag: what it is, and where it is chosen. */
+export function environmentTitle(environment: Environment): string {
+  return `Environment: ${ENVIRONMENT_INFO[environment].label}\nSet in the connection's settings.`;
+}
 
 export const ENVIRONMENT_HELP: Record<Environment, string> = {
   development: 'Local or personal databases. No extra safety checks beyond what you turn on.',

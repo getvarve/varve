@@ -91,6 +91,7 @@ watch(() => [props.schema, props.revision], load);
       <button
         type="button"
         class="icon-btn"
+        title="New type"
         aria-label="New type"
         @click="emit('createObject', newKind, { database, schema, parent: null })"
       >

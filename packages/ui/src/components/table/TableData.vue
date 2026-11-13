@@ -9,6 +9,7 @@ import type {
   GridReadyEvent,
   SortChangedEvent,
   ValueSetterParams,
+  CellContextMenuEvent,
 } from 'ag-grid-community';
 import { AgGridVue } from 'ag-grid-vue3';
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, useId, watch } from 'vue';
@@ -20,6 +21,8 @@ import type { SessionInfo, Value } from '../../api/sessions';
 import { useDialogs } from '../../composables/useDialogs';
 import { useKeepGridScroll, useSizeColumnsWhenShown } from '../../composables/useSizeColumnsWhenShown';
 import { useToasts } from '../../composables/useToasts';
+import { cellMenuItems } from '../../lib/gridMenu';
+import ContextMenu from '../common/ContextMenu.vue';
 import { latestOnly } from '../../lib/async';
 import { runWithConfirmation } from '../../lib/destructive';
 import {
@@ -46,10 +49,12 @@ import {
 import type { ApplyProblem, ChangeRef, ChangeSet, GridRowData } from '../../lib/gridChanges';
 import { createRowViewCache, RowVersions } from '../../lib/gridRows';
 import type { ViewRow } from '../../lib/gridRows';
-import { countSql, dialectOf, FILTER_OPERATORS, operatorNeedsValue, selectPageSql } from '../../lib/gridSql';
+import { conditionComplete, countSql, dialectOf, FILTER_OPERATORS, operatorNeedsValue, selectPageSql, withoutCondition } from '../../lib/gridSql';
 import type { FilterCondition, GridFilter, SortKey } from '../../lib/gridSql';
 import { cachedEditText, opensInDialog, previewText, tooltipText } from '../../lib/gridPreview';
 import { columnAccess, emptyMeansNull, keyRefusal, parseCellText, pendingCellText, tableReadOnlyReason } from '../../lib/gridValues';
+import { exportText } from '../../lib/exportResult';
+import { offReason } from '../../lib/tips';
 import { cellClass, formatCount, formatDuration } from '../../lib/values';
 import Icon from '../common/Icon.vue';
 import { TypedHeader } from '../query/typedHeader';
@@ -182,12 +187,24 @@ function addCondition(): void {
   editing.value = '';
 }
 
-function removeCondition(at: number): void {
+/** Something waits for "Apply filter": a changed filter, or a condition typed far enough to add. */
+const canApplyFilter = computed(() => filterDirty.value || (filterMode.value === 'builder' && conditionComplete(editing)));
+
+/**
+ * Removes a condition. One that is part of the shown filter is taken out of it at once and the rows are read again;
+ * conditions that were added or typed but not applied yet stay as they are and still wait for "Apply filter".
+ */
+async function removeCondition(at: number): Promise<void> {
+  const removed = conditions.value[at];
+  if (!removed) return;
   conditions.value = conditions.value.filter((_, i) => i !== at);
+  const filter = withoutCondition(applied.value, removed);
+  if (filter && (await loadPage({ ...shownPage(), filter, offset: 0 })) === 'shown') exactCount.value = null;
 }
 
 async function applyFilter(): Promise<void> {
-  if (filterMode.value === 'builder' && editing.column && (editing.value !== '' || !operatorNeedsValue(editing.op))) addCondition();
+  if (!canApplyFilter.value) return;
+  if (filterMode.value === 'builder' && conditionComplete(editing)) addCondition();
   const filter: GridFilter = filterMode.value === 'raw' ? { mode: 'raw', sql: rawFilter.value } : { mode: 'builder', conditions: [...conditions.value] };
   if ((await loadPage({ ...shownPage(), filter, offset: 0 })) === 'shown') exactCount.value = null;
 }
@@ -546,6 +563,9 @@ const gridOptions: GridOptions<ViewRow> = {
   onSortChanged: (e: SortChangedEvent<ViewRow>) => onSortChanged(e),
   onCellFocused: (e: CellFocusedEvent<ViewRow>) => onCellFocused(e),
   onCellDoubleClicked: (e: CellDoubleClickedEvent<ViewRow>) => onCellDoubleClicked(e),
+  // The app's own menu opens on a right click, not the webview's.
+  preventDefaultOnContextMenu: true,
+  onCellContextMenu: (e: CellContextMenuEvent<ViewRow>) => onCellContextMenu(e),
   onBodyScroll: (e) => scroll.noteScroll(e.top, e.left),
 };
 
@@ -577,6 +597,79 @@ function onCellFocused(e: CellFocusedEvent<ViewRow>): void {
   const colId = typeof e.column === 'string' ? e.column : e.column?.getColId();
   const i = columnIndexOf(colId);
   if (node?.data) focus.value = { rowId: node.data.id, column: columns.value[i]?.name ?? null };
+}
+
+/** The menu of a right click on a cell: where it opened. The cell it is about is the focused one. */
+const cellMenu = ref<{ x: number; y: number } | null>(null);
+
+function onCellContextMenu(e: CellContextMenuEvent<ViewRow>): void {
+  const i = columnIndexOf(e.column.getColId());
+  if (!e.data || !(e.event instanceof MouseEvent)) return;
+  // The actions work on the focused cell, so the cell under the pointer becomes it.
+  if (e.rowIndex !== null) e.api.setFocusedCell(e.rowIndex, e.column);
+  focus.value = { rowId: e.data.id, column: columns.value[i]?.name ?? null };
+  cellMenu.value = { x: e.event.clientX, y: e.event.clientY };
+}
+
+const cellMenuEntries = computed(() => {
+  const row = focusedRow.value;
+  const column = focusedColumn.value;
+  const pending = !!row && !!column && column.name in (row.pending ?? {});
+  return cellMenuItems({ row, column, pending }, editable.value);
+});
+
+/** The whole text of a cell for the clipboard: what is stored, or what a pending edit will store. */
+function copyTextOf(row: ViewRow, i: number): string {
+  const { pending, value } = cellOf(row, i);
+  if (pending || row.kind === 'insert' || !value) return displayText(row, i);
+  return exportText(value) ?? '';
+}
+
+async function copyText(text: string, done: string, failed: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    toasts.push('success', done, '', 2000);
+  } catch (error) {
+    toasts.pushError(error, failed);
+  }
+}
+
+function onCellMenuSelect(id: string): void {
+  cellMenu.value = null;
+  const row = focusedRow.value;
+  const column = focusedColumn.value;
+  switch (id) {
+    case 'edit':
+      if (row && column) openEditor(row.id, column.name);
+      break;
+    case 'null':
+      setSpecial('null');
+      break;
+    case 'default':
+      setSpecial('default');
+      break;
+    case 'revert':
+      revertFocused();
+      break;
+    case 'copy-value': {
+      const i = column ? columns.value.indexOf(column) : -1;
+      if (row && i >= 0) void copyText(copyTextOf(row, i), 'Value copied', 'Could not copy the value');
+      break;
+    }
+    case 'copy-row':
+      // Tab separated, in column order, so it pastes into a spreadsheet as one row.
+      if (row) {
+        const fields = columns.value.map((_, i) => copyTextOf(row, i).replace(/[\t\r\n]+/g, ' '));
+        void copyText(fields.join('\t'), 'Row copied', 'Could not copy the row');
+      }
+      break;
+    case 'add':
+      addRow();
+      break;
+    case 'delete':
+      toggleDeleteFocused();
+      break;
+  }
 }
 
 function onCellDoubleClicked(e: CellDoubleClickedEvent<ViewRow>): void {
@@ -995,6 +1088,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn small"
+            title="Remove this condition"
             :aria-label="`Remove condition ${c.column} ${conditionText(c).op} ${c.value}`"
             @click="removeCondition(n)"
           >
@@ -1084,6 +1178,8 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
       <button
         type="button"
         class="btn compact"
+        :class="{ primary: canApplyFilter }"
+        :disabled="!canApplyFilter"
         @click="applyFilter"
       >
         Apply filter
@@ -1174,6 +1270,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact"
           :disabled="!focusedRow"
+          :title="focusedRow ? undefined : 'Select a cell first'"
           @click="toggleDeleteFocused"
         >
           {{ focusedRow?.deleted ? 'Undo delete' : focusedRow?.kind === 'insert' ? 'Remove new row' : 'Delete row' }}
@@ -1183,6 +1280,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow || !focusedColumn.nullable"
+          :title="offReason([!focusedColumn || !focusedRow, 'Select a cell first'], [focusedColumn?.nullable === false, `${focusedColumn?.name} does not allow NULL`])"
           @click="setSpecial('null')"
         >
           Set NULL
@@ -1191,6 +1289,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow"
+          :title="focusedColumn && focusedRow ? undefined : 'Select a cell first'"
           @click="setSpecial('default')"
         >
           Set DEFAULT
@@ -1199,6 +1298,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedColumn || !focusedRow"
+          :title="focusedColumn && focusedRow ? undefined : 'Select a cell first'"
           @click="focusedRow && focusedColumn && openEditor(focusedRow.id, focusedColumn.name)"
         >
           Edit value…
@@ -1207,6 +1307,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           type="button"
           class="btn compact ghost"
           :disabled="!focusedRow || !focusedColumn || !(focusedColumn.name in (focusedRow?.pending ?? {}))"
+          :title="offReason([!focusedRow || !focusedColumn, 'Select a cell first'], [!(focusedColumn && focusedRow && focusedColumn.name in focusedRow.pending), 'This cell has no change'])"
           @click="revertFocused"
         >
           Revert cell
@@ -1255,6 +1356,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
       <button
         type="button"
         class="icon-btn"
+        title="Dismiss"
         aria-label="Dismiss"
         @click="problem = null; problemRow = null"
       >
@@ -1285,11 +1387,21 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
             :column-defs="columnDefs"
             :grid-options="gridOptions"
           />
+          <ContextMenu
+            v-if="cellMenu"
+            :items="cellMenuEntries"
+            :x="cellMenu.x"
+            :y="cellMenu.y"
+            label="Cell actions"
+            @select="onCellMenuSelect"
+            @close="cellMenu = null"
+          />
         </div>
         <div class="pager">
           <button
             type="button"
             class="icon-btn bordered"
+            title="Previous page"
             aria-label="Previous page"
             :disabled="offset === 0 || loading"
             @click="page(-1)"
@@ -1303,6 +1415,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn bordered"
+            title="Next page"
             aria-label="Next page"
             :disabled="!hasNext || loading"
             @click="page(1)"
@@ -1362,6 +1475,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Previous record"
             aria-label="Previous record"
             :disabled="focusedIndex <= 0"
             @click="moveRecord(-1)"
@@ -1374,6 +1488,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Next record"
             aria-label="Next record"
             :disabled="focusedIndex < 0 || focusedIndex >= viewRows.length - 1"
             @click="moveRecord(1)"
@@ -1383,6 +1498,7 @@ const sortText = computed(() => (sort.value.length === 0 ? (key.value ? `${key.v
           <button
             type="button"
             class="icon-btn"
+            title="Close record view"
             aria-label="Close record view"
             @click="recordOpen = false"
           >

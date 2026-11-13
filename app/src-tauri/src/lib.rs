@@ -11,6 +11,7 @@ mod ipc;
 pub mod keychain_cleanup;
 pub mod m2;
 pub mod mcp;
+mod menu;
 pub mod permissions;
 pub mod quit;
 pub mod secret_versions;

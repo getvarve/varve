@@ -73,6 +73,36 @@ describe('Modal initial focus', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close');
     wrapper.unmount();
   });
+
+  it('gives the Close button a tooltip with its key, and the title none while its text fits', async () => {
+    const wrapper = mountModal('Move “a very long folder name that does not fit”', []);
+    await flushPromises();
+    expect(document.querySelector('button[aria-label="Close"]')?.getAttribute('title')).toBe('Close (Esc)');
+    // jsdom has no layout, so nothing is cut: a tooltip would only repeat the title.
+    expect(document.querySelector('h2.title')?.hasAttribute('title')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('gives the title its full text as a tooltip when it is cut short', async () => {
+    const widths = { scrollWidth: 600, clientWidth: 300 };
+    const originals = (['scrollWidth', 'clientWidth'] as const).map((name) => [name, Object.getOwnPropertyDescriptor(Element.prototype, name)] as const);
+    for (const name of ['scrollWidth', 'clientWidth'] as const) {
+      Object.defineProperty(Element.prototype, name, { configurable: true, get: () => widths[name] });
+    }
+    try {
+      const wrapper = mountModal('Move “a very long folder name that does not fit”', []);
+      await flushPromises();
+      expect(document.querySelector('h2.title')?.getAttribute('title')).toBe('Move “a very long folder name that does not fit”');
+      // A shorter title that fits again loses the tooltip.
+      widths.scrollWidth = 200;
+      await wrapper.setProps({ title: 'Move' });
+      await flushPromises();
+      expect(document.querySelector('h2.title')?.hasAttribute('title')).toBe(false);
+      wrapper.unmount();
+    } finally {
+      for (const [name, descriptor] of originals) if (descriptor) Object.defineProperty(Element.prototype, name, descriptor);
+    }
+  });
 });
 
 describe('Modal keys and focus', () => {

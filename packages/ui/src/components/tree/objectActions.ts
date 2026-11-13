@@ -252,6 +252,15 @@ export function defaultAction(node: ObjNode): ObjectActionId | null {
   }
 }
 
+/**
+ * Whether a double click on a tree row opens the row (shows what is under it) instead of running its action. Every
+ * row that can open does, except a real object such as a table or a view: a double click on those opens their data
+ * or their editor, and their columns stay behind the arrow. `node` is null for folders and connections.
+ */
+export function doubleClickExpands(expandable: boolean, node: ObjNode | null): boolean {
+  return expandable && node?.type !== 'object';
+}
+
 async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);

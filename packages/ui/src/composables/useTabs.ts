@@ -352,13 +352,21 @@ async function connect(id: string): Promise<void> {
   }
 }
 
+/**
+ * Activates an open tab that was asked for again (from the tree, a saved
+ * query, a menu). Opening it is using it: a tab without a session (its
+ * connection was closed, a connect failed or was cancelled) connects again.
+ */
+function reuse(tab: WorkspaceTab): WorkspaceTab {
+  activeId.value = tab.id;
+  if (!tab.session && tab.status !== 'connecting') void connect(tab.id);
+  return tab;
+}
+
 function add(tab: WorkspaceTab): WorkspaceTab {
   const identity = tabIdentity(tab);
   const open = identity === null ? undefined : tabs.find((t) => tabIdentity(t) === identity);
-  if (open) {
-    activeId.value = open.id;
-    return open;
-  }
+  if (open) return reuse(open);
   tabs.push(tab);
   activeId.value = tab.id;
   const added = tabs[tabs.length - 1] as WorkspaceTab;
@@ -496,7 +504,7 @@ function openKeysTab(profile: ConnectionProfile, db: number | null = null): Work
         if (open.kind === 'keys') resetKeys(open);
       }
     }
-    return open;
+    return reuse(open);
   }
   const startDb = db ?? profile.options.redisDb;
   return add({
@@ -579,9 +587,8 @@ function openOverviewTab(profile: ConnectionProfile, where: { database?: string 
         (wanted === null ? t.database === null : overviewOn(t, profile) === wanted),
     );
     if (open) {
-      activeId.value = open.id;
       if (where.schema) open.scope.schema = where.schema;
-      return open;
+      return reuse(open);
     }
   }
   const scope = { database: pg ? null : database, schema: pg ? (where.schema ?? null) : null };
@@ -716,6 +723,39 @@ async function closeTab(id: string): Promise<void> {
 /** Closes every tab of a connection, for example after it was deleted. */
 async function closeConnectionTabs(connectionId: string): Promise<void> {
   for (const tab of tabs.filter((t) => t.connectionId === connectionId)) await closeTab(tab.id);
+}
+
+/**
+ * Ends the session of every tab of a connection and keeps the tabs ("Close
+ * connection"): a running statement is cancelled, a connect in progress is
+ * dropped (its session is closed once it opens), and each tab is left not
+ * connected, without an error, so it shows "Not connected" with Connect
+ * again; opening it again connects it (`reuse`). Their views stay mounted
+ * (`useLastSession`), so typed text and unapplied changes stay. Resolves
+ * when the backend has closed the sessions; the last user session of a
+ * profile takes its pooled sessions and SSH tunnel with it (`close_session`).
+ */
+async function disconnectConnection(connectionId: string): Promise<void> {
+  const closing: Promise<void>[] = [];
+  for (const tab of tabs.filter((t) => t.connectionId === connectionId)) {
+    // A newer generation makes a connect still running discard its answer and close that session.
+    connecting.set(tab.id, (connecting.get(tab.id) ?? 0) + 1);
+    const session = tab.session;
+    const running = tab.kind === 'query' && tab.running;
+    tab.session = null;
+    tab.multi = NO_MULTI;
+    tab.status = 'cancelled';
+    tab.connectError = null;
+    tab.reconnectNeeded = null;
+    if (!session) continue;
+    closing.push(
+      (async () => {
+        if (running) await cancel(session.id).catch(() => undefined);
+        await closeSession(session.id).catch(() => undefined);
+      })(),
+    );
+  }
+  await Promise.all(closing);
 }
 
 /**
@@ -1002,6 +1042,7 @@ export function useTabs() {
     setOverviewScope,
     closeTab,
     closeConnectionTabs,
+    disconnectConnection,
     reconnect,
     markLost,
     selectDb,

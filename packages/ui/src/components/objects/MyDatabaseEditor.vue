@@ -5,6 +5,7 @@ import { buildMyDatabase, myDatabaseErrors, myDatabaseFeatures, myDatabaseFormFr
 import type { MyDatabaseForm } from '../../lib/ddlDatabase';
 import { objectRef } from '../../lib/ddlPlan';
 import type { FieldErrors } from '../../lib/ddlPlan';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import { formatBytes } from '../../lib/values';
 import FormField from '../common/FormField.vue';
 import ChangePanel from './ChangePanel.vue';
@@ -98,6 +99,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop
@@ -256,6 +258,7 @@ onMounted(() => void editor.load());
                 type="button"
                 class="btn compact"
                 :disabled="session.readOnly"
+                :title="session.readOnly ? READ_ONLY_TIP : undefined"
                 @click="makeWritable"
               >
                 Make it writable first

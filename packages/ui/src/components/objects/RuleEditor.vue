@@ -4,6 +4,7 @@ import type { PgRule, QualifiedName } from '../../api/ddl';
 import { objectRef } from '../../lib/ddlPlan';
 import { buildPgRule, parseRuleDefinition, pgRuleErrors, pgRuleFormFrom } from '../../lib/ddlRls';
 import type { PgRuleForm } from '../../lib/ddlRls';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import FormField from '../common/FormField.vue';
 import ChangePanel from './ChangePanel.vue';
 import DdlView from './DdlView.vue';
@@ -96,6 +97,7 @@ onMounted(() => void editor.load());
         type="button"
         class="btn compact"
         :disabled="session.readOnly || editor.mode.value === 'drop'"
+        :title="session.readOnly ? READ_ONLY_TIP : undefined"
         @click="editor.startDrop"
       >
         Drop

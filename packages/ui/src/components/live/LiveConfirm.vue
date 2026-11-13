@@ -101,6 +101,7 @@ function confirm(): void {
         class="btn"
         :class="danger ? 'danger' : 'primary'"
         :disabled="!enabled"
+        :title="enabled ? undefined : `Type ${typeToConfirm} first`"
         @click="confirm"
       >
         {{ confirmLabel }}

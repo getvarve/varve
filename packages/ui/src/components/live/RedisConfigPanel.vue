@@ -6,6 +6,7 @@ import type { ConfigEntry } from '../../api/live';
 import type { SessionInfo } from '../../api/sessions';
 import { useToasts } from '../../composables/useToasts';
 import { configNote, filterConfig } from '../../lib/live';
+import { READ_ONLY_TIP } from '../../lib/tips';
 import EnvBadge from '../common/EnvBadge.vue';
 import Icon from '../common/Icon.vue';
 import LiveError from './LiveError.vue';
@@ -134,7 +135,7 @@ async function apply(): Promise<void> {
         type="button"
         class="btn compact"
         :disabled="readOnly || plans.busy.value"
-        :title="readOnly ? 'Read-only connection' : 'CONFIG REWRITE'"
+        :title="readOnly ? READ_ONLY_TIP : 'CONFIG REWRITE'"
         @click="previewRewrite"
       >
         <Icon name="save" />Rewrite config file

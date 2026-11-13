@@ -155,6 +155,7 @@ const keyProblems = computed(() => {
               <button
                 type="button"
                 class="icon-btn"
+                :title="by.keys.length === 1 ? 'A partitioned table needs at least one key' : 'Remove this key'"
                 :aria-label="`Remove key ${n + 1}`"
                 :disabled="disabled || by.keys.length === 1"
                 @click="by.keys.splice(n, 1)"

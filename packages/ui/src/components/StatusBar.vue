@@ -6,7 +6,8 @@ import { useTabs } from '../composables/useTabs';
 import { useUpdates } from '../composables/useUpdates';
 import { useWorkspace } from '../composables/useWorkspace';
 import { APP_INFO_KEY } from '../keys';
-import { ENGINE_INFO, ENVIRONMENT_INFO, encryptionStatus } from '../lib/display';
+import { ENGINE_INFO, ENVIRONMENT_HELP, ENVIRONMENT_INFO, encryptionStatus } from '../lib/display';
+import { READ_ONLY_BADGE_TIP } from '../lib/tips';
 import { formatCount, formatDuration } from '../lib/values';
 
 const info = inject(APP_INFO_KEY, ref<AppInfo | null>(null));
@@ -57,6 +58,7 @@ const lastRun = computed(() => {
       <span
         class="band"
         :style="{ background: env.color, color: env.onColor }"
+        :title="ENVIRONMENT_HELP[profile.environment]"
       >{{ env.short }}</span>
       <span
         class="seg name"
@@ -79,6 +81,7 @@ const lastRun = computed(() => {
       <span
         v-if="session?.readOnly"
         class="seg badge"
+        :title="READ_ONLY_BADGE_TIP"
       >Read only</span>
     </template>
     <template v-else>

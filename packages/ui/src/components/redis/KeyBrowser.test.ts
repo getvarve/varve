@@ -534,3 +534,46 @@ describe('KeyBrowser scan retry', () => {
     await tabs.closeTab(id);
   });
 });
+
+describe('KeyBrowser without a session', () => {
+  /** The Connect again button of the not-connected block. */
+  function connectAgain(wrapper: ReturnType<typeof mount>) {
+    return wrapper.findAll('button').find((b) => b.text() === 'Connect again');
+  }
+
+  it('says it is not connected after Close connection and connects again from there', async () => {
+    const { tabs, tab, wrapper, id } = await browser();
+    scans[0]?.resolve({ cursor: '0', keys: [key('a')] });
+    await settle();
+    expect(connectAgain(wrapper)).toBeUndefined();
+
+    // Closed from the sidebar: no session, no error.
+    await tabs.disconnectConnection(profile.id);
+    await settle();
+    expect(tab()).toMatchObject({ status: 'cancelled', session: null, connectError: null });
+    expect(wrapper.text()).toContain('Not connected.');
+    expect(connectAgain(wrapper)).toBeDefined();
+
+    nextSession = 's2';
+    await connectAgain(wrapper)?.trigger('click');
+    await settle();
+    expect(tab().session?.id).toBe('s2');
+    expect(wrapper.text()).not.toContain('Not connected.');
+    expect(connectAgain(wrapper)).toBeUndefined();
+    wrapper.unmount();
+    await tabs.closeTab(id);
+  });
+
+  it('shows the error with Connect again when the session was lost', async () => {
+    const { tabs, wrapper, id } = await browser();
+    scans[0]?.resolve({ cursor: '0', keys: [key('a')] });
+    await settle();
+    tabs.reportTabError(id, lostConnection);
+    await settle();
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true);
+    expect(wrapper.text()).not.toContain('Not connected.');
+    expect(connectAgain(wrapper)).toBeDefined();
+    wrapper.unmount();
+    await tabs.closeTab(id);
+  });
+});
