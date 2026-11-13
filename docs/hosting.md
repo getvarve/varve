@@ -25,6 +25,14 @@ A backend stores your connection profiles, folders and saved queries so they syn
 
 Every release publishes the server as an image on GitHub's container registry, `ghcr.io/getvarve/varve-server`, for amd64 and arm64, tagged with the release's version (such as `0.4.0`), its minor version (`0.4`) and `latest`. The app and the server share one version number. Varve Cloud runs the same image.
 
+> **The image is not public yet.** The server is new: the desktop app cannot sign in to it yet, and nobody outside its tests has run it. Until that changes, pulling the image answers `denied` for anyone outside the getvarve organization. To try the server now, build the image yourself in a checkout of this repository, under the name `compose.prod.yaml` looks for (use the `VARVE_VERSION` you put in `.env`, or `latest` when you set none):
+>
+> ```bash
+> docker build --target prod --file docker/api/Dockerfile --tag ghcr.io/getvarve/varve-server:latest .
+> ```
+>
+> Then follow the steps below. Compose uses the image you built and pulls nothing; to update, check out the new release and build again instead of `docker compose pull`.
+
 ### What you need
 
 - A Linux machine with [Docker Engine](https://docs.docker.com/engine/install/) and its Compose plugin, version 2.24 or newer (`docker compose version`). 1 GB of RAM is enough.
