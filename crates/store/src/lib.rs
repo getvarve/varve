@@ -307,6 +307,18 @@ CREATE INDEX core_saved_queries_folder ON core_saved_queries (workspace_id, fold
 CREATE INDEX core_saved_queries_connection ON core_saved_queries (connection_id);
 ";
 
+/// Indexes for sorting the activity log on a column other than time (design
+/// doc 9.6). The log pages each sort value newest first (`<column> = ?
+/// ORDER BY occurred_at DESC`) and finds the next sort value with one index
+/// seek (`<column> > ? ORDER BY <column> LIMIT 1`); without these, both
+/// would read the whole table on every page of a log that is kept forever by
+/// default. The connection column already has `core_activity_conn_time`.
+const CORE_V4_ACTIVITY_SORT: &str = "
+CREATE INDEX core_activity_action_time ON core_activity (action, occurred_at);
+CREATE INDEX core_activity_outcome_time ON core_activity (outcome, occurred_at);
+CREATE INDEX core_activity_duration_time ON core_activity (duration_ms, occurred_at);
+";
+
 /// Migrations of the core namespace, owned by the app.
 #[must_use]
 pub fn core_migrations() -> MigrationSet {
@@ -326,6 +338,7 @@ pub fn core_migrations() -> MigrationSet {
             ),
             SchemaMigration::new(2, "create_activity", CORE_V2_ACTIVITY),
             SchemaMigration::new(3, "create_folders_connections_queries", CORE_V3_RECORDS),
+            SchemaMigration::new(4, "index_activity_sort_columns", CORE_V4_ACTIVITY_SORT),
         ],
     )
 }

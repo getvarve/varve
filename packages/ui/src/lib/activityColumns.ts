@@ -1,5 +1,6 @@
-import type { ActivityEvent, Category, Outcome } from '../api/activity';
+import type { ActivityEvent, ActivityOrder, ActivitySortColumn, Category, Outcome, SortDirection } from '../api/activity';
 import type { IconName } from '../components/common/Icon.vue';
+import { formatDateTime, formatTime } from './display';
 
 /** The icon of each activity category in the list and the details panel. */
 export const CATEGORY_ICONS: Record<Category, IconName> = {
@@ -37,17 +38,15 @@ export function categoryTone(outcome: Outcome): 'danger' | 'neutral' {
   return outcome === 'failure' ? 'danger' : 'neutral';
 }
 
-// Sorting
+// Sorting. The backend sorts over the whole log and pages in that order
+// (`ActivityOrder` in crates/activity/src/query.rs); the list only shows what
+// it gets, in the order it gets it.
 
-export type ActivitySortKey = 'time' | 'action' | 'connection' | 'outcome' | 'duration';
-export type SortDirection = 'ascending' | 'descending';
-export interface ActivitySort {
-  key: ActivitySortKey;
-  direction: SortDirection;
-}
+export type ActivitySortKey = ActivitySortColumn;
+export type ActivitySort = ActivityOrder;
 
-/** The order the backend pages in (`Page` in crates/activity/src/query.rs only reads newest first). */
-export const DEFAULT_SORT: ActivitySort = { key: 'time', direction: 'descending' };
+/** The order the list starts in, and the one the old cursor forms continue. */
+export const DEFAULT_SORT: ActivitySort = { column: 'time', direction: 'descending' };
 
 /** The direction a column sorts in when it is first clicked: the order most useful to look at. */
 const FIRST_DIRECTION: Record<ActivitySortKey, SortDirection> = {
@@ -74,34 +73,32 @@ const DIRECTION_WORDS: Record<ActivitySortKey, Record<SortDirection, string>> = 
   duration: { descending: 'slowest first', ascending: 'fastest first' },
 };
 
+/** Where the backend puts the events a column has no value for (the same in both directions). */
+const MISSING_LAST: Partial<Record<ActivitySortKey, string>> = {
+  connection: 'Events of deleted connections, then events without one, come last.',
+  duration: 'Events without a duration come last.',
+};
+
 /** The sort after clicking `key`: the same column reverses, another column starts in its first direction. */
 export function nextSort(current: ActivitySort, key: ActivitySortKey): ActivitySort {
-  if (current.key === key) {
-    return { key, direction: current.direction === 'ascending' ? 'descending' : 'ascending' };
+  if (current.column === key) {
+    return { column: key, direction: current.direction === 'ascending' ? 'descending' : 'ascending' };
   }
-  return { key, direction: FIRST_DIRECTION[key] };
+  return { column: key, direction: FIRST_DIRECTION[key] };
 }
 
-/**
- * The sort the list really shows. The backend only pages newest first, so any
- * other order is only correct once every matching event is loaded; before
- * that, reordering the loaded part would hide older events that belong on top.
- */
-export function effectiveSort(requested: ActivitySort, allLoaded: boolean): ActivitySort {
-  return allLoaded ? requested : DEFAULT_SORT;
+/** "Sorted by outcome, failed first." plus where events without a value go. */
+function sortedBy(current: ActivitySort): string {
+  const missing = MISSING_LAST[current.column];
+  const sorted = `Sorted by ${COLUMN_NAMES[current.column]}, ${DIRECTION_WORDS[current.column][current.direction]}.`;
+  return missing ? `${sorted} ${missing}` : sorted;
 }
 
-/** The tooltip of a sortable column header; `current` is the sort the list shows (`effectiveSort`). */
-export function sortTitle(key: ActivitySortKey, current: ActivitySort, allLoaded: boolean): string {
-  const name = COLUMN_NAMES[key];
-  const withinDays = key === 'time' ? '' : ' within each day';
-  const needsAll = 'needs every matching event loaded. Load more, or narrow the filters.';
-  if (current.key === key) {
-    const now = `Sorted by ${name}${withinDays}, ${DIRECTION_WORDS[key][current.direction]}.`;
-    return allLoaded ? `${now} Click to reverse.` : `${now} Reversing ${needsAll}`;
-  }
-  if (!allLoaded) return `Sorting by ${name} ${needsAll}`;
-  return `Sort by ${name}${withinDays}, ${DIRECTION_WORDS[key][FIRST_DIRECTION[key]]}`;
+/** The tooltip of a sortable column header. A line break separates what is shown from what a click does. */
+export function sortTitle(key: ActivitySortKey, current: ActivitySort): string {
+  if (current.column === key) return `${sortedBy(current)}\nClick to reverse.`;
+  const sort = `Sort by ${COLUMN_NAMES[key]}, ${DIRECTION_WORDS[key][FIRST_DIRECTION[key]]}`;
+  return current.column === 'time' ? sort : `${sort}. The list loads again from the top.`;
 }
 
 /** The columns a narrow list leaves out (ActivityView's container query): a sort on one of them has no header to show it. */
@@ -109,7 +106,7 @@ const NARROW_HIDDEN: readonly ActivitySortKey[] = ['connection', 'duration'];
 
 /** Whether the list is sorted on a column that a narrow list does not show. */
 export function sortHiddenWhenNarrow(current: ActivitySort): boolean {
-  return NARROW_HIDDEN.includes(current.key);
+  return NARROW_HIDDEN.includes(current.column);
 }
 
 /**
@@ -118,86 +115,39 @@ export function sortHiddenWhenNarrow(current: ActivitySort): boolean {
  * back to the default order.
  */
 export function hiddenSortTitle(current: ActivitySort): string {
-  const sorted = `Sorted by ${COLUMN_NAMES[current.key]} within each day, ${DIRECTION_WORDS[current.key][current.direction]}.`;
-  return `${sorted} That column is hidden while the list is this narrow. Click to sort by time, newest first.`;
-}
-
-/** Problems first when ascending. */
-const OUTCOME_RANK: Record<Outcome, number> = { failure: 0, cancelled: 1, success: 2 };
-
-const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
-
-type ColumnKey = Exclude<ActivitySortKey, 'time'>;
-
-/** An event's value in a column; null when it has none (no connection, no duration). */
-function columnValue(event: ActivityEvent, key: ColumnKey, connectionLabel: (e: ActivityEvent) => string): string | number | null {
-  switch (key) {
-    case 'action':
-      return event.action;
-    case 'connection': {
-      const label = connectionLabel(event);
-      return label === '' ? null : label;
-    }
-    case 'outcome':
-      return OUTCOME_RANK[event.outcome];
-    case 'duration':
-      return event.durationMs;
-  }
-}
-
-function compareValues(a: string | number, b: string | number): number {
-  return typeof a === 'number' && typeof b === 'number' ? a - b : collator.compare(String(a), String(b));
-}
-
-/**
- * Orders two events on `key`. Events without a value go last in both
- * directions; equal actions are ordered by their target.
- */
-function compareOn(
-  a: ActivityEvent,
-  b: ActivityEvent,
-  key: ColumnKey,
-  direction: SortDirection,
-  connectionLabel: (e: ActivityEvent) => string,
-): number {
-  const va = columnValue(a, key, connectionLabel);
-  const vb = columnValue(b, key, connectionLabel);
-  if (va === null || vb === null) return va === vb ? 0 : va === null ? 1 : -1;
-  let order = compareValues(va, vb);
-  if (order === 0 && key === 'action') order = collator.compare(a.target ?? '', b.target ?? '');
-  return direction === 'ascending' ? order : -order;
+  return `${sortedBy(current)} That column is hidden while the list is this narrow.\nClick to sort by time, newest first.`;
 }
 
 export interface DayGroup {
-  day: string;
+  /** The day heading; null when the list is sorted on another column than time and has no day headings. */
+  day: string | null;
   events: ActivityEvent[];
 }
 
 /**
- * The events grouped by day, in the order of `sort`. `events` come newest
- * first, as the backend pages them. Days keep their time order (reversed
- * for oldest first); another column sorts the events within each day, and
- * events that compare equal keep newest first.
+ * The events as the list shows them, in the order the backend sent them.
+ * Sorted by time they fall into days, each under its heading; in any other
+ * order consecutive events can be days apart, so they form one group without
+ * a heading (each row shows its date instead, `eventTime`).
  */
-export function groupEvents(
-  events: ActivityEvent[],
-  sort: ActivitySort,
-  dayOf: (ms: number) => string,
-  connectionLabel: (e: ActivityEvent) => string,
-): DayGroup[] {
-  const ordered = sort.key === 'time' && sort.direction === 'ascending' ? [...events].reverse() : events;
+export function groupEvents(events: ActivityEvent[], sort: ActivitySort, dayOf: (ms: number) => string): DayGroup[] {
+  if (sort.column !== 'time') return events.length === 0 ? [] : [{ day: null, events }];
   const out: DayGroup[] = [];
-  for (const event of ordered) {
+  for (const event of events) {
     const day = dayOf(event.occurredAt);
     const last = out.at(-1);
     if (last && last.day === day) last.events.push(event);
     else out.push({ day, events: [event] });
   }
-  const key = sort.key;
-  if (key !== 'time') {
-    for (const group of out) group.events.sort((a, b) => compareOn(a, b, key, sort.direction, connectionLabel));
-  }
   return out;
+}
+
+/**
+ * An event's time in the list: the time alone under a day heading, the date
+ * above it when the list has no day headings (sorted on another column).
+ */
+export function eventTime(ms: number, sort: ActivitySort): { date: string | null; time: string } {
+  return { date: sort.column === 'time' ? null : formatDateTime(ms).slice(0, 10), time: formatTime(ms) };
 }
 
 // Column filters

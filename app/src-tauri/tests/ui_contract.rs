@@ -152,6 +152,8 @@ fn roundtrip(name: &str, v: J) -> Result<J, String> {
         "PubSubNames" => rt::<PubSubNames>(v),
         "DropImpact" => rt::<DropImpact>(v),
         "ExportRecord" => rt::<varve_app::commands::ExportRecord>(v),
+        "ActivityFilter" => rt::<varve_activity::ActivityFilter>(v),
+        "Page" => rt::<varve_activity::Page>(v),
         "Vec<PgAvailableExtension>" => rt::<Vec<PgAvailableExtension>>(v),
         "Vec<MyEngine>" => rt::<Vec<MyEngine>>(v),
         "Option<u64>" => rt::<Option<u64>>(v),

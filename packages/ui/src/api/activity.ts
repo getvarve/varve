@@ -43,6 +43,24 @@ export interface ActivityEvent {
   details: unknown;
 }
 
+/** `SortColumn` in crates/activity/src/query.rs: the columns the log sorts on, over every page. */
+export const ACTIVITY_SORT_COLUMNS = ['time', 'action', 'outcome', 'duration', 'connection'] as const;
+export type ActivitySortColumn = (typeof ACTIVITY_SORT_COLUMNS)[number];
+
+export type SortDirection = 'ascending' | 'descending';
+
+/**
+ * `ActivityOrder` in crates/activity/src/query.rs. Values that compare equal
+ * (and every order but time) list newest first; events without a duration
+ * or connection come last in both directions, a deleted connection's just
+ * before them. Connection names compare without regard to case, digits by
+ * value.
+ */
+export interface ActivityOrder {
+  column: ActivitySortColumn;
+  direction: SortDirection;
+}
+
 /** `ActivityFilter` in crates/activity/src/query.rs. Every field is optional. */
 export interface ActivityFilter {
   from?: number;
@@ -55,6 +73,9 @@ export interface ActivityFilter {
   actorId?: string;
   deviceId?: string;
   text?: string;
+  /** Newest first when left out. Exports ignore it. */
+  order?: ActivityOrder;
+  /** The `nextCursor` of the previous page, read with the same filter and order; a cursor of another order is refused. */
   beforeId?: string;
   limit?: number;
 }

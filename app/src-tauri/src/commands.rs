@@ -16,7 +16,7 @@ use varve_records::{
 };
 use varve_secrets::{Secret, SecretCache, SecretKey, SecretKind, SecretStore};
 
-use varve_activity::{ActivityFilter, Page, Recorder};
+use varve_activity::{ActivityFilter, ConnectionNames, Page, Recorder, SortColumn};
 use varve_driver_redis::{
     DbKeyspace, KeyInfo, KeyType, RedisSession, ScanPage, ValueChunk, ValuePage, key_from_display,
 };
@@ -1521,12 +1521,23 @@ impl Services {
 
     // Activity
 
-    /// A page of the activity log, newest first.
+    /// A page of the activity log in the filter's order. The connection
+    /// order sorts by the names the panel shows: the personal workspace's
+    /// connection profiles (any other id is a deleted connection there).
     ///
     /// # Errors
-    /// Storage errors or an unknown cursor.
+    /// Storage errors, an unknown cursor, or a cursor of another order.
     pub fn activity(&self, filter: &ActivityFilter) -> CmdResult<Page> {
-        Ok(self.activity.list(filter)?)
+        let names: ConnectionNames = if filter.order.column == SortColumn::Connection {
+            self.records
+                .connections(PERSONAL_WORKSPACE)?
+                .into_iter()
+                .map(|profile| (profile.id, profile.name))
+                .collect()
+        } else {
+            ConnectionNames::new()
+        };
+        Ok(self.activity.list_named(filter, &names)?)
     }
 
     /// Query history of a connection, built on the activity log.

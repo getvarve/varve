@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::json;
 use varve_store::{Store, core_migrations};
 
-use crate::query::page_sql;
+use crate::query::{Group, Lane, Position, lane_sql, page_sql, seek_sql};
 use crate::*;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
@@ -1917,8 +1917,12 @@ fn list_queries_use_the_activity_indexes() -> TestResult {
         },
     ];
     for filter in filters {
-        let cursor = (NOON, "id".to_string());
-        let (sql, params) = page_sql(&filter, Some(&cursor), 10);
+        let cursor = Position {
+            occurred_at: NOON,
+            id: "id".into(),
+            group: None,
+        };
+        let (sql, params) = page_sql(&filter, SortDirection::Descending, Some(&cursor), 10);
         let plan: Vec<String> = store.with_conn(|c| {
             let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
             let rows = stmt
@@ -2031,4 +2035,532 @@ fn public_redactors_fail_closed() {
         redact_secrets(text, SqlDialect::Postgres),
         "ALTER ROLE app PASSWORD '[redacted]'"
     );
+}
+
+// Sorting on every column (keyset paging over the whole log).
+
+/// Events with ties in every column (more than a small page), events
+/// without a duration or connection, deleted connections, and events at
+/// the same millisecond.
+fn sort_seed(rec: &Recorder) -> Result<ConnectionNames, Box<dyn std::error::Error>> {
+    /// Action, outcome, duration, connection, time offset in seconds.
+    type Row<'a> = (&'a str, Outcome, Option<u64>, Option<&'a str>, i64);
+    let rows: [Row<'_>; 18] = [
+        ("query.executed", Outcome::Success, Some(5), Some("c1"), 0),
+        ("query.executed", Outcome::Success, Some(5), Some("c1"), 0),
+        ("query.executed", Outcome::Success, Some(5), Some("c2"), -1),
+        ("query.executed", Outcome::Failure, Some(5), Some("c4"), -2),
+        (
+            "query.executed",
+            Outcome::Success,
+            Some(900),
+            Some("c3"),
+            -3,
+        ),
+        ("app.started", Outcome::Success, None, None, -3),
+        ("app.started", Outcome::Success, None, None, -4),
+        ("app.started", Outcome::Cancelled, None, None, -5),
+        (
+            "connection.opened",
+            Outcome::Success,
+            Some(40),
+            Some("gone"),
+            -6,
+        ),
+        (
+            "connection.opened",
+            Outcome::Failure,
+            None,
+            Some("gone-2"),
+            -6,
+        ),
+        ("query.failed", Outcome::Failure, Some(7), Some("c1"), -7),
+        ("query.failed", Outcome::Failure, Some(7), Some("c2"), -8),
+        ("query.failed", Outcome::Failure, Some(0), Some("c4"), -9),
+        (
+            "transfer.copied",
+            Outcome::Cancelled,
+            Some(40),
+            Some("gone"),
+            -10,
+        ),
+        ("transfer.copied", Outcome::Success, None, Some("c1"), -11),
+        ("transfer.copied", Outcome::Success, None, Some("c1"), -11),
+        ("app.stopped", Outcome::Success, Some(0), None, -12),
+        ("app.stopped", Outcome::Success, None, Some("c3"), -13),
+    ];
+    let mut events = Vec::new();
+    for (action, outcome, duration, connection, offset) in rows {
+        let category = if action.starts_with("query") {
+            Category::Query
+        } else {
+            Category::App
+        };
+        let mut builder = ActivityEvent::builder(category, action)
+            .outcome(outcome)
+            .occurred_at(NOON + offset * 1000);
+        if let Some(ms) = duration {
+            builder = builder.duration_ms(ms);
+        }
+        if let Some(id) = connection {
+            builder = builder.connection(id);
+        }
+        events.push(builder.build()?);
+    }
+    rec.record_batch(events)?;
+    // `c1` and `c2` have names that differ only in case: one value. `c5`
+    // has no events; `gone` and `gone-2` have no profile any more.
+    Ok([
+        ("c1", "Orders"),
+        ("c2", "orders"),
+        ("c3", "db10"),
+        ("c4", "db2"),
+        ("c5", "Unused"),
+    ]
+    .into_iter()
+    .map(|(id, name)| (id.to_string(), name.to_string()))
+    .collect())
+}
+
+/// The order the panel must show, computed independently of the paging
+/// code: the sort value in the direction (missing values last either way),
+/// then newest first.
+fn expected_order(events: &[ActivityEvent], order: ActivityOrder) -> Vec<String> {
+    use std::cmp::Reverse;
+    fn connection_rank(id: Option<&str>) -> (u8, u8) {
+        match id {
+            Some("c4") => (0, 0), // db2
+            Some("c3") => (0, 1), // db10
+            Some("c1" | "c2") => (0, 2),
+            Some("c5") => (0, 3),
+            Some(_) => (1, 0), // deleted
+            None => (2, 0),
+        }
+    }
+    let ascending = order.direction == SortDirection::Ascending;
+    let mut sorted = events.to_vec();
+    sorted.sort_by(|a, b| {
+        let in_direction = |o: std::cmp::Ordering| if ascending { o } else { o.reverse() };
+        let newest_first = (Reverse(a.occurred_at), Reverse(a.id.to_string()))
+            .cmp(&(Reverse(b.occurred_at), Reverse(b.id.to_string())));
+        match order.column {
+            SortColumn::Time => in_direction(
+                (a.occurred_at, a.id.to_string()).cmp(&(b.occurred_at, b.id.to_string())),
+            ),
+            SortColumn::Action => in_direction(a.action.cmp(&b.action)).then(newest_first),
+            SortColumn::Outcome => {
+                let rank = |o: Outcome| match o {
+                    Outcome::Failure => 0,
+                    Outcome::Cancelled => 1,
+                    Outcome::Success => 2,
+                };
+                in_direction(rank(a.outcome).cmp(&rank(b.outcome))).then(newest_first)
+            }
+            SortColumn::Duration => match (a.duration_ms, b.duration_ms) {
+                (Some(x), Some(y)) => in_direction(x.cmp(&y)),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then(newest_first),
+            SortColumn::Connection => {
+                let (ca, va) = connection_rank(a.connection_id.as_deref());
+                let (cb, vb) = connection_rank(b.connection_id.as_deref());
+                ca.cmp(&cb)
+                    .then_with(|| in_direction(va.cmp(&vb)))
+                    .then(newest_first)
+            }
+        }
+    });
+    sorted.into_iter().map(|e| e.id.to_string()).collect()
+}
+
+/// Every order the panel offers.
+fn every_order() -> Vec<ActivityOrder> {
+    let columns = [
+        SortColumn::Time,
+        SortColumn::Action,
+        SortColumn::Outcome,
+        SortColumn::Duration,
+        SortColumn::Connection,
+    ];
+    columns
+        .into_iter()
+        .flat_map(|column| {
+            [SortDirection::Ascending, SortDirection::Descending]
+                .map(|direction| ActivityOrder { column, direction })
+        })
+        .collect()
+}
+
+/// Reads every page of `filter`, checking the page size and the cursor.
+fn read_all_pages(
+    rec: &Recorder,
+    mut filter: ActivityFilter,
+    names: &ConnectionNames,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut seen = Vec::new();
+    for _ in 0..100 {
+        let page = rec.list_named(&filter, names)?;
+        assert!(page.events.len() <= filter.page_size() as usize);
+        seen.extend(page.events.iter().map(|e| e.id.to_string()));
+        match page.next_cursor {
+            Some(cursor) => {
+                if !filter.order.is_default() {
+                    assert!(cursor.starts_with(&format!("{}.", filter.order.column.as_str())));
+                }
+                filter.before_id = Some(cursor);
+            }
+            None => return Ok(seen),
+        }
+    }
+    Err("the pages never ended".into())
+}
+
+#[test]
+fn every_column_pages_in_both_directions_across_ties_and_missing_values() -> TestResult {
+    let (_, rec) = recorder()?;
+    let names = sort_seed(&rec)?;
+    let all = rec
+        .list(&ActivityFilter {
+            limit: MAX_PAGE_SIZE,
+            ..Default::default()
+        })?
+        .events;
+    assert_eq!(all.len(), 18);
+    for order in every_order() {
+        let expected = expected_order(&all, order);
+        // Pages smaller than every tie group (five `query.executed`, four
+        // durations of 5 ms, six events without a duration).
+        for limit in [1, 2, 3, 100] {
+            let filter = ActivityFilter {
+                order,
+                limit,
+                ..Default::default()
+            };
+            let seen = read_all_pages(&rec, filter, &names)?;
+            assert_eq!(seen, expected, "{order} in pages of {limit}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn sorted_pages_apply_the_filter() -> TestResult {
+    let (_, rec) = recorder()?;
+    let names = sort_seed(&rec)?;
+    let filter = ActivityFilter {
+        from: Some(NOON - 9_500),
+        categories: vec![Category::Query, Category::App],
+        outcomes: vec![Outcome::Success, Outcome::Failure],
+        limit: MAX_PAGE_SIZE,
+        ..Default::default()
+    };
+    let matching = rec.list(&filter)?.events;
+    assert_eq!(matching.len(), 12);
+    for order in every_order() {
+        let seen = read_all_pages(
+            &rec,
+            ActivityFilter {
+                order,
+                limit: 2,
+                ..filter.clone()
+            },
+            &names,
+        )?;
+        assert_eq!(seen, expected_order(&matching, order), "{order}");
+    }
+    Ok(())
+}
+
+#[test]
+fn without_names_every_connection_sorts_as_deleted() -> TestResult {
+    let (_, rec) = recorder()?;
+    sort_seed(&rec)?;
+    let page = rec.list(&ActivityFilter {
+        order: ActivityOrder {
+            column: SortColumn::Connection,
+            direction: SortDirection::Ascending,
+        },
+        limit: MAX_PAGE_SIZE,
+        ..Default::default()
+    })?;
+    let with_connection = page
+        .events
+        .iter()
+        .take_while(|e| e.connection_id.is_some())
+        .count();
+    assert_eq!(with_connection, 14);
+    assert!(
+        page.events[..with_connection]
+            .windows(2)
+            .all(|w| w[0].occurred_at >= w[1].occurred_at)
+    );
+    assert!(
+        page.events[with_connection..]
+            .iter()
+            .all(|e| e.connection_id.is_none())
+    );
+    Ok(())
+}
+
+#[test]
+fn a_sorted_cursor_stays_valid_after_its_event_is_deleted() -> TestResult {
+    for order in every_order() {
+        let (store, rec) = recorder()?;
+        let names = sort_seed(&rec)?;
+        let first = rec.list_named(
+            &ActivityFilter {
+                order,
+                limit: 4,
+                ..Default::default()
+            },
+            &names,
+        )?;
+        let cursor = first.next_cursor.clone().ok_or("no cursor")?;
+        let last = first.events.last().ok_or("empty page")?.id.to_string();
+        let rest = ActivityFilter {
+            order,
+            limit: 100,
+            before_id: Some(cursor),
+            ..Default::default()
+        };
+        let expected = read_all_pages(&rec, rest.clone(), &names)?;
+        assert_eq!(expected.len(), 14, "{order}");
+        store.with_conn(|c| {
+            c.execute("DELETE FROM core_activity WHERE id = ?", [&last])?;
+            Ok(())
+        })?;
+        assert_eq!(read_all_pages(&rec, rest, &names)?, expected, "{order}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_cursor_only_continues_its_own_order() -> TestResult {
+    let (_, rec) = recorder()?;
+    let names = sort_seed(&rec)?;
+    let orders = every_order();
+    for made in &orders {
+        let page = rec.list_named(
+            &ActivityFilter {
+                order: *made,
+                limit: 3,
+                ..Default::default()
+            },
+            &names,
+        )?;
+        let cursor = page.next_cursor.ok_or("no cursor")?;
+        for asked in &orders {
+            let result = rec.list_named(
+                &ActivityFilter {
+                    order: *asked,
+                    before_id: Some(cursor.clone()),
+                    ..Default::default()
+                },
+                &names,
+            );
+            if made == asked {
+                assert!(result.is_ok(), "{made} cursor in its own order: {result:?}");
+            } else {
+                match result {
+                    Err(ActivityError::CursorOrderMismatch {
+                        cursor_order,
+                        order,
+                        ..
+                    }) => {
+                        assert_eq!((cursor_order, order), (*made, *asked));
+                    }
+                    other => panic!("{made} cursor read as {asked}: {other:?}"),
+                }
+            }
+        }
+        // The export reads newest first and refuses a cursor of another order.
+        let mut out = Vec::new();
+        let export = rec.export_jsonl(
+            &ActivityFilter {
+                order: *made,
+                before_id: Some(cursor.clone()),
+                ..Default::default()
+            },
+            &mut out,
+        );
+        assert_eq!(export.is_ok(), made.is_default(), "{made}: {export:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn old_cursors_continue_newest_first_only() -> TestResult {
+    let (_, rec) = recorder()?;
+    let names = sort_seed(&rec)?;
+    let first = rec.list(&ActivityFilter {
+        limit: 4,
+        ..Default::default()
+    })?;
+    let last = first.events.last().ok_or("empty page")?;
+    let old = format!("{}:{}", last.occurred_at, last.id);
+    assert_eq!(first.next_cursor.as_deref(), Some(old.as_str()));
+    let bare = last.id.to_string();
+    let rest = |before: &str, order: ActivityOrder| {
+        rec.list_named(
+            &ActivityFilter {
+                order,
+                before_id: Some(before.into()),
+                ..Default::default()
+            },
+            &names,
+        )
+    };
+    assert_eq!(rest(&old, ActivityOrder::default())?.events.len(), 14);
+    assert_eq!(rest(&bare, ActivityOrder::default())?.events.len(), 14);
+    // The explicit form of the default order is read too.
+    let explicit = format!("time.desc:{}:{}", last.occurred_at, last.id);
+    assert_eq!(rest(&explicit, ActivityOrder::default())?.events.len(), 14);
+    let action = ActivityOrder {
+        column: SortColumn::Action,
+        direction: SortDirection::Ascending,
+    };
+    for cursor in [&old, &bare] {
+        assert!(matches!(
+            rest(cursor, action),
+            Err(ActivityError::CursorOrderMismatch { cursor_order, .. })
+                if cursor_order == ActivityOrder::default()
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn malformed_sorted_cursors_are_refused() -> TestResult {
+    let (_, rec) = recorder()?;
+    let id = "0190f0a0-0000-7000-8000-000000000000";
+    let cases = [
+        (SortColumn::Action, "action.asc:1:ID"),
+        (SortColumn::Action, "action.asc:1:not-a-uuid:=a.b"),
+        (SortColumn::Action, "action.asc:x:ID:=a.b"),
+        (SortColumn::Action, "action.asc:1:ID:#5"),
+        (SortColumn::Outcome, "outcome.asc:1:ID:=bogus"),
+        (SortColumn::Duration, "duration.asc:1:ID:#five"),
+        (SortColumn::Duration, "duration.asc:1:ID:d"),
+        (SortColumn::Duration, "duration.asc:1:ID:x"),
+        (SortColumn::Time, "time.asc:1:ID:=x"),
+        (SortColumn::Time, "sideways.asc:1:ID"),
+        (SortColumn::Time, "time.up:1:ID"),
+    ];
+    for (column, cursor) in cases {
+        let cursor = cursor.replace("ID", id);
+        let result = rec.list(&ActivityFilter {
+            order: ActivityOrder {
+                column,
+                direction: SortDirection::Ascending,
+            },
+            before_id: Some(cursor.clone()),
+            ..Default::default()
+        });
+        assert!(
+            matches!(result, Err(ActivityError::UnknownCursor(_))),
+            "{cursor}: {result:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn the_order_is_read_from_the_filter_json() -> TestResult {
+    let filter: ActivityFilter = serde_json::from_value(json!({
+        "order": { "column": "duration", "direction": "descending" },
+        "limit": 10,
+    }))?;
+    assert_eq!(
+        filter.order,
+        ActivityOrder {
+            column: SortColumn::Duration,
+            direction: SortDirection::Descending,
+        }
+    );
+    let default: ActivityFilter = serde_json::from_value(json!({}))?;
+    assert_eq!(default.order, ActivityOrder::default());
+    for bad in [
+        json!({ "order": { "column": "target", "direction": "ascending" } }),
+        json!({ "order": { "column": "time" } }),
+        json!({ "order": { "column": "time", "direction": "ascending", "nulls": "first" } }),
+    ] {
+        assert!(serde_json::from_value::<ActivityFilter>(bad).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn sorted_reads_use_the_activity_indexes() -> TestResult {
+    let (store, _) = recorder()?;
+    let plan_of = |sql: &str,
+                   params: Vec<rusqlite::types::Value>|
+     -> Result<String, Box<dyn std::error::Error>> {
+        let rows: Vec<String> = store.with_conn(|c| {
+            let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(params), |r| {
+                    r.get::<_, String>(3)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })?;
+        Ok(rows.join(" | "))
+    };
+    let uses_index = |plan: &str| {
+        plan.contains("USING INDEX core_activity_")
+            || plan.contains("USING COVERING INDEX core_activity_")
+    };
+    let text = |s: &str| rusqlite::types::Value::Text(s.into());
+    let lanes = [
+        Lane::equal("action = ?", text("query.executed")),
+        Lane::equal("outcome = ?", text("failure")),
+        Lane::equal("duration_ms = ?", rusqlite::types::Value::Integer(5)),
+        Lane::null("duration_ms IS NULL"),
+        Lane::equal("connection_id = ?", text("c1")),
+        Lane::null("connection_id IS NULL"),
+    ];
+    let within = Position {
+        occurred_at: NOON,
+        id: "id".into(),
+        group: None,
+    };
+    for filter in [
+        ActivityFilter::default(),
+        ActivityFilter {
+            from: Some(NOON - 7 * DAY),
+            ..Default::default()
+        },
+    ] {
+        for lane in &lanes {
+            let (sql, params) = lane_sql(&filter, lane, Some(&within), 10);
+            let plan = plan_of(&sql, params)?;
+            assert!(uses_index(&plan), "no index for {lane:?}: {plan}");
+            assert!(
+                !plan.contains("USE TEMP B-TREE FOR ORDER BY"),
+                "full sort: {plan}"
+            );
+        }
+    }
+    for column in [SortColumn::Action, SortColumn::Duration] {
+        for direction in [SortDirection::Ascending, SortDirection::Descending] {
+            let after = match column {
+                SortColumn::Action => Group::Text("query.executed".into()),
+                _ => Group::Int(5),
+            };
+            for after in [None, Some(&after)] {
+                let (sql, params) = seek_sql(column, direction, after).ok_or("no seek")?;
+                let plan = plan_of(&sql, params)?;
+                assert!(uses_index(&plan), "no index for {sql}: {plan}");
+                assert!(!plan.contains("TEMP B-TREE"), "sort: {plan}");
+            }
+        }
+    }
+    let plan = plan_of(
+        "SELECT connection_id FROM core_activity WHERE connection_id > ? ORDER BY connection_id LIMIT 1",
+        vec![text("c1")],
+    )?;
+    assert!(uses_index(&plan) && !plan.contains("TEMP B-TREE"), "{plan}");
+    Ok(())
 }

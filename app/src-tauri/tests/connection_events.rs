@@ -13,7 +13,7 @@
 use std::net::TcpListener;
 use std::sync::Arc;
 
-use varve_activity::{ActivityEvent, ActivityFilter};
+use varve_activity::{ActivityEvent, ActivityFilter, ActivityOrder, SortColumn, SortDirection};
 use varve_app::commands::{CmdError, ExportRecord, SecretInput, Services, TestTarget};
 use varve_core::Engine;
 use varve_driver::TlsMode;
@@ -307,5 +307,73 @@ async fn result_exports_are_recorded_without_the_path() -> TestResult {
         ..Default::default()
     })?;
     assert_eq!(all.events.len(), 2);
+    Ok(())
+}
+
+/// The connection order sorts by the names the panel shows (the personal
+/// workspace's profiles), across pages; events without a connection last.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_connection_order_sorts_by_profile_name() -> TestResult {
+    let f = fixture("sort")?;
+    let s = &f.services;
+    let beta = s.create_connection(&input("beta", Engine::Postgres, 5432, TlsMode::Prefer))?;
+    let alpha = s.create_connection(&input("Alpha", Engine::Postgres, 5432, TlsMode::Prefer))?;
+    let export = |connection_id: Option<&str>| -> TestResult {
+        Ok(s.record_export(&ExportRecord {
+            connection_id: connection_id.map(str::to_string),
+            objects: vec![],
+            file_name: "rows.csv".into(),
+            format: "csv".into(),
+            size_bytes: None,
+            rows: None,
+        })?)
+    };
+    export(Some(&beta.id))?;
+    export(None)?;
+    export(Some(&alpha.id))?;
+    export(Some(&beta.id))?;
+
+    let mut filter = ActivityFilter {
+        actions: vec!["data.exported".into()],
+        order: ActivityOrder {
+            column: SortColumn::Connection,
+            direction: SortDirection::Ascending,
+        },
+        limit: 1,
+        ..Default::default()
+    };
+    let mut seen = Vec::new();
+    loop {
+        let page = s.activity(&filter)?;
+        seen.extend(page.events.into_iter().map(|e| e.connection_id));
+        match page.next_cursor {
+            Some(cursor) => filter.before_id = Some(cursor),
+            None => break,
+        }
+    }
+    assert_eq!(
+        seen,
+        [
+            Some(alpha.id.clone()),
+            Some(beta.id.clone()),
+            Some(beta.id.clone()),
+            None
+        ]
+    );
+
+    // A cursor of the connection order does not continue newest first.
+    let first = s.activity(&ActivityFilter {
+        before_id: None,
+        ..filter.clone()
+    })?;
+    let refused = s.activity(&ActivityFilter {
+        order: ActivityOrder::default(),
+        before_id: first.next_cursor,
+        ..filter
+    });
+    assert!(
+        matches!(&refused, Err(CmdError::Internal { message }) if message.contains("continues the connection ascending order")),
+        "{refused:?}"
+    );
     Ok(())
 }

@@ -51,7 +51,10 @@ pub use event::{
     ActivityEvent, ActivityEventBuilder, Category, ConnectionDetails, ErrorDetails, ExportDetails,
     LOCAL_ACTOR, Outcome, RowChanges, RowCounts, TunnelDetails, now_ms,
 };
-pub use query::{ActivityFilter, DEFAULT_PAGE_SIZE, DayCount, MAX_PAGE_SIZE, Page};
+pub use query::{
+    ActivityFilter, ActivityOrder, ConnectionNames, DEFAULT_PAGE_SIZE, DayCount, MAX_PAGE_SIZE,
+    Page, SortColumn, SortDirection, compare_names,
+};
 pub use recorder::{
     ACTION_CLEARED, ACTION_PRUNED, MAX_STATEMENT_BYTES, REDACTION_FAILED, Recorder,
     RecorderSettings, Retention, SubscriptionId,
