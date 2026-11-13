@@ -1,7 +1,7 @@
 // `node --test scripts/` (also `pnpm test:scripts`).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { whatsNew } from './release-notes.mjs';
+import { serverNotes, whatsNew } from './release-notes.mjs';
 
 test('features, fixes and speed-ups make the section, in that order', () => {
   const notes = whatsNew([
@@ -24,4 +24,20 @@ test('features, fixes and speed-ups make the section, in that order', () => {
 
 test('a release without user-facing commits has no section', () => {
   assert.equal(whatsNew(['chore(repo): release 0.1.6', 'docs(docs): typo', '']), null);
+});
+
+test('commits to the server are not in the app section and get their own', () => {
+  const subjects = [
+    'feat(server): sync connections between devices',
+    'fix(server): make production settings fail closed',
+    'feat(ui): hide the sidebar',
+    'chore(server): bump a package',
+  ];
+  assert.equal(whatsNew(subjects), "## What's new\n\n- **New:** Hide the sidebar\n");
+  assert.equal(
+    serverNotes(subjects),
+    '## Varve server\n\n- **New:** Sync connections between devices\n- **Fixed:** Make production settings fail closed\n',
+  );
+  assert.equal(serverNotes(['feat(ui): hide the sidebar']), null);
+  assert.equal(whatsNew(['feat(server): only the server changed']), null);
 });

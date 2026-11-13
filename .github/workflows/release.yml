@@ -323,7 +323,7 @@ jobs:
           # The release notes without the install section, as Markdown (Tauri updater) and as
           # HTML (Sparkle). GitHub renders the Markdown the way the release page shows it.
           gh release view "$TAG" --json body --jq .body > body.md
-          awk 'BEGIN { skip = 0 } /^## Install/ { skip = 1; next } /^## / { skip = 0 } !skip' body.md > update-notes.md
+          awk 'BEGIN { skip = 0 } /^## (Install|Varve server)/ { skip = 1; next } /^## / { skip = 0 } !skip' body.md > update-notes.md
           gh api markdown -f text="$(cat update-notes.md)" -f mode=gfm -f context="$GITHUB_REPOSITORY" > update-notes.html
           # The build number is the run number the macOS bundles carry as CFBundleVersion.
           node scripts/update-feeds.mjs dist "$TAG" "${{ github.run_number }}" update-notes.md update-notes.html
